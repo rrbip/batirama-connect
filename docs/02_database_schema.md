@@ -1012,6 +1012,9 @@ return new class extends Migration
 # Initialisation des collections Qdrant
 php artisan qdrant:init
 
+# Initialisation avec données de test
+php artisan qdrant:init --with-test-data
+
 # Indexation des ouvrages dans Qdrant
 php artisan ouvrages:index --chunk=100
 
@@ -1031,3 +1034,741 @@ php artisan logs:purge --days=90
 # Statistiques des collections
 php artisan qdrant:stats
 ```
+
+---
+
+## Seeders (Données Initiales)
+
+Les seeders s'exécutent automatiquement au premier démarrage via l'entrypoint Docker.
+Ils créent les données nécessaires pour que l'application soit fonctionnelle immédiatement.
+
+### Ordre d'Exécution
+
+```
+1. TenantSeeder           → Tenant par défaut
+2. RolePermissionSeeder   → Rôles et permissions
+3. UserSeeder             → Utilisateur admin
+4. AgentSeeder            → Agents IA de test (TEXT_ONLY + SQL_HYDRATION)
+5. OuvrageSeeder          → Ouvrages BTP de test
+6. SupportDocSeeder       → Documents support de test
+```
+
+### Fichier : `database/seeders/DatabaseSeeder.php`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $this->call([
+            TenantSeeder::class,
+            RolePermissionSeeder::class,
+            UserSeeder::class,
+            AgentSeeder::class,
+            OuvrageSeeder::class,
+            SupportDocSeeder::class,
+        ]);
+    }
+}
+```
+
+---
+
+### Seeder : `TenantSeeder`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Tenant;
+use Illuminate\Database\Seeder;
+
+class TenantSeeder extends Seeder
+{
+    public function run(): void
+    {
+        Tenant::firstOrCreate(
+            ['slug' => 'default'],
+            [
+                'name' => 'AI-Manager CMS',
+                'domain' => 'localhost',
+                'settings' => [
+                    'theme' => 'light',
+                    'locale' => 'fr',
+                ],
+                'is_active' => true,
+            ]
+        );
+    }
+}
+```
+
+---
+
+### Seeder : `RolePermissionSeeder`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Role;
+use App\Models\Permission;
+use Illuminate\Database\Seeder;
+
+class RolePermissionSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Création des permissions
+        $permissions = [
+            // Agents
+            ['name' => 'Voir les agents', 'slug' => 'agents.view', 'group_name' => 'agents'],
+            ['name' => 'Créer un agent', 'slug' => 'agents.create', 'group_name' => 'agents'],
+            ['name' => 'Modifier un agent', 'slug' => 'agents.update', 'group_name' => 'agents'],
+            ['name' => 'Supprimer un agent', 'slug' => 'agents.delete', 'group_name' => 'agents'],
+
+            // Sessions IA
+            ['name' => 'Voir les sessions', 'slug' => 'ai-sessions.view', 'group_name' => 'ai'],
+            ['name' => 'Valider les réponses', 'slug' => 'ai-sessions.validate', 'group_name' => 'ai'],
+            ['name' => 'Déclencher l\'apprentissage', 'slug' => 'ai-sessions.learn', 'group_name' => 'ai'],
+
+            // Ouvrages
+            ['name' => 'Voir les ouvrages', 'slug' => 'ouvrages.view', 'group_name' => 'ouvrages'],
+            ['name' => 'Créer un ouvrage', 'slug' => 'ouvrages.create', 'group_name' => 'ouvrages'],
+            ['name' => 'Modifier un ouvrage', 'slug' => 'ouvrages.update', 'group_name' => 'ouvrages'],
+            ['name' => 'Supprimer un ouvrage', 'slug' => 'ouvrages.delete', 'group_name' => 'ouvrages'],
+            ['name' => 'Importer des ouvrages', 'slug' => 'ouvrages.import', 'group_name' => 'ouvrages'],
+            ['name' => 'Indexer dans Qdrant', 'slug' => 'ouvrages.index', 'group_name' => 'ouvrages'],
+
+            // Utilisateurs
+            ['name' => 'Gérer les utilisateurs', 'slug' => 'users.manage', 'group_name' => 'users'],
+            ['name' => 'Gérer les rôles', 'slug' => 'roles.manage', 'group_name' => 'users'],
+
+            // API
+            ['name' => 'Accès API', 'slug' => 'api.access', 'group_name' => 'api'],
+            ['name' => 'Gérer les webhooks', 'slug' => 'webhooks.manage', 'group_name' => 'api'],
+        ];
+
+        foreach ($permissions as $perm) {
+            Permission::firstOrCreate(['slug' => $perm['slug']], $perm);
+        }
+
+        // Création des rôles
+        $roles = [
+            [
+                'name' => 'Super Admin',
+                'slug' => 'super-admin',
+                'description' => 'Accès complet au système',
+                'is_system' => true,
+                'permissions' => ['*'], // Toutes les permissions
+            ],
+            [
+                'name' => 'Admin',
+                'slug' => 'admin',
+                'description' => 'Administration des agents et utilisateurs',
+                'is_system' => true,
+                'permissions' => [
+                    'agents.*', 'ai-sessions.*', 'ouvrages.*', 'users.manage',
+                ],
+            ],
+            [
+                'name' => 'Validateur',
+                'slug' => 'validator',
+                'description' => 'Validation des réponses IA',
+                'is_system' => true,
+                'permissions' => [
+                    'agents.view', 'ai-sessions.view', 'ai-sessions.validate', 'ai-sessions.learn',
+                ],
+            ],
+            [
+                'name' => 'Utilisateur',
+                'slug' => 'user',
+                'description' => 'Utilisation des agents IA',
+                'is_system' => true,
+                'permissions' => [
+                    'agents.view', 'ai-sessions.view',
+                ],
+            ],
+            [
+                'name' => 'API Client',
+                'slug' => 'api-client',
+                'description' => 'Accès API uniquement (marque blanche)',
+                'is_system' => true,
+                'permissions' => [
+                    'api.access',
+                ],
+            ],
+        ];
+
+        foreach ($roles as $roleData) {
+            $permissions = $roleData['permissions'];
+            unset($roleData['permissions']);
+
+            $role = Role::firstOrCreate(['slug' => $roleData['slug']], $roleData);
+
+            // Attacher les permissions
+            if ($permissions === ['*']) {
+                $role->permissions()->sync(Permission::pluck('id'));
+            } else {
+                $permissionIds = Permission::whereIn('slug', $permissions)
+                    ->orWhere(function ($query) use ($permissions) {
+                        foreach ($permissions as $perm) {
+                            if (str_ends_with($perm, '.*')) {
+                                $group = str_replace('.*', '', $perm);
+                                $query->orWhere('group_name', $group);
+                            }
+                        }
+                    })
+                    ->pluck('id');
+                $role->permissions()->sync($permissionIds);
+            }
+        }
+    }
+}
+```
+
+---
+
+### Seeder : `UserSeeder`
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\User;
+use App\Models\Role;
+use App\Models\Tenant;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+
+class UserSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $tenant = Tenant::where('slug', 'default')->first();
+        $superAdminRole = Role::where('slug', 'super-admin')->first();
+        $validatorRole = Role::where('slug', 'validator')->first();
+
+        // Utilisateur Super Admin
+        $admin = User::firstOrCreate(
+            ['email' => 'admin@ai-manager.local'],
+            [
+                'name' => 'Administrateur',
+                'password' => Hash::make('password'),
+                'tenant_id' => $tenant?->id,
+                'email_verified_at' => now(),
+            ]
+        );
+        $admin->roles()->syncWithoutDetaching([$superAdminRole->id]);
+
+        // Utilisateur Validateur (pour tester l'apprentissage)
+        $validator = User::firstOrCreate(
+            ['email' => 'validateur@ai-manager.local'],
+            [
+                'name' => 'Validateur IA',
+                'password' => Hash::make('password'),
+                'tenant_id' => $tenant?->id,
+                'email_verified_at' => now(),
+            ]
+        );
+        $validator->roles()->syncWithoutDetaching([$validatorRole->id]);
+
+        $this->command->info('👤 Utilisateurs créés:');
+        $this->command->info('   - admin@ai-manager.local / password (Super Admin)');
+        $this->command->info('   - validateur@ai-manager.local / password (Validateur)');
+    }
+}
+```
+
+---
+
+### Seeder : `AgentSeeder` (Agents de Test)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Agent;
+use App\Models\Tenant;
+use Illuminate\Database\Seeder;
+
+class AgentSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $tenant = Tenant::where('slug', 'default')->first();
+
+        // =====================================================
+        // AGENT 1: Expert BTP (Mode SQL_HYDRATION)
+        // Pour tester l'hydratation SQL avec les ouvrages
+        // =====================================================
+        Agent::firstOrCreate(
+            ['slug' => 'expert-btp'],
+            [
+                'tenant_id' => $tenant?->id,
+                'name' => 'Expert BTP',
+                'description' => 'Agent spécialisé dans les ouvrages et prix du bâtiment. Utilise le mode SQL_HYDRATION pour enrichir les réponses avec les données des ouvrages.',
+                'icon' => 'building-office',
+                'color' => '#F59E0B',
+
+                'system_prompt' => <<<'PROMPT'
+Tu es un expert en bâtiment et travaux publics (BTP). Tu aides les professionnels à :
+- Trouver des informations sur les ouvrages (cloisons, plafonds, menuiseries, etc.)
+- Comprendre les prix unitaires et la composition des ouvrages
+- Conseiller sur les choix techniques
+
+RÈGLES IMPORTANTES :
+1. Base toujours tes réponses sur les données fournies dans le contexte
+2. Si tu ne trouves pas l'information, dis-le clairement
+3. Donne des prix indicatifs en précisant qu'ils peuvent varier
+4. Utilise un vocabulaire technique mais accessible
+
+FORMAT DE RÉPONSE :
+- Commence par répondre directement à la question
+- Cite les références des ouvrages concernés
+- Donne des détails techniques si pertinent
+PROMPT,
+
+                'qdrant_collection' => 'agent_btp_ouvrages',
+                'retrieval_mode' => 'SQL_HYDRATION',
+                'hydration_config' => [
+                    'table' => 'ouvrages',
+                    'key' => 'db_id',
+                    'fields' => ['*'],
+                    'relations' => ['children'],
+                ],
+
+                'model' => null, // Utilise le modèle par défaut
+                'context_window_size' => 10,
+                'max_tokens' => 2048,
+                'temperature' => 0.7,
+                'is_active' => true,
+            ]
+        );
+
+        // =====================================================
+        // AGENT 2: Support Client (Mode TEXT_ONLY)
+        // Pour tester le mode texte simple sans hydratation
+        // =====================================================
+        Agent::firstOrCreate(
+            ['slug' => 'support-client'],
+            [
+                'tenant_id' => $tenant?->id,
+                'name' => 'Support Client',
+                'description' => 'Agent de support technique pour répondre aux questions fréquentes. Utilise le mode TEXT_ONLY avec des documents pré-formatés.',
+                'icon' => 'chat-bubble-left-right',
+                'color' => '#3B82F6',
+
+                'system_prompt' => <<<'PROMPT'
+Tu es un assistant de support client pour une application de devis/facturation BTP.
+Tu aides les utilisateurs à :
+- Comprendre comment utiliser l'application
+- Résoudre les problèmes techniques courants
+- Trouver les bonnes fonctionnalités
+
+RÈGLES IMPORTANTES :
+1. Sois amical et patient
+2. Donne des instructions étape par étape
+3. Si tu ne connais pas la réponse, propose de contacter le support humain
+4. Utilise un langage simple et clair
+
+FORMAT DE RÉPONSE :
+- Réponds de manière concise
+- Utilise des listes numérotées pour les étapes
+- Propose des actions concrètes
+PROMPT,
+
+                'qdrant_collection' => 'agent_support_docs',
+                'retrieval_mode' => 'TEXT_ONLY',
+                'hydration_config' => null,
+
+                'model' => null,
+                'context_window_size' => 8,
+                'max_tokens' => 1024,
+                'temperature' => 0.5,
+                'is_active' => true,
+            ]
+        );
+
+        $this->command->info('🤖 Agents IA créés:');
+        $this->command->info('   - expert-btp (SQL_HYDRATION) → Ouvrages BTP');
+        $this->command->info('   - support-client (TEXT_ONLY) → FAQ Support');
+    }
+}
+```
+
+---
+
+### Seeder : `OuvrageSeeder` (Données BTP de Test)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use App\Models\Ouvrage;
+use App\Models\Tenant;
+use Illuminate\Database\Seeder;
+
+class OuvrageSeeder extends Seeder
+{
+    public function run(): void
+    {
+        $tenant = Tenant::where('slug', 'default')->first();
+
+        $ouvrages = [
+            // =====================================================
+            // CLOISONS
+            // =====================================================
+            [
+                'code' => 'CLO-BA13-001',
+                'name' => 'Cloison BA13 simple peau sur ossature 48mm',
+                'description' => 'Cloison en plaques de plâtre BA13 simple peau. Ossature métallique 48mm avec montants espacés de 60cm. Épaisseur totale 61mm.',
+                'type' => 'simple',
+                'category' => 'Cloisons',
+                'subcategory' => 'Plaques de plâtre',
+                'unit' => 'm²',
+                'unit_price' => 28.50,
+                'technical_specs' => [
+                    'epaisseur_totale' => '61mm',
+                    'ossature' => 'M48',
+                    'entraxe' => '60cm',
+                    'nb_plaques' => 1,
+                    'affaiblissement_acoustique' => '34dB',
+                ],
+            ],
+            [
+                'code' => 'CLO-BA13-002',
+                'name' => 'Cloison BA13 double peau sur ossature 48mm',
+                'description' => 'Cloison en plaques de plâtre BA13 double peau. Ossature métallique 48mm. 2 plaques de chaque côté. Épaisseur totale 98mm. Excellent affaiblissement acoustique.',
+                'type' => 'simple',
+                'category' => 'Cloisons',
+                'subcategory' => 'Plaques de plâtre',
+                'unit' => 'm²',
+                'unit_price' => 45.00,
+                'technical_specs' => [
+                    'epaisseur_totale' => '98mm',
+                    'ossature' => 'M48',
+                    'entraxe' => '60cm',
+                    'nb_plaques' => 2,
+                    'affaiblissement_acoustique' => '42dB',
+                ],
+            ],
+            [
+                'code' => 'CLO-BA13-003',
+                'name' => 'Cloison BA13 hydrofuge pour pièces humides',
+                'description' => 'Cloison en plaques de plâtre hydrofuges (vertes) pour salles de bains et cuisines. Ossature 48mm. Simple peau.',
+                'type' => 'simple',
+                'category' => 'Cloisons',
+                'subcategory' => 'Plaques de plâtre',
+                'unit' => 'm²',
+                'unit_price' => 35.00,
+                'technical_specs' => [
+                    'epaisseur_totale' => '61mm',
+                    'ossature' => 'M48',
+                    'type_plaque' => 'Hydrofuge H1',
+                    'usage' => 'Pièces humides',
+                ],
+            ],
+
+            // =====================================================
+            // PLAFONDS
+            // =====================================================
+            [
+                'code' => 'PLF-SUSP-001',
+                'name' => 'Plafond suspendu BA13 sur ossature primaire/secondaire',
+                'description' => 'Plafond suspendu en plaques BA13. Ossature métallique avec fourrures et suspentes. Plénum standard 20cm.',
+                'type' => 'simple',
+                'category' => 'Plafonds',
+                'subcategory' => 'Suspendus',
+                'unit' => 'm²',
+                'unit_price' => 42.00,
+                'technical_specs' => [
+                    'plenum' => '20cm',
+                    'ossature' => 'F530 + suspentes',
+                    'entraxe_fourrures' => '50cm',
+                    'entraxe_suspentes' => '120cm',
+                ],
+            ],
+            [
+                'code' => 'PLF-SUSP-002',
+                'name' => 'Plafond suspendu acoustique avec laine minérale',
+                'description' => 'Plafond suspendu BA13 avec isolation acoustique en laine de roche 60mm. Performances acoustiques renforcées.',
+                'type' => 'compose',
+                'category' => 'Plafonds',
+                'subcategory' => 'Suspendus',
+                'unit' => 'm²',
+                'unit_price' => 58.00,
+                'technical_specs' => [
+                    'plenum' => '25cm',
+                    'isolation' => 'Laine de roche 60mm',
+                    'affaiblissement_acoustique' => '45dB',
+                ],
+            ],
+
+            // =====================================================
+            // MENUISERIES
+            // =====================================================
+            [
+                'code' => 'MEN-PORTE-001',
+                'name' => 'Bloc-porte âme alvéolaire 83x204cm',
+                'description' => 'Bloc-porte intérieur standard. Huisserie métallique, porte âme alvéolaire. Serrure bec-de-cane.',
+                'type' => 'simple',
+                'category' => 'Menuiseries',
+                'subcategory' => 'Portes intérieures',
+                'unit' => 'U',
+                'unit_price' => 185.00,
+                'technical_specs' => [
+                    'dimensions' => '83x204cm',
+                    'huisserie' => 'Métallique',
+                    'ame' => 'Alvéolaire',
+                    'serrure' => 'Bec-de-cane',
+                ],
+            ],
+            [
+                'code' => 'MEN-PORTE-002',
+                'name' => 'Bloc-porte acoustique 38dB',
+                'description' => 'Bloc-porte acoustique haute performance. Huisserie bois, joint périphérique, seuil automatique.',
+                'type' => 'simple',
+                'category' => 'Menuiseries',
+                'subcategory' => 'Portes intérieures',
+                'unit' => 'U',
+                'unit_price' => 450.00,
+                'technical_specs' => [
+                    'dimensions' => '83x204cm',
+                    'affaiblissement_acoustique' => '38dB',
+                    'huisserie' => 'Bois',
+                    'seuil' => 'Automatique',
+                ],
+            ],
+
+            // =====================================================
+            // ISOLATION
+            // =====================================================
+            [
+                'code' => 'ISO-LDV-001',
+                'name' => 'Isolation laine de verre 100mm R=2.50',
+                'description' => 'Panneau de laine de verre semi-rigide pour isolation des murs et cloisons. Résistance thermique R=2.50.',
+                'type' => 'simple',
+                'category' => 'Isolation',
+                'subcategory' => 'Thermique',
+                'unit' => 'm²',
+                'unit_price' => 12.50,
+                'technical_specs' => [
+                    'epaisseur' => '100mm',
+                    'resistance_thermique' => 'R=2.50',
+                    'lambda' => '0.040',
+                    'conditionnement' => 'Rouleau',
+                ],
+            ],
+            [
+                'code' => 'ISO-LDR-001',
+                'name' => 'Isolation laine de roche 60mm acoustique',
+                'description' => 'Panneau de laine de roche pour isolation acoustique. Idéal pour cloisons et plafonds.',
+                'type' => 'simple',
+                'category' => 'Isolation',
+                'subcategory' => 'Acoustique',
+                'unit' => 'm²',
+                'unit_price' => 15.00,
+                'technical_specs' => [
+                    'epaisseur' => '60mm',
+                    'densite' => '40kg/m³',
+                    'usage' => 'Acoustique',
+                ],
+            ],
+
+            // =====================================================
+            // PEINTURE
+            // =====================================================
+            [
+                'code' => 'PEI-MAT-001',
+                'name' => 'Peinture acrylique mate blanche - 2 couches',
+                'description' => 'Application de peinture acrylique mate blanche en 2 couches sur murs et plafonds. Impression comprise.',
+                'type' => 'simple',
+                'category' => 'Peinture',
+                'subcategory' => 'Murs et plafonds',
+                'unit' => 'm²',
+                'unit_price' => 14.00,
+                'technical_specs' => [
+                    'type' => 'Acrylique mat',
+                    'nb_couches' => 2,
+                    'impression' => 'Incluse',
+                    'rendement' => '10m²/L',
+                ],
+            ],
+        ];
+
+        foreach ($ouvrages as $data) {
+            Ouvrage::firstOrCreate(
+                ['code' => $data['code']],
+                array_merge($data, [
+                    'tenant_id' => $tenant?->id,
+                    'is_indexed' => false,
+                ])
+            );
+        }
+
+        $this->command->info('🏗️ ' . count($ouvrages) . ' ouvrages BTP créés');
+    }
+}
+```
+
+---
+
+### Seeder : `SupportDocSeeder` (Documents FAQ)
+
+```php
+<?php
+
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
+
+class SupportDocSeeder extends Seeder
+{
+    /**
+     * Ces documents sont directement insérés dans Qdrant par la commande qdrant:init.
+     * Ce seeder crée une table temporaire pour stocker les docs avant indexation.
+     */
+    public function run(): void
+    {
+        $docs = $this->getSupportDocuments();
+
+        // Stocker dans une table support_docs si elle existe
+        // Sinon, ces docs seront utilisés directement par QdrantInitCommand
+        if (config('database.seed_support_docs_to_db', false)) {
+            foreach ($docs as $doc) {
+                DB::table('support_docs')->updateOrInsert(
+                    ['slug' => $doc['slug']],
+                    $doc
+                );
+            }
+        }
+
+        // Stocker dans un fichier JSON pour la commande qdrant:init
+        $path = storage_path('app/seed-data/support-docs.json');
+        if (!is_dir(dirname($path))) {
+            mkdir(dirname($path), 0755, true);
+        }
+        file_put_contents($path, json_encode($docs, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        $this->command->info('📚 ' . count($docs) . ' documents support préparés pour indexation');
+    }
+
+    private function getSupportDocuments(): array
+    {
+        return [
+            [
+                'slug' => 'creer-devis',
+                'title' => 'Comment créer un devis ?',
+                'content' => "Pour créer un nouveau devis, suivez ces étapes :\n\n1. Cliquez sur le menu 'Devis' dans la barre latérale\n2. Cliquez sur le bouton 'Nouveau devis'\n3. Sélectionnez ou créez un client\n4. Ajoutez les ouvrages depuis la bibliothèque en utilisant la recherche\n5. Ajustez les quantités pour chaque ligne\n6. Vérifiez le total et les remises éventuelles\n7. Cliquez sur 'Enregistrer' ou 'Envoyer au client'\n\nLe devis sera automatiquement numéroté selon votre paramétrage.",
+                'category' => 'devis',
+            ],
+            [
+                'slug' => 'modifier-devis',
+                'title' => 'Comment modifier un devis existant ?',
+                'content' => "Pour modifier un devis existant :\n\n1. Allez dans 'Devis' > 'Liste des devis'\n2. Recherchez le devis par numéro ou client\n3. Cliquez sur le devis pour l'ouvrir\n4. Cliquez sur 'Modifier'\n5. Effectuez vos modifications\n6. Enregistrez\n\nNote : Un devis déjà accepté ne peut plus être modifié. Vous devez créer un avenant.",
+                'category' => 'devis',
+            ],
+            [
+                'slug' => 'transformer-devis-facture',
+                'title' => 'Comment transformer un devis en facture ?',
+                'content' => "Une fois le devis accepté par le client, vous pouvez le transformer en facture :\n\n1. Ouvrez le devis accepté\n2. Cliquez sur 'Actions' > 'Transformer en facture'\n3. Choisissez si vous facturez la totalité ou une partie (situation)\n4. Vérifiez les informations\n5. Validez la création de la facture\n\nLa facture sera liée au devis d'origine pour la traçabilité.",
+                'category' => 'facturation',
+            ],
+            [
+                'slug' => 'ajouter-ouvrage-bibliotheque',
+                'title' => 'Comment ajouter un ouvrage à la bibliothèque ?',
+                'content' => "Pour enrichir votre bibliothèque d'ouvrages :\n\n1. Allez dans 'Bibliothèque' > 'Ouvrages'\n2. Cliquez sur 'Nouvel ouvrage'\n3. Renseignez :\n   - Code de l'ouvrage\n   - Désignation\n   - Unité (m², ml, U, etc.)\n   - Prix unitaire HT\n   - Description technique (optionnel)\n4. Choisissez la catégorie\n5. Enregistrez\n\nL'ouvrage sera disponible dans tous vos devis.",
+                'category' => 'bibliotheque',
+            ],
+            [
+                'slug' => 'importer-ouvrages',
+                'title' => 'Comment importer des ouvrages depuis un fichier ?',
+                'content' => "Pour importer en masse des ouvrages :\n\n1. Préparez votre fichier Excel ou CSV avec les colonnes : Code, Nom, Unité, Prix\n2. Allez dans 'Bibliothèque' > 'Import'\n3. Téléchargez le modèle de fichier si besoin\n4. Sélectionnez votre fichier\n5. Mappez les colonnes si nécessaire\n6. Lancez l'import\n\nUn rapport d'import vous indiquera les succès et erreurs éventuelles.",
+                'category' => 'bibliotheque',
+            ],
+            [
+                'slug' => 'gerer-clients',
+                'title' => 'Comment gérer les fiches clients ?',
+                'content' => "Pour gérer vos clients :\n\n1. Menu 'Clients' > 'Liste des clients'\n2. Pour ajouter : cliquez sur 'Nouveau client'\n3. Renseignez les informations :\n   - Raison sociale ou nom\n   - Adresse complète\n   - Email et téléphone\n   - SIRET (si professionnel)\n4. Enregistrez\n\nVous pouvez voir l'historique des devis et factures depuis la fiche client.",
+                'category' => 'clients',
+            ],
+            [
+                'slug' => 'exporter-comptabilite',
+                'title' => 'Comment exporter les données pour la comptabilité ?',
+                'content' => "Pour exporter vos écritures comptables :\n\n1. Allez dans 'Paramètres' > 'Exports comptables'\n2. Sélectionnez la période (mois, trimestre, année)\n3. Choisissez le format d'export selon votre logiciel :\n   - FEC (Fichier des Écritures Comptables)\n   - CSV standard\n   - Format spécifique (Sage, EBP, etc.)\n4. Cliquez sur 'Exporter'\n\nLe fichier sera téléchargé automatiquement.",
+                'category' => 'comptabilite',
+            ],
+            [
+                'slug' => 'probleme-connexion',
+                'title' => 'Je n\'arrive pas à me connecter',
+                'content' => "Si vous rencontrez des difficultés de connexion :\n\n1. Vérifiez votre adresse email (attention aux fautes de frappe)\n2. Cliquez sur 'Mot de passe oublié' pour réinitialiser\n3. Vérifiez que les majuscules ne sont pas activées\n4. Videz le cache de votre navigateur\n5. Essayez un autre navigateur (Chrome, Firefox, Edge)\n\nSi le problème persiste, contactez le support avec :\n- Votre adresse email\n- Une capture d'écran de l'erreur\n- Le navigateur utilisé",
+                'category' => 'technique',
+            ],
+            [
+                'slug' => 'personnaliser-modele-pdf',
+                'title' => 'Comment personnaliser les modèles PDF ?',
+                'content' => "Pour personnaliser vos documents PDF (devis, factures) :\n\n1. Allez dans 'Paramètres' > 'Modèles de documents'\n2. Sélectionnez le type de document à personnaliser\n3. Vous pouvez modifier :\n   - Le logo (formats PNG, JPG)\n   - Les couleurs de l'entête\n   - Les mentions légales\n   - Le pied de page\n   - La mise en page des lignes\n4. Prévisualisez avant d'enregistrer\n\nLes modifications s'appliqueront aux nouveaux documents.",
+                'category' => 'parametrage',
+            ],
+            [
+                'slug' => 'situation-travaux',
+                'title' => 'Comment faire une situation de travaux ?',
+                'content' => "Pour créer une situation de travaux (facturation partielle) :\n\n1. Ouvrez le devis concerné\n2. Cliquez sur 'Actions' > 'Nouvelle situation'\n3. Pour chaque ligne, indiquez le pourcentage ou montant réalisé\n4. Le système calcule automatiquement :\n   - Le montant de la situation\n   - Le cumul des situations précédentes\n   - Le reste à facturer\n5. Validez pour créer la facture de situation\n\nVous pouvez faire autant de situations que nécessaire jusqu'à atteindre 100%.",
+                'category' => 'facturation',
+            ],
+        ];
+    }
+}
+```
+
+---
+
+## Récapitulatif des Données de Test
+
+Après le démarrage, l'application contient :
+
+### Utilisateurs
+
+| Email | Mot de passe | Rôle |
+|-------|--------------|------|
+| admin@ai-manager.local | password | Super Admin |
+| validateur@ai-manager.local | password | Validateur |
+
+### Agents IA
+
+| Slug | Mode | Collection Qdrant | Usage |
+|------|------|-------------------|-------|
+| expert-btp | SQL_HYDRATION | agent_btp_ouvrages | Test hydratation avec ouvrages |
+| support-client | TEXT_ONLY | agent_support_docs | Test mode texte avec FAQ |
+
+### Ouvrages BTP
+
+10 ouvrages de test répartis en catégories :
+- Cloisons (3) : BA13 simple, double, hydrofuge
+- Plafonds (2) : Suspendu standard, acoustique
+- Menuiseries (2) : Porte standard, acoustique
+- Isolation (2) : Laine de verre, laine de roche
+- Peinture (1) : Acrylique mate
+
+### Documents Support
+
+10 articles FAQ couvrant :
+- Création et modification de devis
+- Transformation devis → facture
+- Gestion de la bibliothèque
+- Gestion des clients
+- Export comptable
+- Résolution de problèmes

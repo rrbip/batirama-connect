@@ -417,6 +417,7 @@ RUN apk add --no-cache \
     icu-dev \
     postgresql-dev \
     linux-headers \
+    bash \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP
@@ -455,6 +456,10 @@ WORKDIR /var/www/html
 # Copie des fichiers de l'application
 COPY --chown=www-data:www-data . .
 
+# Copie du script d'entrypoint
+COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Installation des dépendances Composer (production)
 RUN if [ "$APP_ENV" = "production" ]; then \
         composer install --no-dev --optimize-autoloader --no-interaction; \
@@ -473,16 +478,143 @@ RUN if [ "$APP_ENV" = "production" ]; then \
 RUN chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
-# Utilisateur non-root
-USER www-data
-
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD php-fpm -t || exit 1
 
 EXPOSE 9000
 
+# Entrypoint pour initialisation automatique
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["php-fpm"]
+```
+
+---
+
+## Script d'Entrypoint (Initialisation Automatique)
+
+### Fichier : `docker/app/entrypoint.sh`
+
+Ce script s'exécute au démarrage du conteneur et initialise automatiquement l'application.
+
+```bash
+#!/bin/bash
+set -e
+
+# ===========================================
+# AI-Manager CMS - Entrypoint Script
+# ===========================================
+# Ce script initialise automatiquement l'application
+# au premier démarrage du conteneur.
+
+echo "🚀 AI-Manager CMS - Initialisation..."
+
+# Fichier marqueur pour éviter la réinitialisation
+INIT_MARKER="/var/www/html/storage/.initialized"
+
+# Attendre que PostgreSQL soit prêt
+wait_for_db() {
+    echo "⏳ Attente de PostgreSQL..."
+    until php artisan db:monitor --database=pgsql 2>/dev/null; do
+        sleep 2
+    done
+    echo "✅ PostgreSQL est prêt"
+}
+
+# Attendre que Qdrant soit prêt
+wait_for_qdrant() {
+    echo "⏳ Attente de Qdrant..."
+    QDRANT_URL="http://${QDRANT_HOST:-qdrant}:${QDRANT_PORT:-6333}/readyz"
+    until curl -sf "$QDRANT_URL" > /dev/null 2>&1; do
+        sleep 2
+    done
+    echo "✅ Qdrant est prêt"
+}
+
+# Attendre qu'Ollama soit prêt et télécharger les modèles
+wait_for_ollama() {
+    echo "⏳ Attente d'Ollama..."
+    OLLAMA_URL="http://${OLLAMA_HOST:-ollama}:${OLLAMA_PORT:-11434}/api/tags"
+    until curl -sf "$OLLAMA_URL" > /dev/null 2>&1; do
+        sleep 2
+    done
+    echo "✅ Ollama est prêt"
+}
+
+# Initialisation de l'application
+initialize_app() {
+    echo "🔧 Configuration de l'application..."
+
+    # Générer la clé si elle n'existe pas
+    if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:" ]; then
+        echo "🔑 Génération de la clé d'application..."
+        php artisan key:generate --force
+    fi
+
+    # Exécuter les migrations
+    echo "📦 Exécution des migrations..."
+    php artisan migrate --force
+
+    # Exécuter les seeders
+    echo "🌱 Exécution des seeders..."
+    php artisan db:seed --force
+
+    # Initialiser Qdrant (collections + données de test)
+    echo "🧠 Initialisation de Qdrant..."
+    php artisan qdrant:init --with-test-data
+
+    # Vider les caches
+    echo "🧹 Nettoyage des caches..."
+    php artisan config:clear
+    php artisan cache:clear
+    php artisan view:clear
+
+    # Créer le fichier marqueur
+    touch "$INIT_MARKER"
+    echo "✅ Initialisation terminée !"
+}
+
+# Vérification du premier démarrage
+if [ ! -f "$INIT_MARKER" ]; then
+    echo "📌 Premier démarrage détecté"
+
+    # Attendre les services
+    wait_for_db
+    wait_for_qdrant
+
+    # Initialiser l'application
+    initialize_app
+
+    # Attendre Ollama en arrière-plan (ne bloque pas le démarrage)
+    (wait_for_ollama && echo "🤖 Ollama disponible pour les requêtes IA") &
+
+else
+    echo "📌 Application déjà initialisée"
+
+    # Vérifier les migrations en attente
+    PENDING=$(php artisan migrate:status --pending 2>/dev/null | grep -c "Pending" || true)
+    if [ "$PENDING" -gt 0 ]; then
+        echo "📦 $PENDING migration(s) en attente..."
+        php artisan migrate --force
+    fi
+fi
+
+echo "🎉 AI-Manager CMS prêt !"
+echo ""
+echo "📊 Informations de connexion :"
+echo "   - Admin: admin@ai-manager.local / password"
+echo "   - URL: http://localhost:8080"
+echo ""
+
+# Exécuter la commande passée (php-fpm par défaut)
+exec "$@"
+```
+
+### Permissions du script
+
+```bash
+# Le script doit être exécutable
+chmod +x docker/app/entrypoint.sh
 ```
 
 ---

@@ -1617,7 +1617,293 @@ class IndexOuvragesCommand extends Command
 
 ---
 
-## 10. Configuration
+## 10. Initialisation Qdrant avec Données de Test
+
+### Commande : `qdrant:init`
+
+Cette commande est appelée automatiquement par l'entrypoint Docker au premier démarrage.
+Elle crée les collections et indexe les données de test.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Console\Commands;
+
+use App\Models\Ouvrage;
+use App\Services\AI\EmbeddingService;
+use App\Services\AI\QdrantService;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
+
+class QdrantInitCommand extends Command
+{
+    protected $signature = 'qdrant:init
+                            {--with-test-data : Indexe également les données de test}
+                            {--force : Recrée les collections même si elles existent}';
+
+    protected $description = 'Initialise les collections Qdrant et optionnellement les données de test';
+
+    public function __construct(
+        private QdrantService $qdrantService,
+        private EmbeddingService $embeddingService
+    ) {
+        parent::__construct();
+    }
+
+    public function handle(): int
+    {
+        $withTestData = $this->option('with-test-data');
+        $force = $this->option('force');
+
+        $this->info('🧠 Initialisation de Qdrant...');
+
+        // 1. Création des collections
+        $this->createCollections($force);
+
+        // 2. Indexation des données de test si demandé
+        if ($withTestData) {
+            $this->info('');
+            $this->info('📊 Indexation des données de test...');
+
+            $this->indexOuvrages();
+            $this->indexSupportDocs();
+        }
+
+        $this->info('');
+        $this->info('✅ Initialisation Qdrant terminée !');
+
+        return Command::SUCCESS;
+    }
+
+    private function createCollections(bool $force): void
+    {
+        $collections = config('qdrant.collections', []);
+
+        foreach ($collections as $name => $config) {
+            $exists = $this->qdrantService->collectionExists($name);
+
+            if ($exists && !$force) {
+                $this->line("   ⏭️  Collection '{$name}' existe déjà");
+                continue;
+            }
+
+            if ($exists && $force) {
+                $this->qdrantService->deleteCollection($name);
+                $this->line("   🗑️  Collection '{$name}' supprimée");
+            }
+
+            $success = $this->qdrantService->createCollection($name, $config);
+
+            if ($success) {
+                $this->info("   ✅ Collection '{$name}' créée");
+            } else {
+                $this->error("   ❌ Erreur création '{$name}'");
+            }
+        }
+    }
+
+    private function indexOuvrages(): void
+    {
+        $ouvrages = Ouvrage::where('is_indexed', false)->get();
+
+        if ($ouvrages->isEmpty()) {
+            $this->line('   ⏭️  Aucun ouvrage à indexer');
+            return;
+        }
+
+        $this->line("   📦 Indexation de {$ouvrages->count()} ouvrages...");
+
+        $bar = $this->output->createProgressBar($ouvrages->count());
+        $bar->start();
+
+        $points = [];
+        foreach ($ouvrages as $ouvrage) {
+            try {
+                $description = $this->buildOuvrageDescription($ouvrage);
+                $embedding = $this->embeddingService->embed($description);
+
+                $pointId = 'ouvrage_' . $ouvrage->id;
+
+                $points[] = [
+                    'id' => $pointId,
+                    'vector' => $embedding,
+                    'payload' => [
+                        'db_id' => $ouvrage->id,
+                        'code' => $ouvrage->code,
+                        'type' => $ouvrage->type,
+                        'category' => $ouvrage->category,
+                        'subcategory' => $ouvrage->subcategory,
+                        'content' => $description,
+                        'unit' => $ouvrage->unit,
+                        'unit_price' => (float) $ouvrage->unit_price,
+                        'tenant_id' => $ouvrage->tenant_id,
+                        'indexed_at' => now()->toISOString(),
+                    ],
+                ];
+
+                $ouvrage->update([
+                    'is_indexed' => true,
+                    'indexed_at' => now(),
+                    'qdrant_point_id' => $pointId,
+                ]);
+
+            } catch (\Exception $e) {
+                Log::error("Erreur indexation ouvrage {$ouvrage->id}", ['error' => $e->getMessage()]);
+            }
+
+            $bar->advance();
+        }
+
+        // Envoi batch
+        if (!empty($points)) {
+            $this->qdrantService->upsertBatch('agent_btp_ouvrages', $points);
+        }
+
+        $bar->finish();
+        $this->newLine();
+        $this->info("   ✅ {$ouvrages->count()} ouvrages indexés dans 'agent_btp_ouvrages'");
+    }
+
+    private function indexSupportDocs(): void
+    {
+        $jsonPath = storage_path('app/seed-data/support-docs.json');
+
+        if (!file_exists($jsonPath)) {
+            $this->line('   ⏭️  Aucun document support à indexer');
+            return;
+        }
+
+        $docs = json_decode(file_get_contents($jsonPath), true);
+
+        if (empty($docs)) {
+            $this->line('   ⏭️  Fichier support-docs.json vide');
+            return;
+        }
+
+        $this->line("   📚 Indexation de " . count($docs) . " documents support...");
+
+        $bar = $this->output->createProgressBar(count($docs));
+        $bar->start();
+
+        $points = [];
+        foreach ($docs as $doc) {
+            try {
+                // Combiner titre et contenu pour l'embedding
+                $text = $doc['title'] . "\n\n" . $doc['content'];
+                $embedding = $this->embeddingService->embed($text);
+
+                $pointId = 'doc_' . $doc['slug'];
+
+                $points[] = [
+                    'id' => $pointId,
+                    'vector' => $embedding,
+                    'payload' => [
+                        'slug' => $doc['slug'],
+                        'title' => $doc['title'],
+                        'content' => $doc['content'],
+                        'category' => $doc['category'],
+                        'source' => 'seed',
+                        'indexed_at' => now()->toISOString(),
+                    ],
+                ];
+
+            } catch (\Exception $e) {
+                Log::error("Erreur indexation doc {$doc['slug']}", ['error' => $e->getMessage()]);
+            }
+
+            $bar->advance();
+        }
+
+        // Envoi batch
+        if (!empty($points)) {
+            $this->qdrantService->upsertBatch('agent_support_docs', $points);
+        }
+
+        $bar->finish();
+        $this->newLine();
+        $this->info("   ✅ " . count($docs) . " documents indexés dans 'agent_support_docs'");
+    }
+
+    private function buildOuvrageDescription(Ouvrage $ouvrage): string
+    {
+        $parts = [
+            $ouvrage->name . '.',
+        ];
+
+        if ($ouvrage->description) {
+            $parts[] = $ouvrage->description;
+        }
+
+        if ($ouvrage->category) {
+            $cat = "Catégorie: {$ouvrage->category}";
+            if ($ouvrage->subcategory) {
+                $cat .= " / {$ouvrage->subcategory}";
+            }
+            $parts[] = $cat . '.';
+        }
+
+        $parts[] = "Unité: {$ouvrage->unit}. Prix: " .
+            number_format((float) $ouvrage->unit_price, 2, ',', ' ') . " €.";
+
+        if (!empty($ouvrage->technical_specs)) {
+            $specs = collect($ouvrage->technical_specs)
+                ->map(fn($v, $k) => ucfirst(str_replace('_', ' ', $k)) . ": $v")
+                ->join(', ');
+            $parts[] = "Caractéristiques: {$specs}.";
+        }
+
+        return implode(' ', $parts);
+    }
+}
+```
+
+### Comportement au Démarrage
+
+```
+🚀 AI-Manager CMS - Initialisation...
+📌 Premier démarrage détecté
+⏳ Attente de PostgreSQL...
+✅ PostgreSQL est prêt
+⏳ Attente de Qdrant...
+✅ Qdrant est prêt
+🔧 Configuration de l'application...
+🔑 Génération de la clé d'application...
+📦 Exécution des migrations...
+🌱 Exécution des seeders...
+👤 Utilisateurs créés:
+   - admin@ai-manager.local / password (Super Admin)
+   - validateur@ai-manager.local / password (Validateur)
+🤖 Agents IA créés:
+   - expert-btp (SQL_HYDRATION) → Ouvrages BTP
+   - support-client (TEXT_ONLY) → FAQ Support
+🏗️ 10 ouvrages BTP créés
+📚 10 documents support préparés pour indexation
+🧠 Initialisation de Qdrant...
+   ✅ Collection 'agent_btp_ouvrages' créée
+   ✅ Collection 'agent_support_docs' créée
+   ✅ Collection 'learned_responses' créée
+
+📊 Indexation des données de test...
+   📦 Indexation de 10 ouvrages...
+   ✅ 10 ouvrages indexés dans 'agent_btp_ouvrages'
+   📚 Indexation de 10 documents support...
+   ✅ 10 documents indexés dans 'agent_support_docs'
+
+✅ Initialisation Qdrant terminée !
+🧹 Nettoyage des caches...
+✅ Initialisation terminée !
+🎉 AI-Manager CMS prêt !
+
+📊 Informations de connexion :
+   - Admin: admin@ai-manager.local / password
+   - URL: http://localhost:8080
+```
+
+---
+
+## 11. Configuration
 
 ### Fichier : `config/ai.php`
 
