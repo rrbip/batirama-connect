@@ -1,0 +1,214 @@
+version: '3.8'
+
+name: ai-manager-cms
+
+services:
+  # ===========================================
+  # APPLICATION PHP-FPM
+  # ===========================================
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+      args:
+        PHP_VERSION: "8.4"
+    container_name: aim_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+      - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - REDIS_ENABLED=${REDIS_ENABLED:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - ai_network
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # SERVEUR WEB CADDY
+  # ===========================================
+  web:
+    image: caddy:2.10-alpine
+    container_name: aim_web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-80}:80"
+      - "${WEB_SSL_PORT:-443}:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - .:/var/www/html:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - ai_network
+
+  # ===========================================
+  # BASE DE DONNÉES POSTGRESQL
+  # ===========================================
+  db:
+    image: postgres:17-alpine
+    container_name: aim_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-ai_manager}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${DB_EXTERNAL_PORT:-5432}:5432"
+    networks:
+      - ai_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-ai_manager}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # REDIS (OPTIONNEL)
+  # ===========================================
+  redis:
+    image: redis:7.4-alpine
+    container_name: aim_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - ai_network
+    profiles:
+      - with-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================
+  # QDRANT - BASE VECTORIELLE
+  # ===========================================
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: aim_qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+      QDRANT__LOG_LEVEL: INFO
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "${QDRANT_EXTERNAL_PORT:-6333}:6333"
+    networks:
+      - ai_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # OLLAMA - SERVEUR IA
+  # ===========================================
+  ollama:
+    image: ollama/ollama:${OLLAMA_VERSION:-0.13.5}
+    container_name: aim_ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-5m}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "${OLLAMA_EXTERNAL_PORT:-11434}:11434"
+    networks:
+      - ai_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Fallback sans GPU (commenté pour environnements sans GPU)
+    # deploy: {}
+
+  # ===========================================
+  # SCHEDULER (CRON LARAVEL)
+  # ===========================================
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    container_name: aim_scheduler
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      - app
+      - db
+    networks:
+      - ai_network
+
+  # ===========================================
+  # QUEUE WORKER
+  # ===========================================
+  queue:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    container_name: aim_queue
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      - app
+      - db
+    networks:
+      - ai_network
+
+# ===========================================
+# VOLUMES PERSISTANTS
+# ===========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  ollama_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+
+# ===========================================
+# RÉSEAU
+# ===========================================
+networks:
+  ai_network:
+    driver: bridge
+    name: ai_manager_network

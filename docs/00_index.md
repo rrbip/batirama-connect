@@ -223,6 +223,7 @@ batirama-connect/
 | [01_infrastructure.md](./01_infrastructure.md) | Configuration Docker, services et déploiement |
 | [02_database_schema.md](./02_database_schema.md) | Schémas PostgreSQL et collections Qdrant |
 | [03_ai_core_logic.md](./03_ai_core_logic.md) | Logique du Dispatcher, RAG et apprentissage |
+| [04_partners_api.md](./04_partners_api.md) | API Partenaires (ZOOMBAT, EBP, etc.) et intégrations |
 
 ---
 
