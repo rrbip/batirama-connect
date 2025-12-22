@@ -1,0 +1,76 @@
+version: '3.8'
+
+# Override pour la production
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  app:
+    build:
+      args:
+        APP_ENV: production
+        INSTALL_XDEBUG: "false"
+    environment:
+      - APP_DEBUG=false
+      - LOG_LEVEL=error
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  web:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  db:
+    ports: []  # Pas d'exposition externe en prod
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    environment:
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+
+  redis:
+    profiles: []  # Toujours actif en prod
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+
+  qdrant:
+    ports: []  # Pas d'exposition externe en prod
+    restart: always
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  ollama:
+    restart: always
+    ports: []  # Pas d'exposition externe en prod
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 64G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  queue:
+    restart: always
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--max-time=3600"]
+    deploy:
+      replicas: 3
