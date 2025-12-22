@@ -89,6 +89,18 @@ Le système utilise deux types de stockage :
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
+│                          PARTENAIRES & INTÉGRATIONS                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐                                                           │
+│  │   partners   │ ◀──── ZOOMBAT, EBP, Batigest, etc.                        │
+│  │  - api_key   │                                                           │
+│  │  - data_access│                                                          │
+│  └──────────────┘                                                           │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
 │                              WEBHOOKS & API                                  │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
@@ -490,6 +502,18 @@ CREATE TABLE ai_sessions (
     -- Valeurs : 'active', 'archived', 'deleted'
 
     closed_at       TIMESTAMP NULL,
+
+    -- Conversion (rempli par callback du partenaire)
+    conversion_status   VARCHAR(20) DEFAULT NULL,
+    -- Valeurs : 'quoted', 'accepted', 'rejected', 'completed'
+    conversion_amount   DECIMAL(12,2) DEFAULT NULL,  -- Montant final du devis
+    conversion_at       TIMESTAMP DEFAULT NULL,
+
+    -- Commission (pour leads marketplace)
+    commission_rate     DECIMAL(5,2) DEFAULT NULL,   -- NULL = pas de commission (scénario 1)
+    commission_amount   DECIMAL(12,2) DEFAULT NULL,  -- Montant calculé
+    commission_status   VARCHAR(20) DEFAULT NULL,
+    -- Valeurs : 'pending', 'invoiced', 'paid'
 
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -930,6 +954,100 @@ CREATE TABLE import_logs (
 CREATE INDEX idx_import_logs_tenant ON import_logs(tenant_id);
 CREATE INDEX idx_import_logs_status ON import_logs(status);
 CREATE INDEX idx_import_logs_created ON import_logs(created_at DESC);
+```
+
+---
+
+### Partenaires (Intégrations Logiciels BTP)
+
+Permet l'intégration avec des logiciels tiers (ZOOMBAT, EBP, Batigest, etc.) via API.
+
+#### Table : `partners`
+
+```sql
+CREATE TABLE partners (
+    id              BIGSERIAL PRIMARY KEY,
+
+    -- Identification
+    name            VARCHAR(100) NOT NULL,      -- "ZOOMBAT", "EBP Bâtiment", etc.
+    slug            VARCHAR(50) UNIQUE NOT NULL, -- "zoombat", "ebp"
+    description     TEXT NULL,
+    logo_url        VARCHAR(500) NULL,
+
+    -- Authentification API
+    api_key         VARCHAR(64) UNIQUE NOT NULL, -- Clé API unique
+    api_key_prefix  VARCHAR(10) NOT NULL,        -- Préfixe visible (ex: "zb_")
+
+    -- Configuration
+    webhook_url     VARCHAR(255) NULL,           -- URL callback du partenaire
+    default_agent   VARCHAR(50) DEFAULT 'expert-btp',
+
+    -- Niveau d'accès aux données de session
+    data_access     VARCHAR(20) DEFAULT 'summary',
+    -- Valeurs : 'summary', 'full', 'custom'
+    -- summary : Résumé + pré-devis + pièces jointes (défaut partenaires)
+    -- full    : Conversation complète + métadonnées (ZOOMBAT interne)
+    -- custom  : Champs spécifiques définis dans data_fields
+
+    data_fields     JSONB DEFAULT NULL,
+    -- Si data_access = 'custom', liste des champs autorisés
+    -- Exemple : ["summary", "quote", "conversation", "attachments"]
+
+    -- Commission (pour marketplace)
+    commission_rate DECIMAL(5,2) DEFAULT 5.00,   -- % de commission sur leads
+
+    -- Notifications
+    notify_on_session_complete BOOLEAN DEFAULT TRUE,
+    notify_on_conversion       BOOLEAN DEFAULT TRUE,
+
+    -- Statistiques
+    sessions_count    INTEGER DEFAULT 0,
+    conversions_count INTEGER DEFAULT 0,
+    total_commission  DECIMAL(12,2) DEFAULT 0,
+
+    -- Statut
+    status          VARCHAR(20) DEFAULT 'active',
+    -- Valeurs : 'active', 'inactive', 'suspended'
+
+    -- Contact
+    contact_email   VARCHAR(255) NULL,
+    contact_name    VARCHAR(100) NULL,
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_partners_slug ON partners(slug);
+CREATE INDEX idx_partners_api_key ON partners(api_key);
+CREATE INDEX idx_partners_status ON partners(status) WHERE status = 'active';
+
+-- Contrainte sur data_access
+ALTER TABLE partners ADD CONSTRAINT chk_partner_data_access
+    CHECK (data_access IN ('summary', 'full', 'custom'));
+```
+
+**Niveaux d'accès aux données :**
+
+| Niveau | Données exposées | Cas d'usage |
+|--------|------------------|-------------|
+| `summary` | Résumé, pré-devis JSON, pièces jointes, infos client | Partenaires externes (EBP, Batigest) |
+| `full` | Tout + conversation complète + métadonnées | ZOOMBAT (interne) |
+| `custom` | Champs spécifiés dans `data_fields` | Besoins particuliers |
+
+**Exemples de configuration :**
+
+```sql
+-- ZOOMBAT : accès complet (logiciel interne)
+INSERT INTO partners (name, slug, api_key, api_key_prefix, data_access, commission_rate) VALUES
+('ZOOMBAT', 'zoombat', 'zb_a1b2c3d4e5f6...', 'zb_', 'full', 5.00);
+
+-- EBP : résumé seulement
+INSERT INTO partners (name, slug, api_key, api_key_prefix, data_access, commission_rate) VALUES
+('EBP Bâtiment', 'ebp', 'ebp_x9y8z7w6v5...', 'ebp_', 'summary', 5.00);
+
+-- Partenaire custom
+INSERT INTO partners (name, slug, api_key, api_key_prefix, data_access, data_fields) VALUES
+('Autre Logiciel', 'autre', 'alt_...', 'alt_', 'custom', '["summary", "quote", "conversation"]');
 ```
 
 ---
