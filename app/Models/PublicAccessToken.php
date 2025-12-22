@@ -19,6 +19,7 @@ class PublicAccessToken extends Model
         'agent_id',
         'created_by',
         'tenant_id',
+        'partner_id',
         'external_app',
         'external_ref',
         'external_meta',
@@ -27,6 +28,7 @@ class PublicAccessToken extends Model
         'expires_at',
         'max_uses',
         'use_count',
+        'uses_count',
         'status',
         'first_used_at',
         'last_used_at',
@@ -70,15 +72,26 @@ class PublicAccessToken extends Model
             return false;
         }
 
-        if ($this->expires_at && $this->expires_at->isPast()) {
+        if ($this->isExpired()) {
             return false;
         }
 
-        if ($this->max_uses && $this->use_count >= $this->max_uses) {
+        if ($this->isExhausted()) {
             return false;
         }
 
         return true;
+    }
+
+    public function isExpired(): bool
+    {
+        return $this->expires_at && $this->expires_at->isPast();
+    }
+
+    public function isExhausted(): bool
+    {
+        $usesCount = $this->uses_count ?? $this->use_count ?? 0;
+        return $this->max_uses && $usesCount >= $this->max_uses;
     }
 
     public function markAsUsed(string $ip, string $userAgent): void

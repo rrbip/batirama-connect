@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\PartnerApiController;
+use App\Http\Controllers\Api\PublicChatController;
+use App\Http\Middleware\PartnerApiAuth;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -10,20 +13,42 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 */
 
+// Health check (no auth required)
+Route::get('/health', fn () => response()->json([
+    'status' => 'ok',
+    'timestamp' => now()->toIso8601String(),
+]));
+
+// API v1
 Route::prefix('v1')->group(function () {
-    // Health check
-    Route::get('/health', fn () => response()->json(['status' => 'ok']));
 
-    // Partners API (authenticated via API key)
-    Route::prefix('partners')->group(function () {
-        // TODO: Add partner authentication middleware
-        Route::post('/sessions', fn () => response()->json(['message' => 'TODO']));
-        Route::get('/sessions/{id}', fn () => response()->json(['message' => 'TODO']));
-        Route::post('/conversions', fn () => response()->json(['message' => 'TODO']));
-    });
+    // Partner API (authenticated via API key)
+    Route::prefix('partners')
+        ->middleware(PartnerApiAuth::class)
+        ->group(function () {
+            // Sessions
+            Route::post('/sessions', [PartnerApiController::class, 'createSession']);
+            Route::get('/sessions/{session_id}', [PartnerApiController::class, 'getSession']);
 
-    // Public tokens
-    Route::prefix('public-tokens')->group(function () {
-        Route::post('/', fn () => response()->json(['message' => 'TODO']));
-    });
+            // Conversions
+            Route::post('/conversions', [PartnerApiController::class, 'notifyConversion']);
+        });
+
+});
+
+// Public chat endpoints (no auth, token-based access)
+Route::prefix('c')->group(function () {
+    Route::get('/{token}', [PublicChatController::class, 'show']);
+    Route::post('/{token}/start', [PublicChatController::class, 'start']);
+    Route::post('/{token}/message', [PublicChatController::class, 'sendMessage']);
+    Route::post('/{token}/end', [PublicChatController::class, 'end']);
+    Route::get('/{token}/history', [PublicChatController::class, 'history']);
+    Route::post('/{token}/upload', [PublicChatController::class, 'upload']);
+});
+
+// Legacy support (redirect old endpoints)
+Route::prefix('api/partners')->middleware(PartnerApiAuth::class)->group(function () {
+    Route::post('/sessions', [PartnerApiController::class, 'createSession']);
+    Route::get('/sessions/{session_id}', [PartnerApiController::class, 'getSession']);
+    Route::post('/conversions', [PartnerApiController::class, 'notifyConversion']);
 });
