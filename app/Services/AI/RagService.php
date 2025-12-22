@@ -1,0 +1,297 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\AI;
+
+use App\DTOs\AI\LLMResponse;
+use App\DTOs\AI\RagResult;
+use App\Models\Agent;
+use App\Models\AiMessage;
+use App\Models\AiSession;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+class RagService
+{
+    public function __construct(
+        private EmbeddingService $embeddingService,
+        private QdrantService $qdrantService,
+        private OllamaService $ollamaService,
+        private HydrationService $hydrationService,
+        private PromptBuilder $promptBuilder
+    ) {}
+
+    /**
+     * Traite une question utilisateur avec RAG complet
+     */
+    public function query(
+        Agent $agent,
+        string $userMessage,
+        ?AiSession $session = null
+    ): LLMResponse {
+        // 1. Recherche dans la base vectorielle
+        $ragResults = $this->retrieveContext($agent, $userMessage);
+
+        // 2. Hydratation SQL si configurée
+        if ($agent->usesHydration() && !empty($ragResults)) {
+            $ragResults = $this->hydrationService->hydrate(
+                $ragResults,
+                $agent->hydration_config ?? []
+            );
+        }
+
+        // 3. Recherche itérative si activée et résultats insuffisants
+        if ($agent->allow_iterative_search && count($ragResults) < 3) {
+            $additionalResults = $this->iterativeSearch($agent, $userMessage, $ragResults);
+            $ragResults = array_merge($ragResults, $additionalResults);
+        }
+
+        // 4. Tronquer si nécessaire pour respecter le contexte
+        $ragResults = $this->promptBuilder->truncateToTokenLimit(
+            $ragResults,
+            config('ai.rag.context_size', 4000)
+        );
+
+        // 5. Construire le prompt et générer la réponse
+        $ollama = OllamaService::forAgent($agent);
+
+        $messages = $this->promptBuilder->buildChatMessages(
+            $agent,
+            $userMessage,
+            $ragResults,
+            $session
+        );
+
+        $response = $ollama->chat($messages, [
+            'temperature' => $agent->temperature,
+            'max_tokens' => $agent->max_tokens,
+            'fallback_model' => $agent->fallback_model,
+        ]);
+
+        // 6. Ajouter les métadonnées RAG à la réponse
+        $response = new LLMResponse(
+            content: $response->content,
+            model: $response->model,
+            tokensPrompt: $response->tokensPrompt,
+            tokensCompletion: $response->tokensCompletion,
+            generationTimeMs: $response->generationTimeMs,
+            raw: array_merge($response->raw, [
+                'rag_context' => $this->formatRagMetadata($ragResults),
+            ])
+        );
+
+        return $response;
+    }
+
+    /**
+     * Recherche les documents pertinents dans Qdrant
+     */
+    public function retrieveContext(Agent $agent, string $query): array
+    {
+        try {
+            // Générer l'embedding de la requête
+            $queryVector = $this->embeddingService->embed($query);
+
+            // Rechercher dans la collection de l'agent
+            $results = $this->qdrantService->search(
+                vector: $queryVector,
+                collection: $agent->qdrant_collection,
+                limit: $agent->max_rag_results ?? config('ai.rag.max_results', 5),
+                scoreThreshold: config('ai.rag.min_score', 0.6)
+            );
+
+            return $results;
+
+        } catch (\Exception $e) {
+            Log::error('RAG retrieval failed', [
+                'agent' => $agent->slug,
+                'query' => $query,
+                'error' => $e->getMessage()
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * Recherche itérative pour améliorer les résultats
+     */
+    private function iterativeSearch(
+        Agent $agent,
+        string $originalQuery,
+        array $existingResults
+    ): array {
+        // Reformuler la question pour une recherche alternative
+        $reformulatedQuery = $this->reformulateQuery($originalQuery);
+
+        if ($reformulatedQuery === $originalQuery) {
+            return [];
+        }
+
+        try {
+            $queryVector = $this->embeddingService->embed($reformulatedQuery);
+
+            $additionalResults = $this->qdrantService->search(
+                vector: $queryVector,
+                collection: $agent->qdrant_collection,
+                limit: 3,
+                scoreThreshold: config('ai.rag.min_score', 0.6)
+            );
+
+            // Filtrer les doublons
+            $existingIds = collect($existingResults)->pluck('id')->toArray();
+
+            return collect($additionalResults)
+                ->filter(fn ($r) => !in_array($r['id'], $existingIds))
+                ->values()
+                ->toArray();
+
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Reformule une question pour recherche alternative
+     */
+    private function reformulateQuery(string $query): string
+    {
+        // Simplification basique - peut être amélioré avec un LLM
+        $query = Str::lower($query);
+
+        // Supprimer les mots interrogatifs
+        $query = preg_replace(
+            '/^(comment|quel|quelle|quels|quelles|combien|pourquoi|est-ce que)\s+/i',
+            '',
+            $query
+        );
+
+        // Supprimer la ponctuation finale
+        $query = rtrim($query, '?!.');
+
+        return trim($query);
+    }
+
+    /**
+     * Formate les métadonnées RAG pour stockage
+     */
+    private function formatRagMetadata(array $ragResults): array
+    {
+        return [
+            'sources' => collect($ragResults)->map(fn ($r) => [
+                'id' => $r['id'] ?? null,
+                'score' => $r['score'] ?? 0,
+                'content' => Str::limit($r['payload']['content'] ?? '', 200),
+            ])->toArray(),
+            'retrieval_count' => count($ragResults),
+        ];
+    }
+
+    /**
+     * Sauvegarde un message dans la session
+     */
+    public function saveMessage(
+        AiSession $session,
+        string $role,
+        string $content,
+        ?LLMResponse $response = null,
+        array $attachments = []
+    ): AiMessage {
+        $messageData = [
+            'uuid' => Str::uuid()->toString(),
+            'session_id' => $session->id,
+            'role' => $role,
+            'content' => $content,
+            'attachments' => !empty($attachments) ? $attachments : null,
+            'created_at' => now(),
+        ];
+
+        if ($role === 'assistant' && $response) {
+            $messageData['model_used'] = $response->model;
+            $messageData['tokens_prompt'] = $response->tokensPrompt;
+            $messageData['tokens_completion'] = $response->tokensCompletion;
+            $messageData['generation_time_ms'] = $response->generationTimeMs;
+            $messageData['rag_context'] = $response->raw['rag_context'] ?? null;
+        }
+
+        $message = AiMessage::create($messageData);
+
+        // Mettre à jour le compteur de messages
+        $session->increment('message_count');
+
+        return $message;
+    }
+
+    /**
+     * Indexe un document dans Qdrant
+     */
+    public function indexDocument(
+        string $collection,
+        string $id,
+        string $content,
+        array $payload = []
+    ): bool {
+        try {
+            $vector = $this->embeddingService->embed($content);
+
+            return $this->qdrantService->upsert($collection, [
+                [
+                    'id' => $id,
+                    'vector' => $vector,
+                    'payload' => array_merge($payload, [
+                        'content' => $content,
+                        'indexed_at' => now()->toIso8601String(),
+                    ]),
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Document indexing failed', [
+                'collection' => $collection,
+                'id' => $id,
+                'error' => $e->getMessage()
+            ]);
+
+            return false;
+        }
+    }
+
+    /**
+     * Indexe plusieurs documents en batch
+     */
+    public function indexBatch(string $collection, array $documents): int
+    {
+        $successful = 0;
+
+        foreach (array_chunk($documents, 50) as $chunk) {
+            $points = [];
+
+            foreach ($chunk as $doc) {
+                try {
+                    $vector = $this->embeddingService->embed($doc['content']);
+
+                    $points[] = [
+                        'id' => $doc['id'],
+                        'vector' => $vector,
+                        'payload' => array_merge($doc['payload'] ?? [], [
+                            'content' => $doc['content'],
+                            'indexed_at' => now()->toIso8601String(),
+                        ]),
+                    ];
+                } catch (\Exception $e) {
+                    Log::warning('Failed to embed document', [
+                        'id' => $doc['id'],
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            if (!empty($points) && $this->qdrantService->upsert($collection, $points)) {
+                $successful += count($points);
+            }
+        }
+
+        return $successful;
+    }
+}
