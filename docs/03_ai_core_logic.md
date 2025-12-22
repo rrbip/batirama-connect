@@ -1426,7 +1426,986 @@ class LearningService
 
 ---
 
-## 9. Indexation des Ouvrages BTP
+## 9. Services d'Extraction de Documents
+
+Le système permet d'ingérer différents types de documents (PDF, audio, vidéo, etc.) pour enrichir les bases de connaissances des agents IA.
+
+### Architecture des Extracteurs
+
+```
+app/Services/Document/
+├── Contracts/
+│   └── ExtractorInterface.php
+├── DocumentService.php           # Orchestrateur principal
+├── ChunkingService.php           # Découpage en chunks
+├── Extractors/
+│   ├── TextExtractor.php         # TXT, MD
+│   ├── HtmlExtractor.php         # HTML
+│   ├── PdfExtractor.php          # PDF (pdftotext)
+│   ├── OfficeExtractor.php       # DOC, DOCX, ODT
+│   ├── SpreadsheetExtractor.php  # CSV, XLS, XLSX
+│   ├── WhisperExtractor.php      # Audio/Vidéo (transcription)
+│   └── OcrExtractor.php          # Images (OCR)
+└── Jobs/
+    ├── ProcessDocumentJob.php
+    └── IndexDocumentChunksJob.php
+```
+
+### Interface Extracteur
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document\Contracts;
+
+use App\Models\Document;
+
+interface ExtractorInterface
+{
+    /**
+     * Extrait le texte d'un document
+     *
+     * @param Document $document Le document à traiter
+     * @return ExtractionResult Résultat contenant le texte et les métadonnées
+     */
+    public function extract(Document $document): ExtractionResult;
+
+    /**
+     * Types MIME supportés par cet extracteur
+     */
+    public function supportedMimeTypes(): array;
+
+    /**
+     * Vérifie si les dépendances sont disponibles
+     */
+    public function isAvailable(): bool;
+}
+```
+
+### DTO ExtractionResult
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document;
+
+readonly class ExtractionResult
+{
+    public function __construct(
+        public bool $success,
+        public ?string $text = null,
+        public array $metadata = [],
+        public ?string $error = null,
+    ) {}
+
+    public static function success(string $text, array $metadata = []): self
+    {
+        return new self(
+            success: true,
+            text: $text,
+            metadata: $metadata,
+        );
+    }
+
+    public static function failure(string $error): self
+    {
+        return new self(
+            success: false,
+            error: $error,
+        );
+    }
+}
+```
+
+### Extracteur PDF
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document\Extractors;
+
+use App\Models\Document;
+use App\Services\Document\Contracts\ExtractorInterface;
+use App\Services\Document\ExtractionResult;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Log;
+
+class PdfExtractor implements ExtractorInterface
+{
+    public function extract(Document $document): ExtractionResult
+    {
+        $filePath = storage_path('app/' . $document->storage_path);
+
+        if (!file_exists($filePath)) {
+            return ExtractionResult::failure("Fichier non trouvé: {$filePath}");
+        }
+
+        try {
+            // Utiliser pdftotext (poppler-utils)
+            $result = Process::run([
+                'pdftotext',
+                '-layout',      // Préserve la mise en page
+                '-enc', 'UTF-8',
+                $filePath,
+                '-'             // Output vers stdout
+            ]);
+
+            if (!$result->successful()) {
+                return ExtractionResult::failure(
+                    "Erreur pdftotext: " . $result->errorOutput()
+                );
+            }
+
+            $text = $result->output();
+
+            // Récupérer les métadonnées PDF
+            $metadata = $this->extractMetadata($filePath);
+
+            return ExtractionResult::success($text, [
+                'extractor' => 'pdftotext',
+                'pages' => $metadata['pages'] ?? null,
+                'author' => $metadata['author'] ?? null,
+                'title' => $metadata['title'] ?? null,
+                'creation_date' => $metadata['creation_date'] ?? null,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('PDF extraction failed', [
+                'document_id' => $document->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return ExtractionResult::failure($e->getMessage());
+        }
+    }
+
+    private function extractMetadata(string $filePath): array
+    {
+        $result = Process::run(['pdfinfo', $filePath]);
+
+        if (!$result->successful()) {
+            return [];
+        }
+
+        $metadata = [];
+        foreach (explode("\n", $result->output()) as $line) {
+            if (preg_match('/^([^:]+):\s*(.+)$/', $line, $matches)) {
+                $key = strtolower(str_replace(' ', '_', trim($matches[1])));
+                $metadata[$key] = trim($matches[2]);
+            }
+        }
+
+        return $metadata;
+    }
+
+    public function supportedMimeTypes(): array
+    {
+        return ['application/pdf'];
+    }
+
+    public function isAvailable(): bool
+    {
+        $result = Process::run(['which', 'pdftotext']);
+        return $result->successful();
+    }
+}
+```
+
+### Extracteur Audio/Vidéo (Whisper)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document\Extractors;
+
+use App\Models\Document;
+use App\Services\Document\Contracts\ExtractorInterface;
+use App\Services\Document\ExtractionResult;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Log;
+
+class WhisperExtractor implements ExtractorInterface
+{
+    private string $ollamaHost;
+    private int $ollamaPort;
+    private string $whisperModel;
+
+    public function __construct()
+    {
+        $this->ollamaHost = config('ai.ollama.host', 'ollama');
+        $this->ollamaPort = config('ai.ollama.port', 11434);
+        $this->whisperModel = config('documents.whisper_model', 'whisper');
+    }
+
+    public function extract(Document $document): ExtractionResult
+    {
+        $filePath = storage_path('app/' . $document->storage_path);
+
+        if (!file_exists($filePath)) {
+            return ExtractionResult::failure("Fichier non trouvé: {$filePath}");
+        }
+
+        try {
+            // Pour les vidéos, extraire d'abord l'audio
+            $audioPath = $filePath;
+            $isVideo = str_starts_with($document->mime_type, 'video/');
+
+            if ($isVideo) {
+                $audioPath = $this->extractAudioFromVideo($filePath);
+            }
+
+            // Transcription via Whisper (via Ollama ou service dédié)
+            $transcription = $this->transcribe($audioPath);
+
+            // Nettoyer le fichier audio temporaire si vidéo
+            if ($isVideo && $audioPath !== $filePath) {
+                @unlink($audioPath);
+            }
+
+            // Calculer la durée
+            $duration = $this->getMediaDuration($filePath);
+
+            return ExtractionResult::success($transcription['text'], [
+                'extractor' => 'whisper',
+                'model' => $this->whisperModel,
+                'language' => $transcription['language'] ?? 'fr',
+                'duration_seconds' => $duration,
+                'segments' => $transcription['segments'] ?? [],
+                'is_video' => $isVideo,
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Whisper extraction failed', [
+                'document_id' => $document->id,
+                'error' => $e->getMessage()
+            ]);
+
+            return ExtractionResult::failure($e->getMessage());
+        }
+    }
+
+    private function extractAudioFromVideo(string $videoPath): string
+    {
+        $audioPath = sys_get_temp_dir() . '/' . uniqid('audio_') . '.wav';
+
+        $result = Process::run([
+            'ffmpeg',
+            '-i', $videoPath,
+            '-vn',                    // Pas de vidéo
+            '-acodec', 'pcm_s16le',   // Format WAV
+            '-ar', '16000',           // 16kHz (optimal pour Whisper)
+            '-ac', '1',               // Mono
+            '-y',                     // Overwrite
+            $audioPath
+        ]);
+
+        if (!$result->successful()) {
+            throw new \RuntimeException(
+                "Erreur extraction audio: " . $result->errorOutput()
+            );
+        }
+
+        return $audioPath;
+    }
+
+    private function transcribe(string $audioPath): array
+    {
+        // Option 1: Utiliser l'API Ollama avec un modèle Whisper
+        // (nécessite que Whisper soit disponible via Ollama)
+
+        // Option 2: Utiliser whisper-cpp ou whisper.cpp en local
+        // Cette implémentation utilise whisper-cpp
+
+        $result = Process::timeout(600)->run([
+            'whisper-cpp',
+            '--model', '/models/whisper/ggml-medium.bin',
+            '--language', 'fr',
+            '--output-json',
+            '--file', $audioPath
+        ]);
+
+        if (!$result->successful()) {
+            // Fallback: essayer avec le modèle small
+            $result = Process::timeout(300)->run([
+                'whisper-cpp',
+                '--model', '/models/whisper/ggml-small.bin',
+                '--language', 'fr',
+                '--output-json',
+                '--file', $audioPath
+            ]);
+        }
+
+        if (!$result->successful()) {
+            throw new \RuntimeException(
+                "Erreur transcription: " . $result->errorOutput()
+            );
+        }
+
+        $jsonOutput = json_decode($result->output(), true);
+
+        return [
+            'text' => $jsonOutput['transcription'] ?? $result->output(),
+            'language' => $jsonOutput['language'] ?? 'fr',
+            'segments' => $jsonOutput['segments'] ?? [],
+        ];
+    }
+
+    private function getMediaDuration(string $filePath): ?float
+    {
+        $result = Process::run([
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            $filePath
+        ]);
+
+        if ($result->successful()) {
+            return (float) trim($result->output());
+        }
+
+        return null;
+    }
+
+    public function supportedMimeTypes(): array
+    {
+        return [
+            // Audio
+            'audio/mpeg',
+            'audio/wav',
+            'audio/ogg',
+            'audio/webm',
+            'audio/flac',
+            'audio/x-m4a',
+            // Vidéo
+            'video/mp4',
+            'video/webm',
+            'video/x-msvideo',
+            'video/quicktime',
+        ];
+    }
+
+    public function isAvailable(): bool
+    {
+        // Vérifier whisper-cpp ou ffmpeg
+        $whisperCheck = Process::run(['which', 'whisper-cpp']);
+        $ffmpegCheck = Process::run(['which', 'ffmpeg']);
+
+        return $whisperCheck->successful() || $ffmpegCheck->successful();
+    }
+}
+```
+
+### Service de Découpage (Chunking)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document;
+
+use App\Models\Document;
+use App\Models\DocumentChunk;
+use Illuminate\Support\Str;
+
+class ChunkingService
+{
+    private int $maxChunkSize;
+    private int $chunkOverlap;
+
+    public function __construct()
+    {
+        $this->maxChunkSize = config('documents.chunk_settings.max_chunk_size', 1000);
+        $this->chunkOverlap = config('documents.chunk_settings.chunk_overlap', 100);
+    }
+
+    /**
+     * Découpe un document en chunks et les sauvegarde
+     */
+    public function chunkDocument(Document $document, string $strategy = 'paragraph'): int
+    {
+        $text = $document->extracted_text;
+
+        if (empty($text)) {
+            return 0;
+        }
+
+        // Supprimer les anciens chunks
+        DocumentChunk::where('document_id', $document->id)->delete();
+
+        $chunks = match ($strategy) {
+            'paragraph' => $this->chunkByParagraph($text),
+            'sentence' => $this->chunkBySentence($text),
+            'fixed_size' => $this->chunkByFixedSize($text),
+            'semantic' => $this->chunkBySemantic($text),
+            default => $this->chunkByParagraph($text),
+        };
+
+        $created = 0;
+        foreach ($chunks as $index => $chunkData) {
+            DocumentChunk::create([
+                'document_id' => $document->id,
+                'chunk_index' => $index,
+                'content' => $chunkData['content'],
+                'content_hash' => hash('sha256', $chunkData['content']),
+                'token_count' => $this->estimateTokens($chunkData['content']),
+                'start_offset' => $chunkData['start_offset'] ?? null,
+                'end_offset' => $chunkData['end_offset'] ?? null,
+                'page_number' => $chunkData['page_number'] ?? null,
+                'context_before' => $chunkData['context_before'] ?? null,
+                'context_after' => $chunkData['context_after'] ?? null,
+                'metadata' => $chunkData['metadata'] ?? null,
+            ]);
+            $created++;
+        }
+
+        // Mettre à jour le compteur du document
+        $document->update([
+            'chunk_count' => $created,
+            'chunk_strategy' => $strategy,
+        ]);
+
+        return $created;
+    }
+
+    /**
+     * Découpe par paragraphes (double saut de ligne)
+     */
+    private function chunkByParagraph(string $text): array
+    {
+        $paragraphs = preg_split('/\n\s*\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
+        $chunks = [];
+        $currentChunk = '';
+        $currentOffset = 0;
+
+        foreach ($paragraphs as $para) {
+            $para = trim($para);
+
+            if (empty($para)) continue;
+
+            // Si ajouter ce paragraphe dépasse la taille max
+            if ($this->estimateTokens($currentChunk . "\n\n" . $para) > $this->maxChunkSize) {
+                // Sauvegarder le chunk actuel
+                if (!empty($currentChunk)) {
+                    $chunks[] = [
+                        'content' => trim($currentChunk),
+                        'start_offset' => $currentOffset,
+                    ];
+                }
+                $currentChunk = $para;
+                $currentOffset = strpos($text, $para);
+            } else {
+                $currentChunk .= "\n\n" . $para;
+            }
+        }
+
+        // Dernier chunk
+        if (!empty($currentChunk)) {
+            $chunks[] = [
+                'content' => trim($currentChunk),
+                'start_offset' => $currentOffset,
+            ];
+        }
+
+        // Ajouter le contexte (chevauchement)
+        return $this->addContextOverlap($chunks);
+    }
+
+    /**
+     * Découpe par phrases
+     */
+    private function chunkBySentence(string $text): array
+    {
+        // Regex pour découper en phrases (gère . ? ! et abréviations courantes)
+        $sentences = preg_split(
+            '/(?<=[.!?])\s+(?=[A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ])/',
+            $text,
+            -1,
+            PREG_SPLIT_NO_EMPTY
+        );
+
+        $chunks = [];
+        $currentChunk = '';
+
+        foreach ($sentences as $sentence) {
+            if ($this->estimateTokens($currentChunk . ' ' . $sentence) > $this->maxChunkSize) {
+                if (!empty($currentChunk)) {
+                    $chunks[] = ['content' => trim($currentChunk)];
+                }
+                $currentChunk = $sentence;
+            } else {
+                $currentChunk .= ' ' . $sentence;
+            }
+        }
+
+        if (!empty($currentChunk)) {
+            $chunks[] = ['content' => trim($currentChunk)];
+        }
+
+        return $this->addContextOverlap($chunks);
+    }
+
+    /**
+     * Découpe par taille fixe (avec chevauchement)
+     */
+    private function chunkByFixedSize(string $text): array
+    {
+        $words = preg_split('/\s+/', $text);
+        $chunks = [];
+        $chunkWords = [];
+        $wordsPerChunk = (int) ($this->maxChunkSize * 0.75); // Approximation tokens->mots
+
+        foreach ($words as $word) {
+            $chunkWords[] = $word;
+
+            if (count($chunkWords) >= $wordsPerChunk) {
+                $chunks[] = ['content' => implode(' ', $chunkWords)];
+
+                // Conserver les derniers mots pour le chevauchement
+                $overlapWords = (int) ($this->chunkOverlap * 0.75);
+                $chunkWords = array_slice($chunkWords, -$overlapWords);
+            }
+        }
+
+        if (!empty($chunkWords)) {
+            $chunks[] = ['content' => implode(' ', $chunkWords)];
+        }
+
+        return $chunks;
+    }
+
+    /**
+     * Découpe sémantique (utilise les embeddings pour trouver les coupures)
+     */
+    private function chunkBySemantic(string $text): array
+    {
+        // Pour l'instant, fallback sur paragraph
+        // TODO: Implémenter avec détection de changement de thème via embeddings
+        return $this->chunkByParagraph($text);
+    }
+
+    /**
+     * Ajoute le contexte (chevauchement) entre chunks adjacents
+     */
+    private function addContextOverlap(array $chunks): array
+    {
+        $result = [];
+
+        foreach ($chunks as $i => $chunk) {
+            $chunk['context_before'] = $i > 0
+                ? Str::limit($chunks[$i - 1]['content'], 200, '...')
+                : null;
+
+            $chunk['context_after'] = isset($chunks[$i + 1])
+                ? Str::limit($chunks[$i + 1]['content'], 200, '...')
+                : null;
+
+            $result[] = $chunk;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Estime le nombre de tokens (approximation)
+     */
+    private function estimateTokens(string $text): int
+    {
+        // Approximation: 1 token ≈ 4 caractères en français
+        return (int) ceil(strlen($text) / 4);
+    }
+}
+```
+
+### Service Principal DocumentService
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Document;
+
+use App\Models\Document;
+use App\Models\Agent;
+use App\Services\Document\Contracts\ExtractorInterface;
+use App\Services\Document\Extractors\PdfExtractor;
+use App\Services\Document\Extractors\WhisperExtractor;
+use App\Services\Document\Extractors\TextExtractor;
+use App\Services\AI\EmbeddingService;
+use App\Services\AI\QdrantService;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+class DocumentService
+{
+    private array $extractors = [];
+
+    public function __construct(
+        private ChunkingService $chunkingService,
+        private EmbeddingService $embeddingService,
+        private QdrantService $qdrantService
+    ) {
+        // Enregistrement des extracteurs
+        $this->registerExtractor(new TextExtractor());
+        $this->registerExtractor(new PdfExtractor());
+        $this->registerExtractor(new WhisperExtractor());
+        // Ajouter d'autres extracteurs ici
+    }
+
+    public function registerExtractor(ExtractorInterface $extractor): void
+    {
+        foreach ($extractor->supportedMimeTypes() as $mimeType) {
+            $this->extractors[$mimeType] = $extractor;
+        }
+    }
+
+    /**
+     * Upload et traitement d'un document
+     */
+    public function upload(
+        UploadedFile $file,
+        ?Agent $agent = null,
+        array $metadata = []
+    ): Document {
+        // Validation
+        $this->validateFile($file);
+
+        // Stockage du fichier
+        $storagePath = $this->storeFile($file);
+
+        // Création du document
+        $document = Document::create([
+            'tenant_id' => $agent?->tenant_id ?? auth()->user()?->tenant_id,
+            'agent_id' => $agent?->id,
+            'original_name' => $file->getClientOriginalName(),
+            'storage_path' => $storagePath,
+            'mime_type' => $file->getMimeType(),
+            'file_size' => $file->getSize(),
+            'file_hash' => hash_file('sha256', $file->getRealPath()),
+            'document_type' => $this->determineDocumentType($file->getMimeType()),
+            'title' => $metadata['title'] ?? pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME),
+            'description' => $metadata['description'] ?? null,
+            'category' => $metadata['category'] ?? null,
+            'tags' => $metadata['tags'] ?? [],
+            'source_url' => $metadata['source_url'] ?? null,
+            'uploaded_by' => auth()->id(),
+            'extraction_status' => 'pending',
+        ]);
+
+        return $document;
+    }
+
+    /**
+     * Extrait le texte d'un document
+     */
+    public function extract(Document $document): bool
+    {
+        $document->update(['extraction_status' => 'processing']);
+
+        $extractor = $this->extractors[$document->mime_type] ?? null;
+
+        if (!$extractor) {
+            $document->update([
+                'extraction_status' => 'failed',
+                'extraction_error' => "Aucun extracteur pour le type: {$document->mime_type}",
+            ]);
+            return false;
+        }
+
+        if (!$extractor->isAvailable()) {
+            $document->update([
+                'extraction_status' => 'failed',
+                'extraction_error' => "Extracteur non disponible (dépendances manquantes)",
+            ]);
+            return false;
+        }
+
+        $result = $extractor->extract($document);
+
+        if (!$result->success) {
+            $document->update([
+                'extraction_status' => 'failed',
+                'extraction_error' => $result->error,
+            ]);
+            return false;
+        }
+
+        $document->update([
+            'extraction_status' => 'completed',
+            'extracted_text' => $result->text,
+            'extraction_metadata' => $result->metadata,
+            'extracted_at' => now(),
+        ]);
+
+        Log::info('Document extracted successfully', [
+            'document_id' => $document->id,
+            'text_length' => strlen($result->text),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Découpe et indexe un document dans Qdrant
+     */
+    public function index(Document $document, string $chunkStrategy = 'paragraph'): bool
+    {
+        if (empty($document->extracted_text)) {
+            Log::warning('Cannot index document without extracted text', [
+                'document_id' => $document->id
+            ]);
+            return false;
+        }
+
+        // Découpage en chunks
+        $chunkCount = $this->chunkingService->chunkDocument($document, $chunkStrategy);
+
+        if ($chunkCount === 0) {
+            return false;
+        }
+
+        // Indexation des chunks
+        $chunks = $document->chunks()->where('is_indexed', false)->get();
+        $collection = $document->agent?->qdrant_collection ?? 'agent_support_docs';
+        $points = [];
+
+        foreach ($chunks as $chunk) {
+            try {
+                $embedding = $this->embeddingService->embed($chunk->content);
+
+                $pointId = 'doc_' . $document->id . '_chunk_' . $chunk->chunk_index;
+
+                $points[] = [
+                    'id' => $pointId,
+                    'vector' => $embedding,
+                    'payload' => [
+                        'document_id' => $document->id,
+                        'chunk_index' => $chunk->chunk_index,
+                        'content' => $chunk->content,
+                        'title' => $document->title,
+                        'category' => $document->category,
+                        'source' => 'document',
+                        'document_type' => $document->document_type,
+                        'page_number' => $chunk->page_number,
+                        'tenant_id' => $document->tenant_id,
+                        'indexed_at' => now()->toISOString(),
+                    ],
+                ];
+
+                $chunk->update([
+                    'qdrant_point_id' => $pointId,
+                    'is_indexed' => true,
+                    'indexed_at' => now(),
+                ]);
+
+            } catch (\Exception $e) {
+                Log::error('Failed to embed chunk', [
+                    'chunk_id' => $chunk->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        // Envoi batch à Qdrant
+        if (!empty($points)) {
+            $this->qdrantService->upsertBatch($collection, $points);
+        }
+
+        $document->update([
+            'is_indexed' => true,
+            'indexed_at' => now(),
+        ]);
+
+        Log::info('Document indexed', [
+            'document_id' => $document->id,
+            'chunks' => count($points),
+            'collection' => $collection,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Traitement complet : upload → extraction → indexation
+     */
+    public function processComplete(
+        UploadedFile $file,
+        ?Agent $agent = null,
+        array $metadata = []
+    ): Document {
+        // 1. Upload
+        $document = $this->upload($file, $agent, $metadata);
+
+        // 2. Extraction
+        $this->extract($document);
+
+        // 3. Indexation (si extraction réussie)
+        if ($document->extraction_status === 'completed') {
+            $this->index($document);
+        }
+
+        return $document->fresh();
+    }
+
+    private function validateFile(UploadedFile $file): void
+    {
+        $maxSize = config('documents.max_file_size', 104857600);
+        $allowedTypes = array_keys(config('documents.allowed_types', []));
+
+        if ($file->getSize() > $maxSize) {
+            throw new \InvalidArgumentException(
+                "Fichier trop volumineux. Maximum: " . ($maxSize / 1024 / 1024) . " MB"
+            );
+        }
+
+        if (!in_array($file->getMimeType(), $allowedTypes)) {
+            throw new \InvalidArgumentException(
+                "Type de fichier non supporté: " . $file->getMimeType()
+            );
+        }
+    }
+
+    private function storeFile(UploadedFile $file): string
+    {
+        $directory = 'documents/' . date('Y/m');
+        $filename = Str::uuid() . '.' . $file->getClientOriginalExtension();
+
+        return $file->storeAs($directory, $filename);
+    }
+
+    private function determineDocumentType(string $mimeType): string
+    {
+        return match (true) {
+            str_starts_with($mimeType, 'text/') => 'text',
+            $mimeType === 'application/pdf' => 'pdf',
+            str_contains($mimeType, 'word') || str_contains($mimeType, 'opendocument.text') => 'document',
+            str_contains($mimeType, 'spreadsheet') || str_contains($mimeType, 'excel') || $mimeType === 'text/csv' => 'spreadsheet',
+            str_starts_with($mimeType, 'audio/') => 'audio',
+            str_starts_with($mimeType, 'video/') => 'video',
+            str_starts_with($mimeType, 'image/') => 'image',
+            default => 'other',
+        };
+    }
+}
+```
+
+### Job de Traitement Asynchrone
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Jobs;
+
+use App\Models\Document;
+use App\Services\Document\DocumentService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+
+class ProcessDocumentJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public int $tries = 3;
+    public int $timeout = 600; // 10 minutes max (pour vidéos longues)
+
+    public function __construct(
+        public Document $document,
+        public bool $autoIndex = true
+    ) {}
+
+    public function handle(DocumentService $documentService): void
+    {
+        // Extraction
+        $success = $documentService->extract($this->document);
+
+        // Indexation automatique si demandé
+        if ($success && $this->autoIndex) {
+            $documentService->index($this->document);
+        }
+    }
+
+    public function failed(\Throwable $exception): void
+    {
+        $this->document->update([
+            'extraction_status' => 'failed',
+            'extraction_error' => $exception->getMessage(),
+        ]);
+    }
+}
+```
+
+### Dépendances Docker
+
+Pour supporter l'extraction multi-format, ajouter au Dockerfile :
+
+```dockerfile
+# Outils d'extraction de texte
+RUN apk add --no-cache \
+    poppler-utils \    # pdftotext, pdfinfo
+    ffmpeg \           # Extraction audio/vidéo
+    tesseract-ocr \    # OCR images
+    tesseract-ocr-data-fra \  # Données OCR français
+    libreoffice \      # Conversion documents Office (optionnel)
+    && rm -rf /var/cache/apk/*
+
+# Whisper.cpp pour la transcription (optionnel, peut utiliser Ollama)
+# Voir: https://github.com/ggerganov/whisper.cpp
+```
+
+### Configuration `config/documents.php`
+
+```php
+<?php
+
+return [
+    'allowed_types' => [
+        // ... (voir section schéma BDD)
+    ],
+
+    'max_file_size' => env('DOCUMENT_MAX_SIZE', 104857600), // 100 MB
+
+    'chunk_settings' => [
+        'default_strategy' => 'paragraph',
+        'max_chunk_size' => 1000,
+        'chunk_overlap' => 100,
+    ],
+
+    'whisper_model' => env('WHISPER_MODEL', 'medium'),
+
+    'storage' => [
+        'disk' => env('DOCUMENT_STORAGE_DISK', 'local'),
+        'directory' => 'documents',
+    ],
+
+    'processing' => [
+        'auto_extract' => true,
+        'auto_index' => true,
+        'queue' => env('DOCUMENT_QUEUE', 'default'),
+    ],
+];
+```
+
+---
+
+## 10. Indexation des Ouvrages BTP
 
 ### Commande Artisan
 

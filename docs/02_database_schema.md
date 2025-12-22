@@ -571,6 +571,182 @@ CREATE INDEX idx_ouvrage_components_component ON ouvrage_components(component_id
 
 ---
 
+### Ingestion de Documents Multi-Formats
+
+Le système permet d'ingérer différents types de documents pour l'apprentissage IA :
+- **Texte** : TXT, MD, HTML
+- **Documents** : PDF, DOC, DOCX, ODT
+- **Tableurs** : CSV, XLS, XLSX
+- **Multimédia** : MP3, WAV, MP4, WEBM (transcription via Whisper)
+- **Images** : PNG, JPG (OCR optionnel)
+
+#### Table : `documents`
+
+```sql
+CREATE TABLE documents (
+    id              BIGSERIAL PRIMARY KEY,
+    uuid            UUID DEFAULT uuid_generate_v4() UNIQUE NOT NULL,
+    tenant_id       BIGINT REFERENCES tenants(id) ON DELETE SET NULL,
+    agent_id        BIGINT REFERENCES agents(id) ON DELETE SET NULL,
+
+    -- Fichier original
+    original_name   VARCHAR(255) NOT NULL,
+    storage_path    VARCHAR(500) NOT NULL,
+    mime_type       VARCHAR(100) NOT NULL,
+    file_size       BIGINT NOT NULL,  -- En bytes
+    file_hash       VARCHAR(64) NULL, -- SHA-256 pour déduplication
+
+    -- Classification
+    document_type   VARCHAR(50) NOT NULL,
+    -- Valeurs : 'text', 'pdf', 'document', 'spreadsheet', 'audio', 'video', 'image'
+
+    category        VARCHAR(100) NULL,
+    tags            VARCHAR(255)[] DEFAULT '{}',
+
+    -- Extraction
+    extraction_status VARCHAR(20) DEFAULT 'pending',
+    -- Valeurs : 'pending', 'processing', 'completed', 'failed'
+
+    extracted_text  TEXT NULL,          -- Texte extrait (brut)
+    extraction_metadata JSONB NULL,     -- Métadonnées d'extraction
+    -- Structure : {
+    --   "pages": 5,
+    --   "duration_seconds": 120,
+    --   "language": "fr",
+    --   "confidence": 0.95,
+    --   "extractor": "pdftotext"
+    -- }
+
+    extraction_error TEXT NULL,
+    extracted_at    TIMESTAMP NULL,
+
+    -- Chunking (découpage pour RAG)
+    chunk_count     INTEGER DEFAULT 0,
+    chunk_strategy  VARCHAR(50) DEFAULT 'paragraph',
+    -- Valeurs : 'paragraph', 'sentence', 'fixed_size', 'semantic'
+
+    -- Indexation Qdrant
+    is_indexed      BOOLEAN DEFAULT FALSE,
+    indexed_at      TIMESTAMP NULL,
+
+    -- Métadonnées utilisateur
+    title           VARCHAR(255) NULL,
+    description     TEXT NULL,
+    source_url      VARCHAR(2048) NULL,
+
+    -- Upload
+    uploaded_by     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at      TIMESTAMP NULL
+);
+
+CREATE INDEX idx_documents_tenant ON documents(tenant_id);
+CREATE INDEX idx_documents_agent ON documents(agent_id);
+CREATE INDEX idx_documents_type ON documents(document_type);
+CREATE INDEX idx_documents_status ON documents(extraction_status);
+CREATE INDEX idx_documents_indexed ON documents(is_indexed);
+CREATE INDEX idx_documents_hash ON documents(file_hash);
+
+-- Recherche full-text sur le contenu extrait
+CREATE INDEX idx_documents_content_search ON documents
+    USING GIN(to_tsvector('french', COALESCE(title, '') || ' ' || COALESCE(extracted_text, '')));
+```
+
+#### Table : `document_chunks`
+
+Stocke les morceaux de texte découpés pour une indexation RAG optimale.
+
+```sql
+CREATE TABLE document_chunks (
+    id              BIGSERIAL PRIMARY KEY,
+    document_id     BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+
+    -- Position dans le document
+    chunk_index     INTEGER NOT NULL,
+    start_offset    INTEGER NULL,   -- Position caractère début
+    end_offset      INTEGER NULL,   -- Position caractère fin
+    page_number     INTEGER NULL,   -- Pour PDF
+
+    -- Contenu
+    content         TEXT NOT NULL,
+    content_hash    VARCHAR(64) NOT NULL,  -- Pour déduplication
+    token_count     INTEGER NULL,   -- Estimation tokens
+
+    -- Métadonnées contextuelles
+    context_before  TEXT NULL,      -- Contexte précédent (optionnel)
+    context_after   TEXT NULL,      -- Contexte suivant (optionnel)
+    metadata        JSONB NULL,
+    -- Structure : {"heading": "Section 2.1", "timestamp": "00:02:30"}
+
+    -- Indexation Qdrant
+    qdrant_point_id VARCHAR(100) NULL,
+    is_indexed      BOOLEAN DEFAULT FALSE,
+    indexed_at      TIMESTAMP NULL,
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_chunks_document ON document_chunks(document_id);
+CREATE INDEX idx_chunks_indexed ON document_chunks(is_indexed);
+CREATE INDEX idx_chunks_hash ON document_chunks(content_hash);
+CREATE UNIQUE INDEX idx_chunks_document_index ON document_chunks(document_id, chunk_index);
+```
+
+#### Types MIME Supportés
+
+```php
+// config/documents.php
+return [
+    'allowed_types' => [
+        // Texte
+        'text/plain' => ['extensions' => ['txt'], 'extractor' => 'text'],
+        'text/markdown' => ['extensions' => ['md'], 'extractor' => 'text'],
+        'text/html' => ['extensions' => ['html', 'htm'], 'extractor' => 'html'],
+
+        // Documents
+        'application/pdf' => ['extensions' => ['pdf'], 'extractor' => 'pdf'],
+        'application/msword' => ['extensions' => ['doc'], 'extractor' => 'office'],
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' =>
+            ['extensions' => ['docx'], 'extractor' => 'office'],
+        'application/vnd.oasis.opendocument.text' =>
+            ['extensions' => ['odt'], 'extractor' => 'office'],
+
+        // Tableurs
+        'text/csv' => ['extensions' => ['csv'], 'extractor' => 'csv'],
+        'application/vnd.ms-excel' => ['extensions' => ['xls'], 'extractor' => 'spreadsheet'],
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' =>
+            ['extensions' => ['xlsx'], 'extractor' => 'spreadsheet'],
+
+        // Audio (transcription Whisper)
+        'audio/mpeg' => ['extensions' => ['mp3'], 'extractor' => 'whisper'],
+        'audio/wav' => ['extensions' => ['wav'], 'extractor' => 'whisper'],
+        'audio/ogg' => ['extensions' => ['ogg'], 'extractor' => 'whisper'],
+        'audio/webm' => ['extensions' => ['weba'], 'extractor' => 'whisper'],
+
+        // Vidéo (extraction audio + transcription)
+        'video/mp4' => ['extensions' => ['mp4'], 'extractor' => 'whisper'],
+        'video/webm' => ['extensions' => ['webm'], 'extractor' => 'whisper'],
+        'video/x-msvideo' => ['extensions' => ['avi'], 'extractor' => 'whisper'],
+
+        // Images (OCR optionnel)
+        'image/png' => ['extensions' => ['png'], 'extractor' => 'ocr'],
+        'image/jpeg' => ['extensions' => ['jpg', 'jpeg'], 'extractor' => 'ocr'],
+    ],
+
+    'max_file_size' => env('DOCUMENT_MAX_SIZE', 104857600), // 100 MB
+
+    'chunk_settings' => [
+        'default_strategy' => 'paragraph',
+        'max_chunk_size' => 1000,    // Tokens approximatifs
+        'chunk_overlap' => 100,       // Chevauchement entre chunks
+    ],
+];
+```
+
+---
+
 ### Tables Dynamiques
 
 #### Table : `dynamic_tables` (Métadonnées)

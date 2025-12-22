@@ -619,6 +619,65 @@ chmod +x docker/app/entrypoint.sh
 
 ---
 
+## Configuration du Nom de Domaine
+
+La configuration du nom de domaine se fait via des variables d'environnement qui sont utilisées par Caddy.
+
+### Variables d'Environnement
+
+```env
+# Nom de domaine de l'application
+# En développement : localhost ou domaine local
+# En production : votre-domaine.com
+SITE_ADDRESS=localhost
+
+# Email pour les certificats SSL Let's Encrypt (production uniquement)
+ACME_EMAIL=admin@votre-domaine.com
+```
+
+### Exemples de Configuration
+
+| Environnement | SITE_ADDRESS | ACME_EMAIL | Notes |
+|---------------|--------------|------------|-------|
+| Développement local | `localhost` | - | Certificats auto-signés |
+| Développement avec domaine | `dev.monsite.local` | - | Ajouter au fichier hosts |
+| Staging | `staging.monsite.com` | `admin@monsite.com` | Let's Encrypt staging |
+| Production | `monsite.com` | `admin@monsite.com` | Let's Encrypt production |
+| Multi-domaines | `monsite.com, www.monsite.com` | `admin@monsite.com` | Plusieurs domaines |
+
+### Configuration Multi-Domaines
+
+Pour servir plusieurs domaines :
+
+```env
+# Domaine principal + alias
+SITE_ADDRESS="monsite.com, www.monsite.com"
+
+# Ou avec sous-domaines
+SITE_ADDRESS="*.monsite.com"
+```
+
+### Passage en Production
+
+1. **Modifier `.env`** :
+```env
+APP_ENV=production
+APP_DEBUG=false
+SITE_ADDRESS=votre-domaine.com
+ACME_EMAIL=admin@votre-domaine.com
+```
+
+2. **Supprimer `local_certs`** dans le Caddyfile (voir section suivante)
+
+3. **Redémarrer Caddy** :
+```bash
+docker compose restart web
+```
+
+Caddy obtiendra automatiquement un certificat SSL via Let's Encrypt.
+
+---
+
 ## Configuration Caddy
 
 ### Fichier : `docker/caddy/Caddyfile`
@@ -634,7 +693,8 @@ chmod +x docker/app/entrypoint.sh
     email {$ACME_EMAIL:admin@example.com}
 
     # Mode développement : certificats auto-signés
-    # Commenter cette ligne en production
+    # IMPORTANT: Commenter ou supprimer cette ligne en production
+    # pour activer Let's Encrypt
     local_certs
 
     # Logs
@@ -644,7 +704,8 @@ chmod +x docker/app/entrypoint.sh
     }
 }
 
-# Site principal
+# Site principal - Le domaine est configuré via SITE_ADDRESS
+# Exemples : localhost, monsite.com, *.monsite.com
 {$SITE_ADDRESS:localhost} {
     # Racine du site
     root * /var/www/html/public
