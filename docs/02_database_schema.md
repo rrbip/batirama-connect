@@ -148,6 +148,7 @@ CREATE TABLE roles (
 INSERT INTO roles (name, slug, description, is_system) VALUES
     ('Super Admin', 'super-admin', 'Accès complet au système', TRUE),
     ('Admin', 'admin', 'Administration des agents et utilisateurs', TRUE),
+    ('Métreur', 'metreur', 'Validation et correction des devis IA, gestion des ouvrages', TRUE),
     ('Validateur', 'validator', 'Validation des réponses IA', TRUE),
     ('Utilisateur', 'user', 'Utilisation des agents IA', TRUE),
     ('API Client', 'api-client', 'Accès API uniquement (marque blanche)', TRUE);
@@ -241,6 +242,88 @@ CREATE INDEX idx_api_tokens_token ON api_tokens(token);
 CREATE INDEX idx_api_tokens_user ON api_tokens(user_id);
 ```
 
+#### Table : `public_access_tokens`
+
+Permet de générer des liens publics pour accéder à un agent IA sans authentification.
+Utilisé pour envoyer un lien au client final (ex: demande de devis).
+
+```sql
+CREATE TABLE public_access_tokens (
+    id              BIGSERIAL PRIMARY KEY,
+    token           VARCHAR(64) UNIQUE NOT NULL,  -- Token unique dans l'URL
+
+    -- Liaison agent
+    agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    created_by      BIGINT NOT NULL REFERENCES users(id),  -- Artisan/utilisateur qui génère le lien
+    tenant_id       BIGINT REFERENCES tenants(id) ON DELETE SET NULL,
+
+    -- Liaison application tierce (pour retrouver le dossier)
+    external_app    VARCHAR(100) NULL,      -- "batigest", "ebp", "sage", "custom", etc.
+    external_ref    VARCHAR(255) NULL,      -- ID du dossier/client dans l'app tierce
+    external_meta   JSONB NULL,             -- Métadonnées supplémentaires
+    -- Exemple : {"client_name": "Dupont", "project": "Rénovation SDB", "dossier_id": "D-2025-001"}
+
+    -- Session créée (rempli quand le client utilise le lien)
+    session_id      BIGINT REFERENCES ai_sessions(id) ON DELETE SET NULL,
+
+    -- Infos client (collectées pendant la conversation ou pré-remplies)
+    client_info     JSONB NULL,
+    -- Structure : {"name": "...", "email": "...", "phone": "...", "address": "..."}
+
+    -- Validité et sécurité
+    expires_at      TIMESTAMP NOT NULL,     -- Date d'expiration obligatoire
+    max_uses        INTEGER DEFAULT 1,      -- Nombre d'utilisations max (1 = usage unique)
+    use_count       INTEGER DEFAULT 0,      -- Compteur d'utilisations
+
+    -- Statut
+    status          VARCHAR(20) DEFAULT 'active',
+    -- Valeurs : 'active', 'used', 'expired', 'revoked'
+
+    -- Tracking
+    first_used_at   TIMESTAMP NULL,
+    last_used_at    TIMESTAMP NULL,
+    last_ip         INET NULL,              -- IP du dernier accès
+    last_user_agent TEXT NULL,              -- User-Agent du dernier accès
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_public_tokens_token ON public_access_tokens(token);
+CREATE INDEX idx_public_tokens_agent ON public_access_tokens(agent_id);
+CREATE INDEX idx_public_tokens_external ON public_access_tokens(external_app, external_ref);
+CREATE INDEX idx_public_tokens_status ON public_access_tokens(status) WHERE status = 'active';
+CREATE INDEX idx_public_tokens_session ON public_access_tokens(session_id);
+
+-- Contrainte sur le statut
+ALTER TABLE public_access_tokens ADD CONSTRAINT chk_token_status
+    CHECK (status IN ('active', 'used', 'expired', 'revoked'));
+```
+
+**URL générée** : `https://monsite.com/c/{token}`
+
+**Exemple d'utilisation** :
+```php
+// Génération d'un lien depuis l'API (appelée par le logiciel tiers)
+POST /api/public-tokens
+{
+    "agent_slug": "expert-btp",
+    "external_app": "batigest",
+    "external_ref": "DOSSIER-2025-001",
+    "external_meta": {
+        "client_name": "M. Dupont",
+        "project_type": "renovation_sdb"
+    },
+    "expires_in_hours": 168  // Optionnel, sinon default de l'agent
+}
+
+// Réponse
+{
+    "token": "abc123xyz789...",
+    "url": "https://monsite.com/c/abc123xyz789...",
+    "expires_at": "2025-01-05T10:30:00Z"
+}
+```
+
 #### Table : `tenants` (Multi-tenant futur)
 
 ```sql
@@ -302,6 +385,16 @@ CREATE TABLE agents (
     context_window_size INTEGER DEFAULT 10,  -- Nb messages historique
     max_tokens          INTEGER DEFAULT 2048,
     temperature         DECIMAL(3,2) DEFAULT 0.7,
+
+    -- Configuration RAG avancée
+    max_rag_results     INTEGER DEFAULT 5,          -- Nb résultats RAG (BTP: 50, Support: 5)
+    allow_iterative_search BOOLEAN DEFAULT FALSE,   -- Permet recherches multiples
+    response_format     VARCHAR(20) DEFAULT 'text', -- 'text', 'json', 'markdown'
+    allow_attachments   BOOLEAN DEFAULT TRUE,       -- Photos/docs dans le chat
+
+    -- Configuration accès public
+    allow_public_access BOOLEAN DEFAULT FALSE,      -- Autorise les liens publics
+    default_token_expiry_hours INTEGER DEFAULT 168, -- 7 jours par défaut
 
     -- Statut
     is_active           BOOLEAN DEFAULT TRUE,
@@ -379,6 +472,9 @@ CREATE TABLE ai_sessions (
     user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
     tenant_id       BIGINT REFERENCES tenants(id) ON DELETE SET NULL,
 
+    -- Accès public (si créé via lien public)
+    public_token_id BIGINT REFERENCES public_access_tokens(id) ON DELETE SET NULL,
+
     -- Contexte externe (pour intégration écosystème)
     external_session_id VARCHAR(255) NULL,  -- ID session logiciel tiers
     external_context    JSONB NULL,         -- Données contextuelles
@@ -420,6 +516,13 @@ CREATE TABLE ai_messages (
 
     -- Contenu
     content         TEXT NOT NULL,
+
+    -- Pièces jointes (photos, documents envoyés dans le chat)
+    attachments     JSONB NULL,
+    -- Structure : [
+    --   {"document_id": 123, "type": "image", "name": "photo_sdb.jpg", "mime": "image/jpeg"},
+    --   {"document_id": 124, "type": "pdf", "name": "plan.pdf", "mime": "application/pdf"}
+    -- ]
 
     -- Métadonnées RAG (pour les réponses assistant)
     rag_context     JSONB NULL,

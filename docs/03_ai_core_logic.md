@@ -3203,10 +3203,541 @@ class RagServiceTest extends TestCase
 
 ---
 
+## 13. Service Accès Public
+
+### PublicAccessService
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Models\Agent;
+use App\Models\PublicAccessToken;
+use App\Models\AiSession;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
+
+class PublicAccessService
+{
+    /**
+     * Génère un token d'accès public pour un agent
+     */
+    public function generateToken(
+        Agent $agent,
+        int $createdBy,
+        array $options = []
+    ): PublicAccessToken {
+        // Vérifier que l'agent autorise l'accès public
+        if (!$agent->allow_public_access) {
+            throw new \InvalidArgumentException(
+                "L'agent '{$agent->name}' n'autorise pas l'accès public"
+            );
+        }
+
+        // Calculer l'expiration
+        $expiresInHours = $options['expires_in_hours']
+            ?? $agent->default_token_expiry_hours
+            ?? 168; // 7 jours par défaut
+
+        return PublicAccessToken::create([
+            'token' => Str::random(64),
+            'agent_id' => $agent->id,
+            'created_by' => $createdBy,
+            'tenant_id' => $agent->tenant_id,
+            'external_app' => $options['external_app'] ?? null,
+            'external_ref' => $options['external_ref'] ?? null,
+            'external_meta' => $options['external_meta'] ?? null,
+            'client_info' => $options['client_info'] ?? null,
+            'expires_at' => Carbon::now()->addHours($expiresInHours),
+            'max_uses' => $options['max_uses'] ?? 1,
+            'status' => 'active',
+        ]);
+    }
+
+    /**
+     * Valide un token et retourne la session associée
+     */
+    public function validateAndUse(string $token): ?AiSession
+    {
+        $publicToken = PublicAccessToken::where('token', $token)
+            ->where('status', 'active')
+            ->where('expires_at', '>', now())
+            ->first();
+
+        if (!$publicToken) {
+            return null;
+        }
+
+        // Vérifier le nombre d'utilisations
+        if ($publicToken->max_uses && $publicToken->use_count >= $publicToken->max_uses) {
+            $publicToken->update(['status' => 'used']);
+            return null;
+        }
+
+        // Créer ou récupérer la session
+        $session = $publicToken->session;
+
+        if (!$session) {
+            $session = AiSession::create([
+                'agent_id' => $publicToken->agent_id,
+                'tenant_id' => $publicToken->tenant_id,
+                'public_token_id' => $publicToken->id,
+                'external_session_id' => $publicToken->external_ref,
+                'external_context' => [
+                    'app' => $publicToken->external_app,
+                    'ref' => $publicToken->external_ref,
+                    'meta' => $publicToken->external_meta,
+                ],
+            ]);
+
+            $publicToken->update(['session_id' => $session->id]);
+        }
+
+        // Mettre à jour les statistiques
+        $publicToken->increment('use_count');
+        $publicToken->update([
+            'first_used_at' => $publicToken->first_used_at ?? now(),
+            'last_used_at' => now(),
+            'last_ip' => request()->ip(),
+            'last_user_agent' => request()->userAgent(),
+        ]);
+
+        return $session;
+    }
+
+    /**
+     * Révoque un token
+     */
+    public function revoke(PublicAccessToken $token): bool
+    {
+        return $token->update(['status' => 'revoked']);
+    }
+
+    /**
+     * Récupère les sessions d'un dossier externe
+     */
+    public function getSessionsByExternalRef(
+        string $externalApp,
+        string $externalRef
+    ): \Illuminate\Database\Eloquent\Collection {
+        return AiSession::whereHas('publicToken', function ($query) use ($externalApp, $externalRef) {
+            $query->where('external_app', $externalApp)
+                  ->where('external_ref', $externalRef);
+        })->with(['messages', 'agent'])->get();
+    }
+
+    /**
+     * Génère l'URL publique
+     */
+    public function getPublicUrl(PublicAccessToken $token): string
+    {
+        return url("/c/{$token->token}");
+    }
+}
+```
+
+---
+
+## 14. Service RAG Itératif
+
+Ce service étend le RAG standard pour permettre des recherches multiples
+quand l'agent a `allow_iterative_search: true`.
+
+### IterativeRagService
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\AI;
+
+use App\Models\Agent;
+use App\Models\AiSession;
+use App\DTOs\AI\RagResponse;
+use Illuminate\Support\Facades\Log;
+
+class IterativeRagService
+{
+    public function __construct(
+        private RagService $ragService,
+        private EmbeddingService $embeddingService,
+        private QdrantService $qdrantService,
+        private HydrationService $hydrationService,
+        private OllamaService $ollamaService
+    ) {}
+
+    /**
+     * Processus RAG avec support de recherches itératives
+     */
+    public function process(
+        Agent $agent,
+        AiSession $session,
+        string $question,
+        array $attachments = []
+    ): RagResponse {
+        // Si l'agent n'autorise pas la recherche itérative, utiliser le RAG standard
+        if (!$agent->allow_iterative_search) {
+            return $this->ragService->process($agent, $session, $question);
+        }
+
+        // Première passe : RAG standard avec plus de résultats
+        $initialResponse = $this->processWithConfig($agent, $session, $question, [
+            'max_results' => $agent->max_rag_results,
+        ]);
+
+        // Analyser si l'IA demande des recherches supplémentaires
+        $parsedResponse = $this->parseResponse($initialResponse->content);
+
+        if (isset($parsedResponse['action']) && $parsedResponse['action'] === 'search_additional') {
+            // L'IA demande des recherches supplémentaires
+            $additionalQueries = $parsedResponse['queries'] ?? [];
+
+            if (!empty($additionalQueries)) {
+                Log::info('Iterative RAG: Additional searches requested', [
+                    'queries' => $additionalQueries
+                ]);
+
+                // Effectuer les recherches supplémentaires
+                $additionalResults = $this->performAdditionalSearches(
+                    $agent,
+                    $additionalQueries
+                );
+
+                // Relancer la génération avec tous les résultats
+                return $this->processWithAdditionalContext(
+                    $agent,
+                    $session,
+                    $question,
+                    $initialResponse,
+                    $additionalResults
+                );
+            }
+        }
+
+        return $initialResponse;
+    }
+
+    /**
+     * Effectue des recherches supplémentaires
+     */
+    private function performAdditionalSearches(Agent $agent, array $queries): array
+    {
+        $allResults = [];
+
+        foreach ($queries as $query) {
+            $embedding = $this->embeddingService->embed($query);
+
+            $results = $this->qdrantService->search(
+                vector: $embedding,
+                collection: $agent->qdrant_collection,
+                limit: 5,
+                scoreThreshold: 0.5
+            );
+
+            // Hydrater si nécessaire
+            if ($agent->retrieval_mode === 'SQL_HYDRATION' && $agent->hydration_config) {
+                $results = $this->hydrationService->hydrate(
+                    $results,
+                    $agent->hydration_config
+                );
+            }
+
+            $allResults[$query] = $results;
+        }
+
+        return $allResults;
+    }
+
+    /**
+     * Parse la réponse pour détecter les demandes de recherche
+     */
+    private function parseResponse(string $content): array
+    {
+        // Chercher un bloc JSON dans la réponse
+        if (preg_match('/```json\s*(.*?)\s*```/s', $content, $matches)) {
+            $json = json_decode($matches[1], true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $json;
+            }
+        }
+
+        // Essayer de parser directement si c'est du JSON
+        $json = json_decode($content, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $json;
+        }
+
+        return [];
+    }
+
+    private function processWithConfig(
+        Agent $agent,
+        AiSession $session,
+        string $question,
+        array $config
+    ): RagResponse {
+        // Utiliser le RagService avec configuration personnalisée
+        return $this->ragService->process($agent, $session, $question);
+    }
+
+    private function processWithAdditionalContext(
+        Agent $agent,
+        AiSession $session,
+        string $question,
+        RagResponse $initialResponse,
+        array $additionalResults
+    ): RagResponse {
+        // Construire un contexte enrichi avec les résultats supplémentaires
+        // et relancer la génération
+        // ...implementation...
+
+        return $initialResponse; // Placeholder
+    }
+}
+```
+
+---
+
+## 15. Service Génération PDF
+
+### PdfGeneratorService
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Models\AiSession;
+use App\Models\AiMessage;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Facades\Storage;
+
+class PdfGeneratorService
+{
+    /**
+     * Génère un PDF récapitulatif de la conversation
+     */
+    public function generateSessionRecap(AiSession $session): string
+    {
+        $session->load(['agent', 'messages.attachments', 'publicToken']);
+
+        $data = [
+            'session' => $session,
+            'agent' => $session->agent,
+            'messages' => $session->messages()->orderBy('created_at')->get(),
+            'client_info' => $session->publicToken?->client_info,
+            'external_ref' => $session->publicToken?->external_ref,
+            'generated_at' => now(),
+        ];
+
+        $pdf = Pdf::loadView('pdf.session-recap', $data);
+
+        // Sauvegarder le PDF
+        $filename = "recaps/session_{$session->uuid}.pdf";
+        Storage::put($filename, $pdf->output());
+
+        return $filename;
+    }
+
+    /**
+     * Génère un PDF de devis à partir d'une réponse JSON de l'IA
+     */
+    public function generateQuotePdf(
+        AiSession $session,
+        array $quoteData,
+        array $options = []
+    ): string {
+        $session->load(['agent', 'publicToken']);
+
+        $data = [
+            'session' => $session,
+            'quote' => $quoteData,
+            'client_info' => $session->publicToken?->client_info ?? [],
+            'company_info' => $options['company_info'] ?? [],
+            'generated_at' => now(),
+            'quote_number' => $options['quote_number'] ?? 'PRE-' . strtoupper(Str::random(8)),
+            'validity_days' => $options['validity_days'] ?? 30,
+        ];
+
+        $pdf = Pdf::loadView('pdf.quote', $data);
+
+        // Options PDF
+        $pdf->setPaper('a4');
+        $pdf->setOption('isHtml5ParserEnabled', true);
+
+        // Sauvegarder
+        $filename = "quotes/quote_{$session->uuid}.pdf";
+        Storage::put($filename, $pdf->output());
+
+        return $filename;
+    }
+
+    /**
+     * Génère un PDF des photos du projet
+     */
+    public function generatePhotosPdf(AiSession $session): ?string
+    {
+        $photos = AiMessage::where('session_id', $session->id)
+            ->whereNotNull('attachments')
+            ->get()
+            ->pluck('attachments')
+            ->flatten(1)
+            ->filter(fn($a) => str_starts_with($a['mime'] ?? '', 'image/'));
+
+        if ($photos->isEmpty()) {
+            return null;
+        }
+
+        $data = [
+            'session' => $session,
+            'photos' => $photos,
+            'generated_at' => now(),
+        ];
+
+        $pdf = Pdf::loadView('pdf.photos', $data);
+        $pdf->setPaper('a4', 'landscape');
+
+        $filename = "photos/photos_{$session->uuid}.pdf";
+        Storage::put($filename, $pdf->output());
+
+        return $filename;
+    }
+}
+```
+
+---
+
+## 16. Exemples de Prompts Système
+
+### Agent BTP - Expert Devis (avec qualification et décomposition)
+
+```markdown
+Tu es un expert en bâtiment spécialisé dans l'établissement de devis.
+Tu travailles pour un artisan et tu aides ses clients à définir leur projet.
+
+## PHASE 1 - PRÉSENTATION
+Présente-toi brièvement et explique que tu vas poser quelques questions pour comprendre le projet.
+
+## PHASE 2 - QUALIFICATION (OBLIGATOIRE)
+Avant de proposer un devis, tu DOIS collecter les informations suivantes :
+- Nature exacte des travaux souhaités
+- Dimensions / surfaces concernées
+- Équipements spécifiques souhaités
+- Niveau de gamme (standard, milieu de gamme, haut de gamme)
+- Contraintes particulières (accès, délais, etc.)
+
+Pose les questions une par une ou par petits groupes.
+Si le client envoie des photos, décris ce que tu y vois et utilise ces informations.
+Continue jusqu'à avoir suffisamment d'éléments.
+
+## PHASE 3 - DÉCOMPOSITION
+Une fois le besoin clair, décompose le projet en prestations élémentaires.
+Pour chaque prestation, cherche dans les ouvrages disponibles.
+
+Si tu as besoin de recherches supplémentaires, retourne :
+```json
+{
+  "action": "search_additional",
+  "queries": [
+    "démolition carrelage salle de bain",
+    "pose douche italienne receveur extra-plat",
+    "carrelage grès cérame antidérapant"
+  ]
+}
+```
+
+## PHASE 4 - PROPOSITION DE DEVIS
+Une fois toutes les prestations identifiées, génère un JSON structuré :
+```json
+{
+  "phase": "devis",
+  "resume_projet": "Description courte du projet",
+  "prestations": [
+    {
+      "designation": "Démolition carrelage existant",
+      "ouvrage_id": 123,
+      "ouvrage_code": "DEM-CAR-001",
+      "unite": "m²",
+      "quantite": 8,
+      "prix_unitaire": 25.00,
+      "total": 200.00,
+      "justification": "Sol et murs SDB"
+    }
+  ],
+  "total_ht": 3500.00,
+  "tva": 700.00,
+  "total_ttc": 4200.00,
+  "avertissement": "⚠️ Devis estimatif basé sur vos indications. Les quantités définitives seront confirmées après visite technique.",
+  "validite_jours": 30
+}
+```
+
+## RÈGLES IMPORTANTES
+- Utilise UNIQUEMENT les ouvrages fournis en contexte
+- Les quantités sont des ESTIMATIONS, précise-le toujours
+- Sois courtois et professionnel
+- Si tu ne trouves pas un ouvrage correspondant, indique "ouvrage non trouvé"
+- Pose des questions si quelque chose n'est pas clair
+```
+
+### Agent Support Client (simple Q&A)
+
+```markdown
+Tu es l'assistant support de [Nom du logiciel].
+Tu aides les utilisateurs à résoudre leurs problèmes et à utiliser le logiciel.
+
+## TON RÔLE
+- Répondre aux questions sur l'utilisation du logiciel
+- Guider les utilisateurs pas à pas
+- Résoudre les problèmes courants
+
+## RÈGLES
+- Sois concis et clair
+- Utilise des listes numérotées pour les étapes
+- Si tu ne sais pas, dis-le et suggère de contacter le support humain
+- Base tes réponses UNIQUEMENT sur la documentation fournie
+
+## FORMAT
+Réponds en texte simple, avec des étapes numérotées si nécessaire.
+```
+
+### Configuration Agent BTP dans la base
+
+```json
+{
+  "name": "Expert BTP",
+  "slug": "expert-btp",
+  "retrieval_mode": "SQL_HYDRATION",
+  "hydration_config": {
+    "table": "ouvrages",
+    "key": "db_id",
+    "fields": ["*"],
+    "relations": ["fournitures", "main_oeuvres"]
+  },
+  "max_rag_results": 50,
+  "allow_iterative_search": true,
+  "response_format": "json",
+  "allow_attachments": true,
+  "allow_public_access": true,
+  "default_token_expiry_hours": 168,
+  "model": "llama3.1:70b",
+  "temperature": 0.7
+}
+```
+
+---
+
 ## Résumé
 
 Ce document décrit l'architecture complète du moteur IA :
 
+### Services Core
 1. **OllamaService** : Communication avec le serveur d'inférence
 2. **EmbeddingService** : Génération de vecteurs sémantiques
 3. **QdrantService** : Stockage et recherche vectorielle
@@ -3216,8 +3747,20 @@ Ce document décrit l'architecture complète du moteur IA :
 7. **DispatcherService** : Point d'entrée et gestion des sessions
 8. **LearningService** : Boucle d'amélioration continue
 
+### Services Document
+9. **DocumentService** : Upload, extraction et indexation de documents
+10. **ChunkingService** : Découpage intelligent pour le RAG
+11. **Extracteurs** : PDF, Audio/Vidéo (Whisper), OCR
+
+### Services Métier
+12. **PublicAccessService** : Génération de liens publics pour clients
+13. **IterativeRagService** : RAG multi-requêtes pour agents complexes
+14. **PdfGeneratorService** : Génération de PDF (récaps, devis)
+
+### Caractéristiques
 Le système est conçu pour être :
 - **Modulaire** : Chaque service a une responsabilité unique
-- **Configurable** : Tout est paramétrable via BDD ou config
+- **Configurable** : Tout est paramétrable via BDD ou config (par agent)
 - **Extensible** : Facile d'ajouter de nouveaux agents ou modes
+- **Flexible** : Chaque agent peut avoir son propre comportement (via prompt système)
 - **Observable** : Logs et métriques à chaque étape
