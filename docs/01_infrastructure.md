@@ -1131,7 +1131,7 @@ COMMENT ON DATABASE ai_manager IS 'AI-Manager CMS - Base principale';
 # AI-Manager CMS - Commandes Make
 # ===========================================
 
-.PHONY: help install dev prod up down restart logs shell test migrate seed fresh ollama-pull
+.PHONY: help install update dev prod up down restart logs shell test migrate seed fresh ollama-pull
 
 # Variables
 COMPOSE = docker compose
@@ -1155,6 +1155,40 @@ install: ## Installation initiale
 	$(COMPOSE_DEV) exec app php artisan migrate
 	$(COMPOSE_DEV) exec app php artisan db:seed
 	@echo "Installation terminée ! Accès : http://localhost:8080"
+
+# ===========================================
+# MISES À JOUR
+# ===========================================
+
+update: ## Met à jour l'application (pull + rebuild + migrate)
+	@echo "📥 Récupération du code..."
+	git pull origin $$(git branch --show-current)
+	@echo "🔨 Reconstruction de l'image app..."
+	$(COMPOSE) build app
+	@echo "🚀 Redémarrage des services..."
+	$(COMPOSE) up -d
+	@echo "📦 Exécution des migrations..."
+	$(COMPOSE) exec app php artisan migrate --force
+	@echo "🧹 Nettoyage des caches..."
+	$(COMPOSE) exec app php artisan config:clear
+	$(COMPOSE) exec app php artisan cache:clear
+	$(COMPOSE) exec app php artisan view:clear
+	@echo "✅ Mise à jour terminée !"
+
+update-prod: ## Met à jour en production (avec optimisations)
+	@echo "📥 Récupération du code..."
+	git pull origin main
+	@echo "🔨 Reconstruction de l'image app..."
+	$(COMPOSE_PROD) build app
+	@echo "🚀 Redémarrage des services..."
+	$(COMPOSE_PROD) up -d
+	@echo "📦 Exécution des migrations..."
+	$(COMPOSE_PROD) exec app php artisan migrate --force
+	@echo "⚡ Optimisation pour la production..."
+	$(COMPOSE_PROD) exec app php artisan config:cache
+	$(COMPOSE_PROD) exec app php artisan route:cache
+	$(COMPOSE_PROD) exec app php artisan view:cache
+	@echo "✅ Mise à jour production terminée !"
 
 # ===========================================
 # ENVIRONNEMENTS
@@ -1434,3 +1468,20 @@ make ollama-list
 # Lancer les tests
 make test
 ```
+
+### Mises à Jour
+
+```bash
+# Développement - Une seule commande pour tout mettre à jour
+make update
+
+# Production - Avec optimisations de cache
+make update-prod
+```
+
+Ces commandes :
+1. Récupèrent le dernier code (`git pull`)
+2. Reconstruisent l'image app
+3. Redémarrent les services
+4. Exécutent les nouvelles migrations
+5. Nettoient/optimisent les caches
