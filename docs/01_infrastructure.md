@@ -491,11 +491,184 @@ CMD ["php-fpm"]
 
 ---
 
+## Déploiement Simplifié (Une Seule Commande)
+
+Le déploiement est entièrement automatisé. Une seule commande suffit pour lancer l'écosystème complet.
+
+### Installation Express
+
+```bash
+# Cloner le projet
+git clone https://github.com/votre-repo/ai-manager-cms.git
+cd ai-manager-cms
+
+# Lancer l'installation complète (tout automatique)
+./install.sh
+```
+
+C'est tout ! Le script :
+- Génère automatiquement le fichier `.env`
+- Construit les images Docker
+- Démarre tous les services
+- Exécute les migrations et seeders
+- Télécharge les modèles IA
+- Initialise Qdrant
+
+---
+
+## Script d'Installation Automatique
+
+### Fichier : `install.sh`
+
+```bash
+#!/bin/bash
+set -e
+
+# ===========================================
+# AI-Manager CMS - Installation Automatique
+# ===========================================
+# Usage: ./install.sh [dev|prod]
+
+MODE="${1:-dev}"
+COMPOSE_DEV="docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+COMPOSE_PROD="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║           AI-Manager CMS - Installation                  ║"
+echo "║                Mode: $MODE                               ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+
+# Sélection du compose selon le mode
+if [ "$MODE" = "prod" ]; then
+    COMPOSE="$COMPOSE_PROD"
+else
+    COMPOSE="$COMPOSE_DEV"
+fi
+
+# ===========================================
+# ÉTAPE 1 : Configuration .env
+# ===========================================
+echo "📝 Configuration de l'environnement..."
+
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "   ✓ Fichier .env créé depuis .env.example"
+
+    # Générer une clé d'application unique
+    APP_KEY=$(openssl rand -base64 32)
+    sed -i "s|APP_KEY=.*|APP_KEY=base64:$APP_KEY|" .env
+    echo "   ✓ Clé d'application générée"
+
+    # Générer un mot de passe DB aléatoire si mode prod
+    if [ "$MODE" = "prod" ]; then
+        DB_PASS=$(openssl rand -hex 16)
+        sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASS|" .env
+        echo "   ✓ Mot de passe DB généré"
+
+        # Demander le domaine
+        read -p "   Entrez votre nom de domaine (ex: monsite.com): " DOMAIN
+        if [ -n "$DOMAIN" ]; then
+            sed -i "s|SITE_ADDRESS=.*|SITE_ADDRESS=$DOMAIN|" .env
+            echo "   ✓ Domaine configuré: $DOMAIN"
+        fi
+
+        # Demander l'email pour SSL
+        read -p "   Entrez votre email pour Let's Encrypt: " EMAIL
+        if [ -n "$EMAIL" ]; then
+            sed -i "s|ACME_EMAIL=.*|ACME_EMAIL=$EMAIL|" .env
+            echo "   ✓ Email SSL configuré: $EMAIL"
+        fi
+    fi
+else
+    echo "   ✓ Fichier .env existant conservé"
+fi
+
+# ===========================================
+# ÉTAPE 2 : Construction des images
+# ===========================================
+echo ""
+echo "🔨 Construction des images Docker..."
+$COMPOSE build --no-cache
+echo "   ✓ Images construites"
+
+# ===========================================
+# ÉTAPE 3 : Démarrage des services
+# ===========================================
+echo ""
+echo "🚀 Démarrage des services..."
+$COMPOSE up -d
+echo "   ✓ Services démarrés"
+
+# ===========================================
+# ÉTAPE 4 : Attendre que tout soit prêt
+# ===========================================
+echo ""
+echo "⏳ Attente de l'initialisation (peut prendre quelques minutes)..."
+
+# Attendre que l'app soit healthy
+MAX_WAIT=120
+WAITED=0
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if docker compose exec -T app php artisan --version > /dev/null 2>&1; then
+        break
+    fi
+    sleep 5
+    WAITED=$((WAITED + 5))
+    echo "   ... encore $((MAX_WAIT - WAITED)) secondes max"
+done
+
+# ===========================================
+# ÉTAPE 5 : Affichage du statut
+# ===========================================
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║                 Installation Terminée !                  ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+echo "📊 Statut des services :"
+docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
+echo ""
+
+if [ "$MODE" = "dev" ]; then
+    echo "🌐 Accès à l'application :"
+    echo "   URL:      http://localhost:8080"
+    echo "   Admin:    admin@ai-manager.local / password"
+    echo ""
+    echo "📦 Commandes utiles :"
+    echo "   make logs        - Voir les logs"
+    echo "   make shell       - Accéder au conteneur"
+    echo "   make ollama-list - Voir les modèles IA"
+else
+    DOMAIN=$(grep SITE_ADDRESS .env | cut -d'=' -f2)
+    echo "🌐 Accès à l'application :"
+    echo "   URL:      https://$DOMAIN"
+    echo "   Admin:    Créez un compte via la CLI"
+    echo ""
+    echo "⚠️  N'oubliez pas de :"
+    echo "   1. Configurer votre DNS pour pointer vers ce serveur"
+    echo "   2. Supprimer 'local_certs' du Caddyfile pour activer SSL"
+fi
+
+echo ""
+echo "📖 Documentation : docs/00_index.md"
+echo ""
+```
+
+### Permissions
+
+```bash
+chmod +x install.sh
+```
+
+---
+
 ## Script d'Entrypoint (Initialisation Automatique)
 
 ### Fichier : `docker/app/entrypoint.sh`
 
-Ce script s'exécute au démarrage du conteneur et initialise automatiquement l'application.
+Ce script s'exécute au démarrage du conteneur et initialise automatiquement l'application, y compris le téléchargement des modèles IA.
 
 ```bash
 #!/bin/bash
@@ -504,89 +677,162 @@ set -e
 # ===========================================
 # AI-Manager CMS - Entrypoint Script
 # ===========================================
-# Ce script initialise automatiquement l'application
-# au premier démarrage du conteneur.
+# Initialisation 100% automatique au premier démarrage
 
-echo "🚀 AI-Manager CMS - Initialisation..."
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║           AI-Manager CMS - Démarrage                     ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
 
 # Fichier marqueur pour éviter la réinitialisation
 INIT_MARKER="/var/www/html/storage/.initialized"
 
-# Attendre que PostgreSQL soit prêt
+# Modèles IA à télécharger automatiquement
+OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
+
+# ===========================================
+# FONCTIONS UTILITAIRES
+# ===========================================
+
 wait_for_db() {
     echo "⏳ Attente de PostgreSQL..."
+    local max_attempts=30
+    local attempt=0
+
     until php artisan db:monitor --database=pgsql 2>/dev/null; do
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            echo "❌ PostgreSQL non disponible après ${max_attempts} tentatives"
+            exit 1
+        fi
         sleep 2
     done
-    echo "✅ PostgreSQL est prêt"
+    echo "✅ PostgreSQL connecté"
 }
 
-# Attendre que Qdrant soit prêt
 wait_for_qdrant() {
     echo "⏳ Attente de Qdrant..."
-    QDRANT_URL="http://${QDRANT_HOST:-qdrant}:${QDRANT_PORT:-6333}/readyz"
-    until curl -sf "$QDRANT_URL" > /dev/null 2>&1; do
+    local max_attempts=30
+    local attempt=0
+    local url="http://${QDRANT_HOST:-qdrant}:${QDRANT_PORT:-6333}/readyz"
+
+    until curl -sf "$url" > /dev/null 2>&1; do
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            echo "❌ Qdrant non disponible après ${max_attempts} tentatives"
+            exit 1
+        fi
         sleep 2
     done
-    echo "✅ Qdrant est prêt"
+    echo "✅ Qdrant connecté"
 }
 
-# Attendre qu'Ollama soit prêt et télécharger les modèles
 wait_for_ollama() {
     echo "⏳ Attente d'Ollama..."
-    OLLAMA_URL="http://${OLLAMA_HOST:-ollama}:${OLLAMA_PORT:-11434}/api/tags"
-    until curl -sf "$OLLAMA_URL" > /dev/null 2>&1; do
+    local max_attempts=60
+    local attempt=0
+    local url="http://${OLLAMA_HOST:-ollama}:${OLLAMA_PORT:-11434}/api/tags"
+
+    until curl -sf "$url" > /dev/null 2>&1; do
+        attempt=$((attempt + 1))
+        if [ $attempt -ge $max_attempts ]; then
+            echo "⚠️  Ollama non disponible - les modèles seront téléchargés plus tard"
+            return 1
+        fi
         sleep 2
     done
-    echo "✅ Ollama est prêt"
+    echo "✅ Ollama connecté"
+    return 0
 }
 
-# Initialisation de l'application
+pull_ollama_models() {
+    echo "📥 Téléchargement des modèles IA..."
+    local ollama_url="http://${OLLAMA_HOST:-ollama}:${OLLAMA_PORT:-11434}"
+
+    # Convertir la liste en array
+    IFS=',' read -ra MODELS <<< "$OLLAMA_MODELS"
+
+    for model in "${MODELS[@]}"; do
+        model=$(echo "$model" | xargs)  # Trim whitespace
+        echo "   ⏳ Téléchargement de $model..."
+
+        # Vérifier si le modèle existe déjà
+        if curl -sf "${ollama_url}/api/show" -d "{\"name\":\"$model\"}" > /dev/null 2>&1; then
+            echo "   ✓ $model déjà présent"
+        else
+            # Télécharger le modèle via l'API Ollama
+            if curl -sf "${ollama_url}/api/pull" -d "{\"name\":\"$model\",\"stream\":false}" > /dev/null 2>&1; then
+                echo "   ✓ $model téléchargé"
+            else
+                # Fallback: utiliser la commande ollama directement via docker exec
+                if docker exec aim_ollama ollama pull "$model" 2>/dev/null; then
+                    echo "   ✓ $model téléchargé"
+                else
+                    echo "   ⚠️  Échec du téléchargement de $model (sera retéléchargé au besoin)"
+                fi
+            fi
+        fi
+    done
+
+    echo "✅ Modèles IA configurés"
+}
+
 initialize_app() {
-    echo "🔧 Configuration de l'application..."
+    echo ""
+    echo "🔧 Initialisation de l'application..."
 
     # Générer la clé si elle n'existe pas
     if [ -z "$APP_KEY" ] || [ "$APP_KEY" = "base64:" ]; then
-        echo "🔑 Génération de la clé d'application..."
+        echo "   🔑 Génération de la clé d'application..."
         php artisan key:generate --force
     fi
 
     # Exécuter les migrations
-    echo "📦 Exécution des migrations..."
+    echo "   📦 Exécution des migrations..."
     php artisan migrate --force
 
     # Exécuter les seeders
-    echo "🌱 Exécution des seeders..."
+    echo "   🌱 Exécution des seeders..."
     php artisan db:seed --force
 
-    # Initialiser Qdrant (collections + données de test)
-    echo "🧠 Initialisation de Qdrant..."
+    # Initialiser Qdrant
+    echo "   🧠 Initialisation des collections Qdrant..."
     php artisan qdrant:init --with-test-data
 
-    # Vider les caches
-    echo "🧹 Nettoyage des caches..."
+    # Optimisations
+    echo "   ⚡ Optimisation des caches..."
     php artisan config:clear
     php artisan cache:clear
     php artisan view:clear
 
     # Créer le fichier marqueur
     touch "$INIT_MARKER"
-    echo "✅ Initialisation terminée !"
+
+    echo "✅ Application initialisée"
 }
 
-# Vérification du premier démarrage
-if [ ! -f "$INIT_MARKER" ]; then
-    echo "📌 Premier démarrage détecté"
+# ===========================================
+# LOGIQUE PRINCIPALE
+# ===========================================
 
-    # Attendre les services
+if [ ! -f "$INIT_MARKER" ]; then
+    echo "📌 Premier démarrage détecté - Initialisation complète"
+    echo ""
+
+    # Attendre les services critiques
     wait_for_db
     wait_for_qdrant
 
     # Initialiser l'application
     initialize_app
 
-    # Attendre Ollama en arrière-plan (ne bloque pas le démarrage)
-    (wait_for_ollama && echo "🤖 Ollama disponible pour les requêtes IA") &
+    # Télécharger les modèles IA en arrière-plan
+    (
+        if wait_for_ollama; then
+            pull_ollama_models
+        fi
+    ) &
 
 else
     echo "📌 Application déjà initialisée"
@@ -594,16 +840,19 @@ else
     # Vérifier les migrations en attente
     PENDING=$(php artisan migrate:status --pending 2>/dev/null | grep -c "Pending" || true)
     if [ "$PENDING" -gt 0 ]; then
-        echo "📦 $PENDING migration(s) en attente..."
+        echo "   📦 $PENDING migration(s) en attente..."
         php artisan migrate --force
     fi
 fi
 
-echo "🎉 AI-Manager CMS prêt !"
 echo ""
-echo "📊 Informations de connexion :"
-echo "   - Admin: admin@ai-manager.local / password"
-echo "   - URL: http://localhost:8080"
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║              AI-Manager CMS - Prêt !                     ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+echo "📊 Informations :"
+echo "   Mode:     ${APP_ENV:-local}"
+echo "   Admin:    admin@ai-manager.local / password"
 echo ""
 
 # Exécuter la commande passée (php-fpm par défaut)
@@ -613,8 +862,55 @@ exec "$@"
 ### Permissions du script
 
 ```bash
-# Le script doit être exécutable
 chmod +x docker/app/entrypoint.sh
+```
+
+---
+
+## Script de Téléchargement des Modèles Ollama
+
+### Fichier : `docker/ollama/pull-models.sh`
+
+Ce script est exécuté automatiquement par l'entrypoint mais peut aussi être lancé manuellement.
+
+```bash
+#!/bin/bash
+
+# ===========================================
+# AI-Manager CMS - Ollama Model Puller
+# ===========================================
+# Télécharge les modèles IA configurés
+
+MODELS="${1:-nomic-embed-text,mistral:7b}"
+
+echo "📥 Téléchargement des modèles Ollama..."
+
+IFS=',' read -ra MODEL_LIST <<< "$MODELS"
+
+for model in "${MODEL_LIST[@]}"; do
+    model=$(echo "$model" | xargs)
+    echo "   ⏳ $model..."
+    ollama pull "$model" 2>&1 | tail -1
+done
+
+echo "✅ Tous les modèles sont téléchargés"
+ollama list
+```
+
+---
+
+## Variables d'Environnement pour les Modèles
+
+### Dans `.env`
+
+```env
+# Modèles IA à télécharger automatiquement au démarrage
+# Séparés par des virgules
+# Dev : modèles légers
+OLLAMA_MODELS=nomic-embed-text,mistral:7b
+
+# Prod : modèles plus puissants (décommenter)
+# OLLAMA_MODELS=nomic-embed-text,llama3.3:70b,mistral-small
 ```
 
 ---
@@ -1088,21 +1384,53 @@ OLLAMA_PORT=11434
 
 ## Checklist de Déploiement
 
-### Développement
+### Développement (Automatique)
 
-- [ ] Copier `.env.example` vers `.env`
-- [ ] Exécuter `make install`
-- [ ] Télécharger les modèles : `make ollama-pull`
-- [ ] Vérifier Qdrant : `make qdrant-status`
-- [ ] Lancer les tests : `make test`
+```bash
+# Une seule commande !
+./install.sh
+```
 
-### Production
+Tout est automatique :
+- [x] Création du `.env` depuis `.env.example`
+- [x] Génération de la clé d'application
+- [x] Construction des images Docker
+- [x] Démarrage des services
+- [x] Exécution des migrations
+- [x] Exécution des seeders
+- [x] Initialisation de Qdrant
+- [x] Téléchargement des modèles IA
 
-- [ ] Configurer les secrets (`.env` sécurisé)
-- [ ] Configurer le domaine dans Caddyfile
-- [ ] Activer Redis (`REDIS_ENABLED=true`)
+### Production (Semi-Automatique)
+
+```bash
+# Installation avec mode production
+./install.sh prod
+```
+
+Le script demandera :
+1. Votre nom de domaine
+2. Votre email pour Let's Encrypt
+
+Après l'installation :
+- [ ] Configurer le DNS pour pointer vers le serveur
+- [ ] Supprimer `local_certs` du Caddyfile (active Let's Encrypt)
+- [ ] Redémarrer Caddy : `docker compose restart web`
 - [ ] Configurer les backups PostgreSQL
-- [ ] Télécharger les modèles prod : `make ollama-pull-prod`
-- [ ] Configurer les alertes de monitoring
-- [ ] Vérifier les certificats SSL
-- [ ] Tester le failover si Multi-AZ
+- [ ] (Optionnel) Activer Redis : `REDIS_ENABLED=true`
+
+### Commandes Post-Installation
+
+```bash
+# Vérifier le statut
+docker compose ps
+
+# Voir les logs
+make logs
+
+# Vérifier les modèles IA
+make ollama-list
+
+# Lancer les tests
+make test
+```
