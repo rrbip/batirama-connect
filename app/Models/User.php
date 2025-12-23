@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Traits\Auditable;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -12,9 +15,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser
 {
-    use HasFactory, Notifiable, SoftDeletes;
+    use Auditable, HasFactory, Notifiable, SoftDeletes;
+
+    /**
+     * Attributes hidden from audit log.
+     */
+    protected array $hiddenFromAudit = ['password', 'remember_token'];
 
     protected $fillable = [
         'uuid',
@@ -73,5 +81,35 @@ class User extends Authenticatable
     public function isSuperAdmin(): bool
     {
         return $this->hasRole('super-admin');
+    }
+
+    /**
+     * Determine if the user can access the Filament admin panel.
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        // En développement, tous les utilisateurs vérifiés peuvent accéder
+        // En production, ajouter une vérification de rôle admin
+        if (app()->environment('local', 'development')) {
+            return true;
+        }
+
+        return $this->hasRole('super-admin') || $this->hasRole('admin');
+    }
+
+    /**
+     * Get the user's initials for avatar display.
+     */
+    public function getFilamentAvatarUrl(): ?string
+    {
+        return null; // Utilise les initiales par défaut
+    }
+
+    /**
+     * Get the user's name for Filament display.
+     */
+    public function getFilamentName(): string
+    {
+        return $this->name;
     }
 }
