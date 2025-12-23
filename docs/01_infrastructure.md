@@ -695,6 +695,28 @@ echo ""
 # Fichier marqueur pour éviter la réinitialisation
 INIT_MARKER="/var/www/html/storage/.initialized"
 
+# ===========================================
+# VÉRIFICATION DES DÉPENDANCES
+# ===========================================
+
+# Installer composer si vendor n'existe pas (cas du volume mount)
+# Important: quand un volume est monté, il écrase le contenu du build Docker
+if [ ! -d "/var/www/html/vendor" ]; then
+    echo "📦 Installation des dépendances Composer..."
+    if [ "$APP_ENV" = "production" ]; then
+        composer install --no-dev --optimize-autoloader --no-interaction
+    else
+        composer install --optimize-autoloader --no-interaction
+    fi
+    echo "✅ Dépendances installées"
+fi
+
+# Créer les dossiers Laravel et fixer les permissions
+# Note: chown est nécessaire car le volume mount peut avoir des permissions différentes
+mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
 
@@ -707,12 +729,27 @@ wait_for_db() {
     local max_attempts=30
     local attempt=0
 
-    until php artisan db:monitor --database=pgsql 2>/dev/null; do
+    # Utiliser une connexion PHP/PDO directe (plus fiable que artisan)
+    until php -r "
+        \$host = getenv('DB_HOST') ?: 'db';
+        \$port = getenv('DB_PORT') ?: '5432';
+        \$dbname = getenv('DB_DATABASE') ?: 'ai_manager';
+        \$user = getenv('DB_USERNAME') ?: 'postgres';
+        \$pass = getenv('DB_PASSWORD') ?: 'secret';
+        try {
+            new PDO(\"pgsql:host=\$host;port=\$port;dbname=\$dbname\", \$user, \$pass);
+            exit(0);
+        } catch (Exception \$e) {
+            exit(1);
+        }
+    " 2>/dev/null; do
         attempt=$((attempt + 1))
         if [ $attempt -ge $max_attempts ]; then
             echo "❌ PostgreSQL non disponible après ${max_attempts} tentatives"
+            echo "   Host: ${DB_HOST:-db}, Port: ${DB_PORT:-5432}, DB: ${DB_DATABASE:-ai_manager}"
             exit 1
         fi
+        echo "   Tentative $attempt/$max_attempts..."
         sleep 2
     done
     echo "✅ PostgreSQL connecté"
@@ -807,11 +844,12 @@ initialize_app() {
     echo "   🧠 Initialisation des collections Qdrant..."
     php artisan qdrant:init --with-test-data
 
-    # Optimisations
+    # Optimisations (ignorer les erreurs de permissions non critiques)
+    # Le || true évite que set -e arrête le script sur ces erreurs
     echo "   ⚡ Optimisation des caches..."
-    php artisan config:clear
-    php artisan cache:clear
-    php artisan view:clear
+    php artisan config:clear || true
+    php artisan cache:clear || true
+    php artisan view:clear || true
 
     # Créer le fichier marqueur
     touch "$INIT_MARKER"

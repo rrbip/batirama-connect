@@ -5,6 +5,36 @@
 
 ---
 
+## Architecture de l'Application
+
+AI-Manager CMS est un **backend API** pour les agents IA du secteur BTP. Il n'y a pas d'interface d'administration web (pas de panneau Filament).
+
+### Points d'accès
+
+| Endpoint | Description |
+|----------|-------------|
+| `/` | Page de statut JSON (santé de l'API) |
+| `/api/health` | Health check pour les load balancers |
+| `/api/v1/partners/*` | API partenaires (authentifiée) |
+| `/api/c/{token}/*` | Chat public (via token) |
+
+### Exemple de réponse sur `/`
+
+```json
+{
+  "name": "AI-Manager CMS",
+  "version": "1.0.0",
+  "status": "running",
+  "api": {
+    "health": "/api/health",
+    "documentation": "/api/docs"
+  },
+  "timestamp": "2025-12-23T14:00:00+00:00"
+}
+```
+
+---
+
 ## Prérequis
 
 ### Matériel Minimum
@@ -395,6 +425,63 @@ grep WEB_PORT .env
 # Doit afficher : WEB_PORT=8080
 ```
 
+### Erreur : "No application encryption key has been specified"
+
+**Symptôme** : Erreur 500 avec le message "No application encryption key"
+
+**Cause** : La variable `APP_KEY` n'est pas définie ou mal formatée dans le fichier `.env`
+
+**Solution** :
+
+```bash
+# Vérifier si APP_KEY existe
+grep APP_KEY .env
+
+# Supprimer les anciennes entrées APP_KEY (si plusieurs)
+sed -i '/^APP_KEY/d' .env
+
+# Générer et ajouter une nouvelle clé
+NEW_KEY=$(docker compose exec -T app php artisan key:generate --show 2>/dev/null)
+echo "APP_KEY=$NEW_KEY" >> .env
+
+# Redémarrer les conteneurs
+docker compose down && docker compose up -d
+```
+
+### Erreur : "Permission denied" sur storage/logs
+
+**Symptôme** : Erreur 500 avec "Failed to open stream: Permission denied"
+
+**Cause** : Les permissions du dossier `storage/` ne correspondent pas à l'utilisateur www-data du conteneur
+
+**Solution** :
+
+```bash
+# Corriger les permissions manuellement
+docker compose exec app chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+docker compose exec app chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+```
+
+**Note** : L'entrypoint corrige automatiquement les permissions au démarrage, mais si vous montez un volume depuis l'hôte, les permissions peuvent être écrasées.
+
+### Erreur : "Class not found" ou vendor manquant
+
+**Symptôme** : Erreur PHP "Class 'XXX' not found" au démarrage
+
+**Cause** : Le volume monté écrase le dossier `vendor/` créé lors du build Docker
+
+**Solution** : L'entrypoint détecte automatiquement ce cas et lance `composer install`. Si le problème persiste :
+
+```bash
+# Installer manuellement les dépendances
+docker compose exec app composer install
+
+# Ou reconstruire complètement
+docker compose down
+docker compose build --no-cache app
+docker compose up -d
+```
+
 ### Les conteneurs redémarrent en boucle
 
 **Vérifier les logs** :
@@ -409,6 +496,7 @@ docker compose logs qdrant
 - Base de données non initialisée
 - Permissions incorrectes sur storage/
 - Variables d'environnement manquantes
+- APP_KEY manquante
 
 **Solution** :
 
@@ -502,10 +590,11 @@ make update  # ou make update-prod pour la production
 - [ ] Port 8080 accessible (localement si derrière CWP)
 - [ ] Clone du repository
 - [ ] Fichier `.env` créé depuis `.env.example`
-- [ ] Variables configurées (mots de passe)
+- [ ] Variables configurées (mots de passe, APP_KEY)
 - [ ] `./install.sh` exécuté avec succès
 - [ ] Tous les conteneurs démarrés
-- [ ] Accès à l'application via `http://localhost:8080`
+- [ ] Accès à l'API via `curl http://localhost:8080` (retourne JSON)
+- [ ] Health check OK via `curl http://localhost:8080/api/health`
 
 ### Configuration Production avec CWP
 
