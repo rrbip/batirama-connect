@@ -10,11 +10,7 @@
             <x-filament::section>
                 <x-slot name="heading">
                     <div class="flex items-center gap-2">
-                        @if($agent->icon)
-                            <x-dynamic-component :component="$agent->icon" class="w-5 h-5" />
-                        @else
-                            <x-heroicon-o-cpu-chip class="w-5 h-5" />
-                        @endif
+                        <x-heroicon-o-cpu-chip class="w-5 h-5" />
                         {{ $agent->name }}
                     </div>
                 </x-slot>
