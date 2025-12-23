@@ -161,11 +161,11 @@ initialize_app() {
     echo "   🧠 Initialisation des collections Qdrant..."
     php artisan qdrant:init --with-test-data
 
-    # Optimisations
+    # Optimisations (ignorer les erreurs de permissions non critiques)
     echo "   ⚡ Optimisation des caches..."
-    php artisan config:clear
-    php artisan cache:clear
-    php artisan view:clear
+    php artisan config:clear || true
+    php artisan cache:clear || true
+    php artisan view:clear || true
 
     # Créer le fichier marqueur
     touch "$INIT_MARKER"
