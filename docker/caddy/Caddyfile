@@ -4,15 +4,13 @@
 
 # Configuration globale
 {
-    # Email pour Let's Encrypt (requis en production)
+    # Email pour Let's Encrypt (requis pour les vrais domaines)
     # Configurez ACME_EMAIL dans .env avec votre email
-    # Si non défini, Caddy essaiera sans email (peut échouer)
     email {$ACME_EMAIL}
 
-    # Mode développement : certificats auto-signés
-    # IMPORTANT: Supprimez ou commentez 'local_certs' en production
-    # pour activer Let's Encrypt automatique
-    local_certs
+    # Caddy gère automatiquement les certificats :
+    # - localhost / 127.0.0.1 → certificats auto-signés
+    # - domaine réel (ex: ai.bipinfopro.com) → Let's Encrypt automatique
 
     # Logs
     log {
