@@ -306,7 +306,7 @@
                                                     <span x-show="!showFull">Voir stacktrace...</span>
                                                     <span x-show="showFull" x-cloak>Masquer stacktrace</span>
                                                 </button>
-                                                <pre x-show="showFull" x-cloak class="mt-2 p-2 bg-gray-800 text-green-400 text-xs rounded overflow-x-auto max-h-48 overflow-y-auto" style="color: #4ade80 !important;">{{ $job['full_exception'] }}</pre>
+                                                <pre x-show="showFull" x-cloak class="mt-2 p-2 bg-gray-800 text-green-400 text-xs rounded overflow-x-auto max-h-48 overflow-y-auto">{{ $job['full_exception'] }}</pre>
                                             @endif
                                         </div>
                                     </td>
