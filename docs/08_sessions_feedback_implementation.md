@@ -11,6 +11,76 @@ Ce document détaille l'implémentation des fonctionnalités de gestion des sess
 
 ---
 
+## 0. Architecture du système d'apprentissage
+
+### Comment les réponses apprises sont utilisées
+
+Les réponses corrigées et validées (`learned_responses`) sont utilisées comme **contexte enrichi** pour le LLM, pas comme remplacement direct.
+
+**Flow de génération de réponse :**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    QUESTION UTILISATEUR                          │
+│            "Comment envoyer ma facture par email ?"              │
+└───────────────────────────┬─────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               RECHERCHE VECTORIELLE QDRANT                       │
+│                                                                 │
+│  1. Collection: learned_responses  →  Cas similaires traités    │
+│  2. Collection: agent_*_docs       →  Documents indexés         │
+└───────────────────────────┬─────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               CONSTRUCTION DU PROMPT                             │
+│                                                                 │
+│  [SYSTEM PROMPT]                                                │
+│  Tu es Support Client pour ZOOMBAT...                           │
+│                                                                 │
+│  [CAS SIMILAIRES TRAITÉS]  ← Learned Responses                  │
+│  ### Cas 1 (similarité: 87%)                                    │
+│  Q: Comment envoyer une facture ?                               │
+│  Réponse validée: Pour envoyer une facture...                   │
+│                                                                 │
+│  [CONTEXTE DOCUMENTAIRE]  ← Documents RAG                       │
+│  ### Source 1 (pertinence: 85%)                                 │
+│  Guide: Pour envoyer un document...                             │
+│                                                                 │
+│  [HISTORIQUE SESSION]                                           │
+│  Utilisateur: Bonjour                                           │
+│  Assistant: Bonjour, comment puis-je vous aider ?               │
+│                                                                 │
+└───────────────────────────┬─────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         LLM (Ollama)                             │
+│                                                                 │
+│  Le LLM génère une réponse adaptée au contexte actuel           │
+│  en s'inspirant des cas similaires et documents                 │
+└───────────────────────────┬─────────────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    RÉPONSE CONTEXTUALISÉE                        │
+│                                                                 │
+│  "Bonjour M. Dupont, pour envoyer votre facture par email..."   │
+│  (Adaptée au contexte actuel, pas copiée verbatim)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Configuration (config/ai.php) :**
+
+```php
+'rag' => [
+    'max_results' => 5,                    // Documents RAG max
+    'min_score' => 0.6,                    // Score min documents
+    'max_learned_responses' => 3,          // Cas similaires max
+    'learned_min_score' => 0.75,           // Score min cas similaires
+],
+```
+
+---
+
 ## 1. AiSessionResource - Liste des Sessions
 
 ### 1.1 Vue Liste
@@ -207,6 +277,76 @@ LearningService::reject($message, auth()->id(), $reason)
 - Change `validation_status` → `rejected`
 - Pas d'indexation
 - Notification de succès
+
+### 2.4 Contexte sauvegardé pour validation
+
+Chaque réponse IA sauvegarde le **contexte complet** utilisé pour générer la réponse. Cela permet au validateur de voir exactement quelles sources l'IA avait à disposition.
+
+**Structure du champ `rag_context` (JSON) :**
+
+```json
+{
+  "system_prompt_sent": "Tu es Support Client pour ZOOMBAT...\n\n## CAS SIMILAIRES...\n\n## CONTEXTE DOCUMENTAIRE...",
+
+  "learned_sources": [
+    {
+      "index": 1,
+      "score": 87.5,
+      "question": "Comment envoyer une facture par email ?",
+      "answer": "Pour envoyer une facture...",
+      "message_id": 42
+    }
+  ],
+
+  "document_sources": [
+    {
+      "index": 1,
+      "id": "doc_123",
+      "score": 85.2,
+      "content": "Guide: Pour envoyer un document depuis ZOOMBAT...",
+      "metadata": {"category": "documentation", "source": "guide_utilisateur.pdf"}
+    }
+  ],
+
+  "stats": {
+    "learned_count": 1,
+    "document_count": 2,
+    "agent_slug": "support-client",
+    "agent_model": "mistral:7b",
+    "temperature": 0.7
+  }
+}
+```
+
+**Affichage dans la vue validation :**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🔍 2 source(s) utilisée(s) par l'IA (1 apprises, 1 docs)  [▼] │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  🎓 Cas similaires traités (1)                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Cas #1                                    87.5% similaire│   │
+│  │ Q: Comment envoyer une facture par email ?              │   │
+│  │ [Voir la réponse validée ▼]                             │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  📄 Documents indexés (1)                                       │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Document #1                               85.2% pertinent│   │
+│  │ [Voir le contenu ▼]                                     │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  💻 Voir le prompt système complet envoyé [▼]                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Cette transparence permet au validateur de :
+- Comprendre pourquoi l'IA a répondu d'une certaine manière
+- Identifier si les sources étaient pertinentes
+- Décider si une correction est nécessaire
 
 ---
 
