@@ -154,16 +154,41 @@ class RagService
     public function retrieveContext(Agent $agent, string $query): array
     {
         try {
+            // Vérifier que l'agent a une collection configurée
+            if (empty($agent->qdrant_collection)) {
+                Log::info('RAG skipped: No Qdrant collection configured', [
+                    'agent' => $agent->slug,
+                ]);
+                return [];
+            }
+
             // Générer l'embedding de la requête
             $queryVector = $this->embeddingService->embed($query);
+
+            $minScore = config('ai.rag.min_score', 0.5);
+            $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
+
+            Log::info('RAG search starting', [
+                'agent' => $agent->slug,
+                'collection' => $agent->qdrant_collection,
+                'query' => $query,
+                'min_score' => $minScore,
+                'limit' => $limit,
+            ]);
 
             // Rechercher dans la collection de l'agent
             $results = $this->qdrantService->search(
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
-                limit: $agent->max_rag_results ?? config('ai.rag.max_results', 5),
-                scoreThreshold: config('ai.rag.min_score', 0.6)
+                limit: $limit,
+                scoreThreshold: $minScore
             );
+
+            Log::info('RAG search completed', [
+                'agent' => $agent->slug,
+                'results_count' => count($results),
+                'results_scores' => collect($results)->pluck('score')->toArray(),
+            ]);
 
             return $results;
 

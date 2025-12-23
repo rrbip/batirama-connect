@@ -170,6 +170,51 @@ class DocumentResource extends Resource
                                     ->columns(3),
                             ])
                             ->visible(fn ($record) => $record !== null),
+
+                        Forms\Components\Tabs\Tab::make('Chunks')
+                            ->icon('heroicon-o-squares-2x2')
+                            ->schema([
+                                Forms\Components\Section::make('Chunks indexés')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('chunks_list')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                if (!$record || $record->chunks->isEmpty()) {
+                                                    return 'Aucun chunk disponible';
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+                                                foreach ($record->chunks as $index => $chunk) {
+                                                    $status = $chunk->is_indexed ? '✓ Indexé' : '✗ Non indexé';
+                                                    $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                    $tokens = $chunk->token_count ?? 0;
+
+                                                    $html .= sprintf(
+                                                        '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                            <div class="flex justify-between items-center mb-2">
+                                                                <span class="font-semibold">Chunk #%d</span>
+                                                                <div class="flex items-center gap-3">
+                                                                    <span class="text-xs text-gray-500">%d tokens</span>
+                                                                    <span class="text-xs %s">%s</span>
+                                                                </div>
+                                                            </div>
+                                                            <div class="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">%s</div>
+                                                        </div>',
+                                                        $index,
+                                                        $tokens,
+                                                        $statusColor,
+                                                        $status,
+                                                        e(\Illuminate\Support\Str::limit($chunk->content, 500))
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ]),
+                            ])
+                            ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
                     ])
                     ->columnSpanFull(),
             ]);
