@@ -58,10 +58,8 @@ class DispatcherService
         // Sauvegarder la réponse
         $this->ragService->saveMessage($session, 'assistant', $response->content, $response);
 
-        // Mettre à jour la session
-        $session->update([
-            'last_activity_at' => now(),
-        ]);
+        // Mettre à jour le compteur de messages
+        $session->increment('message_count');
 
         return $response;
     }
@@ -90,11 +88,12 @@ class DispatcherService
             'uuid' => Str::uuid()->toString(),
             'agent_id' => $agent->id,
             'user_id' => $user?->id,
-            'metadata' => [
+            'tenant_id' => $agent->tenant_id,
+            'external_context' => [
                 'agent_slug' => $agent->slug,
-                'started_at' => now()->toIso8601String(),
+                'source' => 'admin_test',
             ],
-            'started_at' => now(),
+            'status' => 'active',
         ]);
     }
 
