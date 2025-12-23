@@ -18,7 +18,23 @@ services:
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
     environment:
       - APP_ENV=${APP_ENV:-local}
+      - APP_KEY=${APP_KEY:-}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost}
+      - DB_CONNECTION=${DB_CONNECTION:-pgsql}
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_DATABASE=${DB_DATABASE:-ai_manager}
+      - DB_USERNAME=${DB_USERNAME:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_ENABLED=${REDIS_ENABLED:-false}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - QDRANT_HOST=${QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${QDRANT_PORT:-6333}
+      - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
+      - OLLAMA_PORT=${OLLAMA_PORT:-11434}
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-*}
     depends_on:
       db:
         condition: service_healthy
