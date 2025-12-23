@@ -13,6 +13,8 @@ use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Str;
 
 class AiStatusPage extends Page
 {
@@ -31,6 +33,8 @@ class AiStatusPage extends Page
     public array $services = [];
     public array $queueStats = [];
     public array $documentStats = [];
+    public array $failedDocuments = [];
+    public array $failedJobs = [];
 
     public function mount(): void
     {
@@ -42,6 +46,8 @@ class AiStatusPage extends Page
         $this->services = $this->checkServices();
         $this->queueStats = $this->getQueueStats();
         $this->documentStats = $this->getDocumentStats();
+        $this->failedDocuments = $this->getFailedDocuments();
+        $this->failedJobs = $this->getFailedJobs();
     }
 
     protected function checkServices(): array
@@ -57,12 +63,16 @@ class AiStatusPage extends Page
                 'status' => 'online',
                 'details' => count($models) . ' modèle(s) disponible(s)',
                 'models' => $models,
+                'restartable' => true,
+                'restart_command' => 'docker restart ollama',
             ];
         } catch (\Exception $e) {
             $services['ollama'] = [
                 'name' => 'Ollama (LLM)',
                 'status' => 'offline',
                 'details' => $e->getMessage(),
+                'restartable' => true,
+                'restart_command' => 'docker restart ollama',
             ];
         }
 
@@ -78,19 +88,22 @@ class AiStatusPage extends Page
                     ? count($collections) . ' collection(s): ' . implode(', ', $collections)
                     : 'Service non disponible',
                 'collections' => $collections,
+                'restartable' => true,
+                'restart_command' => 'docker restart qdrant',
             ];
         } catch (\Exception $e) {
             $services['qdrant'] = [
                 'name' => 'Qdrant (Vector DB)',
                 'status' => 'offline',
                 'details' => $e->getMessage(),
+                'restartable' => true,
+                'restart_command' => 'docker restart qdrant',
             ];
         }
 
-        // Embedding Service
+        // Embedding Service (dépend d'Ollama)
         try {
             $embedding = app(EmbeddingService::class);
-            // Test rapide d'embedding
             $testVector = $embedding->embed('test');
             $services['embedding'] = [
                 'name' => 'Embedding Service',
@@ -98,12 +111,16 @@ class AiStatusPage extends Page
                 'details' => !empty($testVector)
                     ? 'Dimension: ' . count($testVector)
                     : 'Erreur de génération',
+                'restartable' => false,
+                'depends_on' => 'ollama',
             ];
         } catch (\Exception $e) {
             $services['embedding'] = [
                 'name' => 'Embedding Service',
                 'status' => 'offline',
                 'details' => $e->getMessage(),
+                'restartable' => false,
+                'depends_on' => 'ollama',
             ];
         }
 
@@ -114,9 +131,9 @@ class AiStatusPage extends Page
                 'name' => 'Queue Worker',
                 'status' => 'online',
                 'details' => 'Mode synchrone (traitement immédiat)',
+                'restartable' => false,
             ];
         } else {
-            // Vérifier si des jobs sont en attente depuis longtemps
             $oldestJob = null;
             try {
                 $oldestJob = DB::table('jobs')->orderBy('created_at')->first();
@@ -126,19 +143,23 @@ class AiStatusPage extends Page
 
             if ($oldestJob) {
                 $age = now()->timestamp - $oldestJob->created_at;
-                $isStuck = $age > 300; // Plus de 5 minutes
+                $isStuck = $age > 300;
                 $services['queue'] = [
                     'name' => 'Queue Worker',
                     'status' => $isStuck ? 'warning' : 'online',
                     'details' => $isStuck
                         ? "Jobs en attente depuis " . gmdate('H:i:s', $age) . " - Worker probablement arrêté"
                         : "Worker actif (driver: {$queueConnection})",
+                    'restartable' => true,
+                    'restart_command' => 'supervisorctl restart laravel-worker:*',
                 ];
             } else {
                 $services['queue'] = [
                     'name' => 'Queue Worker',
                     'status' => 'unknown',
                     'details' => "Aucun job en file (driver: {$queueConnection})",
+                    'restartable' => true,
+                    'restart_command' => 'supervisorctl restart laravel-worker:*',
                 ];
             }
         }
@@ -183,6 +204,197 @@ class AiStatusPage extends Page
         }
     }
 
+    protected function getFailedDocuments(): array
+    {
+        try {
+            return Document::where('extraction_status', 'failed')
+                ->orderByDesc('updated_at')
+                ->limit(10)
+                ->get()
+                ->map(fn ($doc) => [
+                    'id' => $doc->id,
+                    'name' => $doc->title ?? $doc->original_name,
+                    'error' => $doc->extraction_error ?? 'Erreur inconnue',
+                    'updated_at' => $doc->updated_at->format('d/m/Y H:i'),
+                ])
+                ->toArray();
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    protected function getFailedJobs(): array
+    {
+        try {
+            return DB::table('failed_jobs')
+                ->orderByDesc('failed_at')
+                ->limit(10)
+                ->get()
+                ->map(function ($job) {
+                    $payload = json_decode($job->payload, true);
+                    $displayName = $payload['displayName'] ?? 'Job inconnu';
+
+                    // Extraire le message d'erreur principal
+                    $exception = $job->exception;
+                    $errorMessage = Str::before($exception, "\n");
+                    $errorMessage = Str::limit($errorMessage, 200);
+
+                    return [
+                        'id' => $job->id,
+                        'uuid' => $job->uuid,
+                        'name' => class_basename($displayName),
+                        'queue' => $job->queue,
+                        'error' => $errorMessage,
+                        'full_exception' => $exception,
+                        'failed_at' => $job->failed_at,
+                    ];
+                })
+                ->toArray();
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Relance un service Docker
+     */
+    public function restartService(string $serviceKey): void
+    {
+        $service = $this->services[$serviceKey] ?? null;
+
+        if (!$service || !($service['restartable'] ?? false)) {
+            Notification::make()
+                ->title('Service non redémarrable')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $command = $service['restart_command'] ?? null;
+        if (!$command) {
+            Notification::make()
+                ->title('Commande de redémarrage non configurée')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $result = Process::timeout(30)->run($command);
+
+            if ($result->successful()) {
+                // Attendre un peu que le service redémarre
+                sleep(2);
+                $this->refreshStatus();
+
+                Notification::make()
+                    ->title('Service redémarré')
+                    ->body("Le service {$service['name']} a été redémarré.")
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Échec du redémarrage')
+                    ->body($result->errorOutput() ?: 'Erreur inconnue')
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Relance un document échoué
+     */
+    public function retryDocument(int $documentId): void
+    {
+        $document = Document::find($documentId);
+        if (!$document) {
+            Notification::make()
+                ->title('Document non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $document->update([
+            'extraction_status' => 'pending',
+            'extraction_error' => null,
+        ]);
+
+        try {
+            ProcessDocumentJob::dispatchSync($document);
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Document retraité')
+                ->body("Le document \"{$document->original_name}\" a été retraité.")
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Échec du retraitement')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+
+            $this->refreshStatus();
+        }
+    }
+
+    /**
+     * Relance un job échoué
+     */
+    public function retryFailedJob(string $uuid): void
+    {
+        try {
+            \Artisan::call('queue:retry', ['id' => [$uuid]]);
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Job relancé')
+                ->body("Le job a été remis en file d'attente.")
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Échec de la relance')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Supprime un job échoué
+     */
+    public function deleteFailedJob(string $uuid): void
+    {
+        try {
+            DB::table('failed_jobs')->where('uuid', $uuid)->delete();
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Job supprimé')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -206,7 +418,6 @@ class AiStatusPage extends Page
 
                     foreach ($documents as $document) {
                         try {
-                            // Exécution synchrone du job
                             ProcessDocumentJob::dispatchSync($document);
                             $count++;
                         } catch (\Exception $e) {
@@ -235,8 +446,8 @@ class AiStatusPage extends Page
                     }
                 }),
 
-            Action::make('retry_failed')
-                ->label('Relancer les échecs')
+            Action::make('retry_all_failed')
+                ->label('Relancer tous les échecs')
                 ->icon('heroicon-o-arrow-path')
                 ->color('warning')
                 ->visible(fn () => ($this->documentStats['failed'] ?? 0) > 0)
@@ -244,21 +455,27 @@ class AiStatusPage extends Page
                 ->action(function () {
                     $documents = Document::where('extraction_status', 'failed')->get();
                     $count = 0;
+                    $errors = 0;
 
                     foreach ($documents as $document) {
                         $document->update([
                             'extraction_status' => 'pending',
                             'extraction_error' => null,
                         ]);
-                        ProcessDocumentJob::dispatchSync($document);
-                        $count++;
+
+                        try {
+                            ProcessDocumentJob::dispatchSync($document);
+                            $count++;
+                        } catch (\Exception $e) {
+                            $errors++;
+                        }
                     }
 
                     $this->refreshStatus();
 
                     Notification::make()
                         ->title('Relance terminée')
-                        ->body("{$count} document(s) relancé(s)")
+                        ->body("{$count} succès, {$errors} erreur(s)")
                         ->success()
                         ->send();
                 }),
@@ -269,6 +486,8 @@ class AiStatusPage extends Page
                 ->color('danger')
                 ->visible(fn () => ($this->queueStats['failed'] ?? 0) > 0)
                 ->requiresConfirmation()
+                ->modalHeading('Supprimer tous les jobs échoués ?')
+                ->modalDescription('Cette action est irréversible.')
                 ->action(function () {
                     DB::table('failed_jobs')->truncate();
                     $this->refreshStatus();

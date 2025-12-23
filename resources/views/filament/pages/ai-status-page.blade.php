@@ -39,15 +39,33 @@
                                 {{ ucfirst($service['status']) }}
                             </span>
                         </div>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
                             {{ $service['details'] }}
                         </p>
+
+                        {{-- Bouton de redémarrage si service offline et restartable --}}
+                        @if(($service['status'] === 'offline' || $service['status'] === 'warning') && ($service['restartable'] ?? false))
+                            <button
+                                wire:click="restartService('{{ $key }}')"
+                                wire:loading.attr="disabled"
+                                wire:target="restartService('{{ $key }}')"
+                                class="w-full inline-flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 transition"
+                            >
+                                <x-heroicon-o-arrow-path class="w-4 h-4" wire:loading.class="animate-spin" wire:target="restartService('{{ $key }}')" />
+                                <span wire:loading.remove wire:target="restartService('{{ $key }}')">Redémarrer</span>
+                                <span wire:loading wire:target="restartService('{{ $key }}')">Redémarrage...</span>
+                            </button>
+                        @elseif($service['status'] === 'offline' && isset($service['depends_on']))
+                            <p class="text-xs text-gray-500 dark:text-gray-500 italic">
+                                Dépend de: {{ $services[$service['depends_on']]['name'] ?? $service['depends_on'] }}
+                            </p>
+                        @endif
                     </div>
                 @endforeach
             </div>
         </x-filament::section>
 
-        {{-- Queue Stats --}}
+        {{-- Queue & Documents Stats --}}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <x-filament::section>
                 <x-slot name="heading">
@@ -78,7 +96,7 @@
                     </div>
                 </div>
 
-                @if($queueStats['connection'] !== 'sync')
+                @if(($queueStats['connection'] ?? 'sync') !== 'sync')
                     <div class="mt-4 p-3 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700 rounded-lg">
                         <div class="flex items-start gap-2">
                             <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
@@ -174,6 +192,157 @@
                 @endif
             </x-filament::section>
         </div>
+
+        {{-- Failed Documents Section --}}
+        @if(count($failedDocuments) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2 text-danger-600 dark:text-danger-400">
+                        <x-heroicon-o-document-text class="w-5 h-5" />
+                        Documents en échec ({{ count($failedDocuments) }})
+                    </div>
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Document</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Erreur</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Date</th>
+                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            @foreach($failedDocuments as $doc)
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                                        {{ Str::limit($doc['name'], 40) }}
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="max-w-md">
+                                            <p class="text-danger-600 dark:text-danger-400 text-xs font-mono break-words">
+                                                {{ Str::limit($doc['error'], 150) }}
+                                            </p>
+                                            @if(strlen($doc['error']) > 150)
+                                                <button
+                                                    x-data="{ open: false }"
+                                                    @click="open = !open"
+                                                    class="text-xs text-primary-600 hover:underline mt-1"
+                                                >
+                                                    <span x-show="!open">Voir plus...</span>
+                                                    <span x-show="open" x-cloak>Réduire</span>
+                                                </button>
+                                                <p x-show="open" x-cloak class="text-danger-600 dark:text-danger-400 text-xs font-mono mt-1 break-words">
+                                                    {{ $doc['error'] }}
+                                                </p>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                                        {{ $doc['updated_at'] }}
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <button
+                                            wire:click="retryDocument({{ $doc['id'] }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="retryDocument({{ $doc['id'] }})"
+                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                        >
+                                            <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryDocument({{ $doc['id'] }})" />
+                                            Relancer
+                                        </button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </x-filament::section>
+        @endif
+
+        {{-- Failed Jobs Section --}}
+        @if(count($failedJobs) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2 text-danger-600 dark:text-danger-400">
+                        <x-heroicon-o-queue-list class="w-5 h-5" />
+                        Jobs en échec ({{ count($failedJobs) }})
+                    </div>
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Job</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Queue</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Erreur</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Date</th>
+                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            @foreach($failedJobs as $job)
+                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                    <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                                        {{ $job['name'] }}
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400">
+                                        <span class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 rounded">
+                                            {{ $job['queue'] }}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div x-data="{ showFull: false }" class="max-w-md">
+                                            <p class="text-danger-600 dark:text-danger-400 text-xs font-mono break-words">
+                                                {{ $job['error'] }}
+                                            </p>
+                                            @if($job['full_exception'])
+                                                <button
+                                                    @click="showFull = !showFull"
+                                                    class="text-xs text-primary-600 hover:underline mt-1"
+                                                >
+                                                    <span x-show="!showFull">Voir stacktrace...</span>
+                                                    <span x-show="showFull" x-cloak>Masquer stacktrace</span>
+                                                </button>
+                                                <pre x-show="showFull" x-cloak class="mt-2 p-2 bg-gray-900 text-gray-100 text-xs rounded overflow-x-auto max-h-48 overflow-y-auto">{{ $job['full_exception'] }}</pre>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                                        {{ \Carbon\Carbon::parse($job['failed_at'])->format('d/m/Y H:i') }}
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <button
+                                                wire:click="retryFailedJob('{{ $job['uuid'] }}')"
+                                                wire:loading.attr="disabled"
+                                                wire:target="retryFailedJob('{{ $job['uuid'] }}')"
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                                title="Relancer"
+                                            >
+                                                <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryFailedJob('{{ $job['uuid'] }}')" />
+                                            </button>
+                                            <button
+                                                wire:click="deleteFailedJob('{{ $job['uuid'] }}')"
+                                                wire:loading.attr="disabled"
+                                                wire:target="deleteFailedJob('{{ $job['uuid'] }}')"
+                                                wire:confirm="Supprimer ce job échoué ?"
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                                title="Supprimer"
+                                            >
+                                                <x-heroicon-o-trash class="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </x-filament::section>
+        @endif
 
         {{-- Collections Qdrant Details --}}
         @if(isset($services['qdrant']) && $services['qdrant']['status'] === 'online' && !empty($services['qdrant']['collections']))

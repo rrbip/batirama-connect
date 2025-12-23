@@ -225,7 +225,9 @@ batirama-connect/
 | [03_ai_core_logic.md](./03_ai_core_logic.md) | Logique du Dispatcher, RAG et apprentissage |
 | [04_partners_api.md](./04_partners_api.md) | API Partenaires (ZOOMBAT, EBP, etc.) et intégrations |
 | [05_deployment_guide.md](./05_deployment_guide.md) | Guide de déploiement, configuration GPU, troubleshooting |
-| [06_admin_panel.md](./06_admin_panel.md) | **[NEW]** Cahier des charges du panneau d'administration |
+| [06_admin_panel.md](./06_admin_panel.md) | Cahier des charges du panneau d'administration |
+| [08_sessions_feedback_implementation.md](./08_sessions_feedback_implementation.md) | Système de feedback et apprentissage continu |
+| [09_ai_status_page.md](./09_ai_status_page.md) | **[NEW]** Page de monitoring des services IA |
 
 ---
 
