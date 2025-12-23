@@ -88,9 +88,18 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        // Tous les utilisateurs authentifiés peuvent accéder au panel
-        // La gestion fine des permissions se fait via les policies Filament
-        return true;
+        // Vérifier si l'utilisateur a un rôle admin
+        if ($this->hasRole('super-admin') || $this->hasRole('admin')) {
+            return true;
+        }
+
+        // En développement ou si aucun rôle admin n'existe, autoriser l'accès
+        if (app()->environment('local', 'development')) {
+            return true;
+        }
+
+        // Fallback: autoriser si aucun rôle admin n'existe encore (premier setup)
+        return !\App\Models\Role::whereIn('slug', ['super-admin', 'admin'])->exists();
     }
 
     /**
