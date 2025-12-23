@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\DocumentResource\Pages;
+use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -269,13 +271,24 @@ class DocumentResource extends Resource
                     ->label('Retraiter')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
-                    ->visible(fn ($record) => $record->extraction_status === 'failed')
+                    ->visible(fn ($record) => in_array($record->extraction_status, ['failed', 'pending']))
+                    ->requiresConfirmation()
+                    ->modalHeading('Retraiter le document')
+                    ->modalDescription('Le document sera ré-extrait, re-découpé et ré-indexé. Continuer ?')
                     ->action(function (Document $record) {
                         $record->update([
                             'extraction_status' => 'pending',
                             'extraction_error' => null,
+                            'is_indexed' => false,
                         ]);
-                        // TODO: Dispatcher le job de traitement
+
+                        ProcessDocumentJob::dispatch($record);
+
+                        Notification::make()
+                            ->title('Traitement relancé')
+                            ->body("Le document \"{$record->original_name}\" est en cours de retraitement.")
+                            ->success()
+                            ->send();
                     }),
 
                 Tables\Actions\Action::make('index')
@@ -284,7 +297,14 @@ class DocumentResource extends Resource
                     ->color('success')
                     ->visible(fn ($record) => $record->extraction_status === 'completed' && !$record->is_indexed)
                     ->action(function (Document $record) {
-                        // TODO: Dispatcher le job d'indexation
+                        // Relancer le job pour indexer uniquement
+                        ProcessDocumentJob::dispatch($record, reindex: true);
+
+                        Notification::make()
+                            ->title('Indexation en cours')
+                            ->body("Le document \"{$record->original_name}\" est en cours d'indexation.")
+                            ->success()
+                            ->send();
                     }),
 
                 Tables\Actions\EditAction::make(),
@@ -297,16 +317,45 @@ class DocumentResource extends Resource
                     Tables\Actions\BulkAction::make('reprocess')
                         ->label('Retraiter')
                         ->icon('heroicon-o-arrow-path')
-                        ->action(fn ($records) => $records->each->update([
-                            'extraction_status' => 'pending',
-                            'extraction_error' => null,
-                        ])),
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->action(function ($records) {
+                            $count = 0;
+                            foreach ($records as $record) {
+                                $record->update([
+                                    'extraction_status' => 'pending',
+                                    'extraction_error' => null,
+                                    'is_indexed' => false,
+                                ]);
+                                ProcessDocumentJob::dispatch($record);
+                                $count++;
+                            }
+
+                            Notification::make()
+                                ->title('Traitement en cours')
+                                ->body("{$count} document(s) en cours de retraitement.")
+                                ->success()
+                                ->send();
+                        }),
 
                     Tables\Actions\BulkAction::make('index')
                         ->label('Indexer')
                         ->icon('heroicon-o-magnifying-glass')
+                        ->color('success')
                         ->action(function ($records) {
-                            // TODO: Dispatcher les jobs d'indexation
+                            $count = 0;
+                            foreach ($records as $record) {
+                                if ($record->extraction_status === 'completed' && !$record->is_indexed) {
+                                    ProcessDocumentJob::dispatch($record, reindex: true);
+                                    $count++;
+                                }
+                            }
+
+                            Notification::make()
+                                ->title('Indexation en cours')
+                                ->body("{$count} document(s) en cours d'indexation.")
+                                ->success()
+                                ->send();
                         }),
                 ]),
             ])

@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources\DocumentResource\Pages;
 
 use App\Filament\Resources\DocumentResource;
+use App\Jobs\ProcessDocumentJob;
+use App\Models\Document;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -39,6 +42,24 @@ class CreateDocument extends CreateRecord
         }
 
         return $data;
+    }
+
+    /**
+     * Après la création, dispatcher le job de traitement
+     */
+    protected function afterCreate(): void
+    {
+        /** @var Document $document */
+        $document = $this->record;
+
+        // Dispatcher le job de traitement (extraction + chunking + indexation)
+        ProcessDocumentJob::dispatch($document);
+
+        Notification::make()
+            ->title('Traitement en cours')
+            ->body("Le document \"{$document->original_name}\" est en cours de traitement.")
+            ->info()
+            ->send();
     }
 
     /**

@@ -41,6 +41,23 @@ class QdrantService implements VectorStoreInterface
         }
     }
 
+    /**
+     * Vérifie et crée une collection si elle n'existe pas
+     */
+    public function ensureCollectionExists(string $name, array $config = []): bool
+    {
+        if ($this->collectionExists($name)) {
+            return true;
+        }
+
+        $success = $this->createCollection($name, $config);
+        if ($success) {
+            Log::info("Qdrant: Collection '$name' créée");
+        }
+
+        return $success;
+    }
+
     public function collectionExists(string $name): bool
     {
         try {
