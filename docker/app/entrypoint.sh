@@ -15,6 +15,25 @@ echo ""
 # Fichier marqueur pour éviter la réinitialisation
 INIT_MARKER="/var/www/html/storage/.initialized"
 
+# ===========================================
+# VÉRIFICATION DES DÉPENDANCES
+# ===========================================
+
+# Installer composer si vendor n'existe pas (cas du volume mount)
+if [ ! -d "/var/www/html/vendor" ]; then
+    echo "📦 Installation des dépendances Composer..."
+    if [ "$APP_ENV" = "production" ]; then
+        composer install --no-dev --optimize-autoloader --no-interaction
+    else
+        composer install --optimize-autoloader --no-interaction
+    fi
+    echo "✅ Dépendances installées"
+fi
+
+# Créer les dossiers Laravel si nécessaires
+mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
 
