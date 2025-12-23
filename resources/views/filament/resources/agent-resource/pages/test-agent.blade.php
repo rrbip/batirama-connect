@@ -42,13 +42,20 @@
                 if (!this.inputMessage || this.inputMessage.trim() === '') return;
                 if (this.isProcessing) return;
 
+                // Garder le message avant de vider
+                const messageToSend = this.inputMessage;
+
                 // Afficher immédiatement le message utilisateur
                 this.pendingMessage = {
-                    content: this.inputMessage,
+                    content: messageToSend,
                     timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
                 };
                 this.isProcessing = true;
                 this.elapsedTime = 0;
+
+                // Vider le champ
+                this.inputMessage = '';
+
                 this.scrollToBottom();
 
                 // Timer pour afficher le temps écoulé
@@ -56,11 +63,8 @@
                     this.elapsedTime++;
                 }, 1000);
 
-                // Vider le champ
-                this.inputMessage = '';
-
-                // Soumettre au serveur
-                $wire.sendMessage();
+                // Soumettre au serveur avec le message en paramètre
+                $wire.sendMessage(messageToSend);
             }
          }"
          x-on:message-received.window="resetState()"

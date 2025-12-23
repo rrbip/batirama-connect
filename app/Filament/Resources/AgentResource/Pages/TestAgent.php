@@ -67,14 +67,16 @@ class TestAgent extends Page implements HasForms
         ];
     }
 
-    public function sendMessage(): void
+    public function sendMessage(string $message = ''): void
     {
-        if (empty(trim($this->userMessage))) {
+        // Utiliser le paramètre ou la propriété
+        $message = trim($message) ?: trim($this->userMessage);
+
+        if (empty($message)) {
             return;
         }
 
         $this->isLoading = true;
-        $message = $this->userMessage;
         $this->userMessage = '';
 
         // Ajouter le message utilisateur à l'affichage
