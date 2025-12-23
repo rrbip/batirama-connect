@@ -57,13 +57,21 @@ class PromptBuilder
         Agent $agent,
         string $userMessage,
         array $ragResults = [],
-        ?AiSession $session = null
+        ?AiSession $session = null,
+        array $learnedResponses = []
     ): array {
         $messages = [];
 
-        // System message avec contexte RAG intégré
+        // System message avec contexte intégré
         $systemContent = $agent->system_prompt;
 
+        // Ajouter les réponses apprises similaires (priorité haute)
+        if (!empty($learnedResponses)) {
+            $learnedContent = $this->formatLearnedResponses($learnedResponses);
+            $systemContent .= "\n\n## CAS SIMILAIRES TRAITÉS\n\nVoici des échanges similaires précédemment validés. Inspire-toi de ces réponses pour formuler ta réponse :\n\n{$learnedContent}";
+        }
+
+        // Ajouter le contexte documentaire RAG
         if (!empty($ragResults)) {
             $contextContent = $this->formatRagContext($ragResults, $agent);
             $systemContent .= "\n\n## CONTEXTE DOCUMENTAIRE\n\n{$contextContent}";
@@ -87,6 +95,25 @@ class PromptBuilder
         ];
 
         return $messages;
+    }
+
+    /**
+     * Formate les réponses apprises pour le contexte
+     */
+    private function formatLearnedResponses(array $learnedResponses): string
+    {
+        $parts = [];
+
+        foreach ($learnedResponses as $index => $learned) {
+            $num = $index + 1;
+            $score = round(($learned['score'] ?? 0) * 100);
+            $question = $learned['question'] ?? '';
+            $answer = $learned['answer'] ?? '';
+
+            $parts[] = "### Cas {$num} (similarité: {$score}%)\n**Question:** {$question}\n**Réponse validée:** {$answer}";
+        }
+
+        return implode("\n\n", $parts);
     }
 
     private function buildSystemSection(Agent $agent): string

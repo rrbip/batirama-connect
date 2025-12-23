@@ -19,7 +19,8 @@ class RagService
         private QdrantService $qdrantService,
         private OllamaService $ollamaService,
         private HydrationService $hydrationService,
-        private PromptBuilder $promptBuilder
+        private PromptBuilder $promptBuilder,
+        private LearningService $learningService
     ) {}
 
     /**
@@ -30,10 +31,18 @@ class RagService
         string $userMessage,
         ?AiSession $session = null
     ): LLMResponse {
-        // 1. Recherche dans la base vectorielle
+        // 1. Recherche des réponses apprises similaires (priorité haute)
+        $learnedResponses = $this->learningService->findSimilarLearnedResponses(
+            question: $userMessage,
+            agentSlug: $agent->slug,
+            limit: config('ai.rag.max_learned_responses', 3),
+            minScore: config('ai.rag.learned_min_score', 0.75)
+        );
+
+        // 2. Recherche dans la base vectorielle documentaire
         $ragResults = $this->retrieveContext($agent, $userMessage);
 
-        // 2. Hydratation SQL si configurée
+        // 3. Hydratation SQL si configurée
         if ($agent->usesHydration() && !empty($ragResults)) {
             $ragResults = $this->hydrationService->hydrate(
                 $ragResults,
@@ -41,26 +50,27 @@ class RagService
             );
         }
 
-        // 3. Recherche itérative si activée et résultats insuffisants
+        // 4. Recherche itérative si activée et résultats insuffisants
         if ($agent->allow_iterative_search && count($ragResults) < 3) {
             $additionalResults = $this->iterativeSearch($agent, $userMessage, $ragResults);
             $ragResults = array_merge($ragResults, $additionalResults);
         }
 
-        // 4. Tronquer si nécessaire pour respecter le contexte
+        // 5. Tronquer si nécessaire pour respecter le contexte
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
             config('ai.rag.context_size', 4000)
         );
 
-        // 5. Construire le prompt et générer la réponse
+        // 6. Construire le prompt avec TOUT le contexte et générer la réponse
         $ollama = OllamaService::forAgent($agent);
 
         $messages = $this->promptBuilder->buildChatMessages(
-            $agent,
-            $userMessage,
-            $ragResults,
-            $session
+            agent: $agent,
+            userMessage: $userMessage,
+            ragResults: $ragResults,
+            session: $session,
+            learnedResponses: $learnedResponses
         );
 
         $response = $ollama->chat($messages, [
@@ -69,7 +79,7 @@ class RagService
             'fallback_model' => $agent->fallback_model,
         ]);
 
-        // 6. Ajouter les métadonnées RAG à la réponse
+        // 7. Ajouter les métadonnées RAG à la réponse
         $response = new LLMResponse(
             content: $response->content,
             model: $response->model,
@@ -78,10 +88,26 @@ class RagService
             generationTimeMs: $response->generationTimeMs,
             raw: array_merge($response->raw, [
                 'rag_context' => $this->formatRagMetadata($ragResults),
+                'learned_context' => $this->formatLearnedMetadata($learnedResponses),
             ])
         );
 
         return $response;
+    }
+
+    /**
+     * Formate les métadonnées des réponses apprises
+     */
+    private function formatLearnedMetadata(array $learnedResponses): array
+    {
+        return [
+            'sources' => collect($learnedResponses)->map(fn ($r) => [
+                'question' => Str::limit($r['question'] ?? '', 100),
+                'score' => $r['score'] ?? 0,
+                'message_id' => $r['message_id'] ?? null,
+            ])->toArray(),
+            'count' => count($learnedResponses),
+        ];
     }
 
     /**

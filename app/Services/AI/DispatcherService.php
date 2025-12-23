@@ -36,23 +36,16 @@ class DispatcherService
         // Sauvegarder le message utilisateur
         $this->ragService->saveMessage($session, 'user', $userMessage);
 
-        // Vérifier les réponses apprises
-        $learnedResponse = $this->findLearnedResponse($userMessage, $agent);
+        // Exécuter le RAG complet (inclut maintenant les learned responses comme contexte)
+        $response = $this->ragService->query($agent, $userMessage, $session);
 
-        if ($learnedResponse) {
-            Log::info('Using learned response', [
+        // Log si des réponses apprises ont été utilisées comme contexte
+        $learnedCount = $response->raw['learned_context']['count'] ?? 0;
+        if ($learnedCount > 0) {
+            Log::info('Learned responses used as context', [
                 'agent' => $agent->slug,
-                'score' => $learnedResponse['score'],
+                'learned_count' => $learnedCount,
             ]);
-
-            $response = new LLMResponse(
-                content: $learnedResponse['answer'],
-                model: 'learned_response',
-                raw: ['learned' => true, 'score' => $learnedResponse['score']]
-            );
-        } else {
-            // Exécuter le RAG standard
-            $response = $this->ragService->query($agent, $userMessage, $session);
         }
 
         // Sauvegarder la réponse
@@ -62,21 +55,6 @@ class DispatcherService
         $session->increment('message_count');
 
         return $response;
-    }
-
-    /**
-     * Cherche une réponse apprise similaire
-     */
-    private function findLearnedResponse(string $question, Agent $agent): ?array
-    {
-        $results = $this->learningService->findSimilarLearnedResponses(
-            question: $question,
-            agentSlug: $agent->slug,
-            limit: 1,
-            minScore: 0.90 // Score élevé pour les réponses apprises
-        );
-
-        return $results[0] ?? null;
     }
 
     /**

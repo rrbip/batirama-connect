@@ -54,14 +54,18 @@ return [
     */
 
     'rag' => [
-        // Nombre de résultats maximum à récupérer
+        // Nombre de résultats maximum à récupérer (documents)
         'max_results' => env('RAG_MAX_RESULTS', 5),
 
-        // Score minimum pour inclure un résultat
+        // Score minimum pour inclure un résultat documentaire
         'min_score' => env('RAG_MIN_SCORE', 0.6),
 
         // Taille du contexte (en tokens approximatifs)
         'context_size' => env('RAG_CONTEXT_SIZE', 4000),
+
+        // Réponses apprises (learned responses)
+        'max_learned_responses' => env('RAG_MAX_LEARNED_RESPONSES', 3),
+        'learned_min_score' => env('RAG_LEARNED_MIN_SCORE', 0.75),
     ],
 
     /*
