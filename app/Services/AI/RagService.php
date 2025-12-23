@@ -79,7 +79,15 @@ class RagService
             'fallback_model' => $agent->fallback_model,
         ]);
 
-        // 7. Ajouter les métadonnées RAG à la réponse
+        // 7. Construire le contexte complet pour sauvegarde (validation humaine)
+        $fullContext = $this->buildFullContext(
+            agent: $agent,
+            messages: $messages,
+            learnedResponses: $learnedResponses,
+            ragResults: $ragResults
+        );
+
+        // 8. Ajouter les métadonnées à la réponse
         $response = new LLMResponse(
             content: $response->content,
             model: $response->model,
@@ -87,8 +95,7 @@ class RagService
             tokensCompletion: $response->tokensCompletion,
             generationTimeMs: $response->generationTimeMs,
             raw: array_merge($response->raw, [
-                'rag_context' => $this->formatRagMetadata($ragResults),
-                'learned_context' => $this->formatLearnedMetadata($learnedResponses),
+                'context' => $fullContext,
             ])
         );
 
@@ -96,17 +103,48 @@ class RagService
     }
 
     /**
-     * Formate les métadonnées des réponses apprises
+     * Construit le contexte complet pour sauvegarde et validation humaine
      */
-    private function formatLearnedMetadata(array $learnedResponses): array
-    {
+    private function buildFullContext(
+        Agent $agent,
+        array $messages,
+        array $learnedResponses,
+        array $ragResults
+    ): array {
+        // Extraire le system prompt envoyé
+        $systemPrompt = collect($messages)
+            ->firstWhere('role', 'system')['content'] ?? '';
+
         return [
-            'sources' => collect($learnedResponses)->map(fn ($r) => [
-                'question' => Str::limit($r['question'] ?? '', 100),
-                'score' => $r['score'] ?? 0,
+            // Le prompt système complet envoyé au LLM
+            'system_prompt_sent' => $systemPrompt,
+
+            // Sources: Cas similaires traités (learned responses)
+            'learned_sources' => collect($learnedResponses)->map(fn ($r, $i) => [
+                'index' => $i + 1,
+                'score' => round(($r['score'] ?? 0) * 100, 1),
+                'question' => $r['question'] ?? '',
+                'answer' => $r['answer'] ?? '',
                 'message_id' => $r['message_id'] ?? null,
-            ])->toArray(),
-            'count' => count($learnedResponses),
+            ])->values()->toArray(),
+
+            // Sources: Documents RAG
+            'document_sources' => collect($ragResults)->map(fn ($r, $i) => [
+                'index' => $i + 1,
+                'id' => $r['id'] ?? null,
+                'score' => round(($r['score'] ?? 0) * 100, 1),
+                'content' => $r['payload']['content'] ?? $r['content'] ?? '',
+                'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
+            ])->values()->toArray(),
+
+            // Statistiques
+            'stats' => [
+                'learned_count' => count($learnedResponses),
+                'document_count' => count($ragResults),
+                'agent_slug' => $agent->slug,
+                'agent_model' => $agent->getModel(),
+                'temperature' => $agent->temperature,
+            ],
         ];
     }
 
@@ -238,7 +276,8 @@ class RagService
             $messageData['tokens_prompt'] = $response->tokensPrompt;
             $messageData['tokens_completion'] = $response->tokensCompletion;
             $messageData['generation_time_ms'] = $response->generationTimeMs;
-            $messageData['rag_context'] = $response->raw['rag_context'] ?? null;
+            // Sauvegarder le contexte complet pour validation humaine
+            $messageData['rag_context'] = $response->raw['context'] ?? null;
         }
 
         $message = AiMessage::create($messageData);

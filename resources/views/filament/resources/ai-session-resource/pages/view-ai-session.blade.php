@@ -202,22 +202,101 @@
                                     @endif
                                 </div>
 
-                                {{-- Sources RAG --}}
-                                @if($isAssistant && !empty($message->rag_context['sources']))
-                                    <details class="mt-2">
-                                        <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
-                                            {{ count($message->rag_context['sources']) }} source(s) utilisée(s)
-                                        </summary>
-                                        <ul class="mt-1 text-xs text-gray-500 space-y-1">
-                                            @foreach($message->rag_context['sources'] as $source)
-                                                <li class="flex items-center gap-1">
-                                                    <x-heroicon-o-document class="w-3 h-3" />
-                                                    {{ \Illuminate\Support\Str::limit($source['content'] ?? 'Document', 100) }}
-                                                    <span class="text-gray-400">({{ number_format($source['score'] ?? 0, 2) }})</span>
-                                                </li>
-                                            @endforeach
-                                        </ul>
-                                    </details>
+                                {{-- Contexte utilisé par l'IA --}}
+                                @if($isAssistant && !empty($message->rag_context))
+                                    @php
+                                        $context = $message->rag_context;
+                                        $learnedSources = $context['learned_sources'] ?? [];
+                                        $documentSources = $context['document_sources'] ?? [];
+                                        $stats = $context['stats'] ?? [];
+                                        $totalSources = count($learnedSources) + count($documentSources);
+                                    @endphp
+
+                                    @if($totalSources > 0)
+                                        <details class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                                            <summary class="p-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg flex items-center gap-2">
+                                                <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
+                                                <span>{{ $totalSources }} source(s) utilisée(s) par l'IA</span>
+                                                @if(!empty($stats))
+                                                    <span class="text-gray-400">
+                                                        ({{ $stats['learned_count'] ?? 0 }} apprises, {{ $stats['document_count'] ?? 0 }} docs)
+                                                    </span>
+                                                @endif
+                                            </summary>
+
+                                            <div class="p-3 space-y-4 text-xs border-t border-gray-200 dark:border-gray-700">
+                                                {{-- Cas similaires appris --}}
+                                                @if(!empty($learnedSources))
+                                                    <div>
+                                                        <h5 class="font-semibold text-primary-600 dark:text-primary-400 mb-2 flex items-center gap-1">
+                                                            <x-heroicon-o-academic-cap class="w-4 h-4" />
+                                                            Cas similaires traités ({{ count($learnedSources) }})
+                                                        </h5>
+                                                        <div class="space-y-2">
+                                                            @foreach($learnedSources as $learned)
+                                                                <div class="p-2 bg-primary-50 dark:bg-primary-950 rounded border-l-2 border-primary-500">
+                                                                    <div class="flex items-center justify-between mb-1">
+                                                                        <span class="font-medium">Cas #{{ $learned['index'] }}</span>
+                                                                        <x-filament::badge size="sm" color="primary">
+                                                                            {{ $learned['score'] }}% similaire
+                                                                        </x-filament::badge>
+                                                                    </div>
+                                                                    <div class="text-gray-600 dark:text-gray-400">
+                                                                        <strong>Q:</strong> {{ \Illuminate\Support\Str::limit($learned['question'], 150) }}
+                                                                    </div>
+                                                                    <details class="mt-1">
+                                                                        <summary class="cursor-pointer text-primary-600 hover:underline">Voir la réponse validée</summary>
+                                                                        <div class="mt-1 p-2 bg-white dark:bg-gray-900 rounded text-gray-700 dark:text-gray-300">
+                                                                            {{ $learned['answer'] }}
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endforeach
+                                                        </div>
+                                                    </div>
+                                                @endif
+
+                                                {{-- Documents RAG --}}
+                                                @if(!empty($documentSources))
+                                                    <div>
+                                                        <h5 class="font-semibold text-info-600 dark:text-info-400 mb-2 flex items-center gap-1">
+                                                            <x-heroicon-o-document-text class="w-4 h-4" />
+                                                            Documents indexés ({{ count($documentSources) }})
+                                                        </h5>
+                                                        <div class="space-y-2">
+                                                            @foreach($documentSources as $doc)
+                                                                <div class="p-2 bg-gray-50 dark:bg-gray-900 rounded border-l-2 border-info-500">
+                                                                    <div class="flex items-center justify-between mb-1">
+                                                                        <span class="font-medium">Document #{{ $doc['index'] }}</span>
+                                                                        <x-filament::badge size="sm" color="info">
+                                                                            {{ $doc['score'] }}% pertinent
+                                                                        </x-filament::badge>
+                                                                    </div>
+                                                                    <details>
+                                                                        <summary class="cursor-pointer text-info-600 hover:underline">Voir le contenu</summary>
+                                                                        <div class="mt-1 p-2 bg-white dark:bg-gray-800 rounded text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ $doc['content'] }}</div>
+                                                                    </details>
+                                                                </div>
+                                                            @endforeach
+                                                        </div>
+                                                    </div>
+                                                @endif
+
+                                                {{-- Prompt système complet --}}
+                                                @if(!empty($context['system_prompt_sent']))
+                                                    <div>
+                                                        <details>
+                                                            <summary class="cursor-pointer text-gray-500 hover:text-gray-700 flex items-center gap-1">
+                                                                <x-heroicon-o-command-line class="w-4 h-4" />
+                                                                Voir le prompt système complet envoyé
+                                                            </summary>
+                                                            <div class="mt-2 p-3 bg-gray-100 dark:bg-gray-900 rounded font-mono text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">{{ $context['system_prompt_sent'] }}</div>
+                                                        </details>
+                                                    </div>
+                                                @endif
+                                            </div>
+                                        </details>
+                                    @endif
                                 @endif
 
                                 {{-- Boutons d'action pour réponses en attente --}}
