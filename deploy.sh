@@ -60,6 +60,11 @@ done
 # Fonctions utilitaires
 # ===========================================
 
+# Obtenir la branche courante (compatible toutes versions Git)
+get_current_branch() {
+    git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main"
+}
+
 wait_for_container() {
     local max_attempts=30
     local attempt=1
@@ -159,11 +164,12 @@ echo -e "${YELLOW}📥 [1/5] Récupération du code...${NC}"
 # Sauvegarder les modifications locales si présentes
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     echo -e "${YELLOW}   ⚠️  Stash des modifications locales...${NC}"
-    git stash save "deploy-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || git stash 2>/dev/null || true
+    git stash 2>/dev/null || true
 fi
 
-# Récupérer la branche courante (compatible anciennes versions git)
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || git branch | grep '\*' | cut -d' ' -f2)
+# Récupérer la branche courante
+CURRENT_BRANCH=$(get_current_branch)
+echo -e "${YELLOW}   Branche: ${CURRENT_BRANCH}${NC}"
 
 # Pull les changements
 if git pull origin "$CURRENT_BRANCH" 2>/dev/null; then
