@@ -37,18 +37,10 @@
                 $wire.sendMessage();
             }
          }"
-         x-init="
-            $watch('$wire.messages', () => {
-                pendingMessage = null;
-                isProcessing = false;
-                scrollToBottom();
-            });
-            $watch('$wire.isLoading', (value) => {
-                if (!value) {
-                    isProcessing = false;
-                    pendingMessage = null;
-                }
-            });
+         x-on:message-received.window="
+            pendingMessage = null;
+            isProcessing = false;
+            $nextTick(() => scrollToBottom());
          "
     >
         {{-- Info Agent --}}

@@ -133,6 +133,9 @@ class TestAgent extends Page implements HasForms
         }
 
         $this->isLoading = false;
+
+        // Signaler à Alpine que le traitement est terminé
+        $this->dispatch('message-received');
     }
 
     #[Computed]
