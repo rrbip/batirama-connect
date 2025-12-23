@@ -40,20 +40,21 @@ class AIServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(LearningService::class, function ($app) {
+            return new LearningService(
+                $app->make(EmbeddingService::class),
+                $app->make(QdrantService::class)
+            );
+        });
+
         $this->app->singleton(RagService::class, function ($app) {
             return new RagService(
                 $app->make(EmbeddingService::class),
                 $app->make(QdrantService::class),
                 $app->make(OllamaService::class),
                 $app->make(HydrationService::class),
-                $app->make(PromptBuilder::class)
-            );
-        });
-
-        $this->app->singleton(LearningService::class, function ($app) {
-            return new LearningService(
-                $app->make(EmbeddingService::class),
-                $app->make(QdrantService::class)
+                $app->make(PromptBuilder::class),
+                $app->make(LearningService::class)
             );
         });
 
