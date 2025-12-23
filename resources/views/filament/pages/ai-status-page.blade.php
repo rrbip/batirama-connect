@@ -215,7 +215,7 @@
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                             @foreach($failedDocuments as $doc)
-                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <tr class="hover:bg-gray-100 dark:hover:bg-gray-700">
                                     <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
                                         {{ Str::limit($doc['name'], 40) }}
                                     </td>
@@ -284,7 +284,7 @@
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                             @foreach($failedJobs as $job)
-                                <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <tr class="hover:bg-gray-100 dark:hover:bg-gray-700">
                                     <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
                                         {{ $job['name'] }}
                                     </td>
