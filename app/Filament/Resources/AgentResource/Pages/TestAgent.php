@@ -9,26 +9,23 @@ use App\Models\Agent;
 use App\Models\AiSession;
 use App\Services\ChatDispatcherService;
 use Filament\Actions;
-use Filament\Forms\Components\Textarea;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Forms\Form;
 use Filament\Notifications\Notification;
+use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
-use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Computed;
 
 class TestAgent extends Page implements HasForms
 {
     use InteractsWithForms;
+    use InteractsWithRecord;
 
     protected static string $resource = AgentResource::class;
 
     protected static string $view = 'filament.resources.agent-resource.pages.test-agent';
 
-    public Agent $record;
-
-    public ?AiSession $testSession = null;
+    public ?int $testSessionId = null;
 
     public array $messages = [];
 
@@ -38,12 +35,12 @@ class TestAgent extends Page implements HasForms
 
     public function mount(int|string $record): void
     {
-        $this->record = Agent::findOrFail($record);
+        $this->record = $this->resolveRecord($record);
     }
 
     public function getTitle(): string
     {
-        return "Tester : {$this->record->name}";
+        return "Tester : {$this->getRecord()->name}";
     }
 
     protected function getHeaderActions(): array
@@ -59,7 +56,7 @@ class TestAgent extends Page implements HasForms
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->action(function () {
-                    $this->testSession = null;
+                    $this->testSessionId = null;
                     $this->messages = [];
                     Notification::make()
                         ->title('Session réinitialisée')
@@ -91,12 +88,16 @@ class TestAgent extends Page implements HasForms
             $dispatcher = app(ChatDispatcherService::class);
 
             // Créer une session de test si nécessaire
-            if (!$this->testSession) {
-                $this->testSession = $dispatcher->createSession($this->record);
+            if (!$this->testSessionId) {
+                $session = $dispatcher->createSession($this->getRecord());
+                $this->testSessionId = $session->id;
             }
 
+            // Récupérer la session
+            $session = AiSession::find($this->testSessionId);
+
             // Envoyer le message
-            $response = $dispatcher->chat($this->testSession, $message);
+            $response = $dispatcher->chat($session, $message);
 
             // Ajouter la réponse
             $this->messages[] = [
@@ -127,12 +128,19 @@ class TestAgent extends Page implements HasForms
     #[Computed]
     public function agentInfo(): array
     {
+        $record = $this->getRecord();
+
         return [
-            'Modèle' => $this->record->model ?? 'Par défaut',
-            'Température' => $this->record->temperature ?? 0.7,
-            'Max tokens' => $this->record->max_tokens ?? 2048,
-            'Mode RAG' => $this->record->retrieval_mode ?? 'VECTOR_ONLY',
-            'Collection' => $this->record->qdrant_collection ?? '-',
+            'Modèle' => $record->model ?? 'Par défaut',
+            'Température' => $record->temperature ?? 0.7,
+            'Max tokens' => $record->max_tokens ?? 2048,
+            'Mode RAG' => $record->retrieval_mode ?? 'VECTOR_ONLY',
+            'Collection' => $record->qdrant_collection ?? '-',
         ];
+    }
+
+    public function getTestSession(): ?AiSession
+    {
+        return $this->testSessionId ? AiSession::find($this->testSessionId) : null;
     }
 }

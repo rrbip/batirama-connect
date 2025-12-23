@@ -1,16 +1,21 @@
 <x-filament-panels::page>
+    @php
+        $agent = $this->getRecord();
+        $testSession = $this->getTestSession();
+    @endphp
+
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {{-- Info Agent --}}
         <div class="lg:col-span-1">
             <x-filament::section>
                 <x-slot name="heading">
                     <div class="flex items-center gap-2">
-                        @if($record->icon)
-                            <x-dynamic-component :component="$record->icon" class="w-5 h-5" />
+                        @if($agent->icon)
+                            <x-dynamic-component :component="$agent->icon" class="w-5 h-5" />
                         @else
                             <x-heroicon-o-cpu-chip class="w-5 h-5" />
                         @endif
-                        {{ $record->name }}
+                        {{ $agent->name }}
                     </div>
                 </x-slot>
 
@@ -23,10 +28,10 @@
                     @endforeach
                 </div>
 
-                @if($record->description)
+                @if($agent->description)
                     <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <p class="text-sm text-gray-600 dark:text-gray-400">
-                            {{ $record->description }}
+                            {{ $agent->description }}
                         </p>
                     </div>
                 @endif
