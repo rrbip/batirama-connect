@@ -4,12 +4,14 @@
 
 # Configuration globale
 {
-    # Email pour Let's Encrypt (production)
-    email {$ACME_EMAIL:admin@example.com}
+    # Email pour Let's Encrypt (requis en production)
+    # Configurez ACME_EMAIL dans .env avec votre email
+    # Si non défini, Caddy essaiera sans email (peut échouer)
+    email {$ACME_EMAIL}
 
     # Mode développement : certificats auto-signés
-    # IMPORTANT: Commenter ou supprimer cette ligne en production
-    # pour activer Let's Encrypt
+    # IMPORTANT: Supprimez ou commentez 'local_certs' en production
+    # pour activer Let's Encrypt automatique
     local_certs
 
     # Logs
@@ -19,7 +21,7 @@
     }
 }
 
-# Site principal - Le domaine est configuré via SITE_ADDRESS
+# Site principal - Le domaine est configuré via SITE_ADDRESS dans .env
 # Exemples : localhost, monsite.com, *.monsite.com
 {$SITE_ADDRESS:localhost} {
     # Racine du site
