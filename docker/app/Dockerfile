@@ -32,6 +32,7 @@ RUN apk add --no-cache \
     postgresql-dev \
     linux-headers \
     bash \
+    poppler-utils \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP
