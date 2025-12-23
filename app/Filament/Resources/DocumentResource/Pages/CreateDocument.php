@@ -6,6 +6,7 @@ namespace App\Filament\Resources\DocumentResource\Pages;
 
 use App\Filament\Resources\DocumentResource;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CreateDocument extends CreateRecord
@@ -20,14 +21,39 @@ class CreateDocument extends CreateRecord
 
         // Extraire le nom original et le type du fichier uploadé
         if (isset($data['storage_path'])) {
-            $data['original_name'] = basename($data['storage_path']);
+            $storagePath = $data['storage_path'];
+            $data['original_name'] = basename($storagePath);
             $extension = pathinfo($data['original_name'], PATHINFO_EXTENSION);
             $data['document_type'] = strtolower($extension);
-            $data['mime_type'] = mime_content_type(storage_path('app/' . $data['storage_path'])) ?? 'application/octet-stream';
-            $data['file_size'] = filesize(storage_path('app/' . $data['storage_path'])) ?? 0;
+
+            // Utiliser Storage facade pour compatibilité Docker
+            if (Storage::disk('local')->exists($storagePath)) {
+                $fullPath = Storage::disk('local')->path($storagePath);
+                $data['mime_type'] = mime_content_type($fullPath) ?: $this->getMimeTypeFromExtension($extension);
+                $data['file_size'] = Storage::disk('local')->size($storagePath);
+            } else {
+                // Fallback si le fichier n'est pas encore accessible
+                $data['mime_type'] = $this->getMimeTypeFromExtension($extension);
+                $data['file_size'] = 0;
+            }
         }
 
         return $data;
+    }
+
+    /**
+     * Détermine le type MIME à partir de l'extension
+     */
+    private function getMimeTypeFromExtension(string $extension): string
+    {
+        return match (strtolower($extension)) {
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt' => 'text/plain',
+            'md' => 'text/markdown',
+            default => 'application/octet-stream',
+        };
     }
 
     protected function getRedirectUrl(): string
