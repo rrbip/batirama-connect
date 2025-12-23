@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\Document;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Smalot\PdfParser\Parser as PdfParser;
 
@@ -18,6 +19,12 @@ class DocumentExtractorService
     {
         $storagePath = $document->storage_path;
 
+        Log::info('DocumentExtractor: Starting extraction', [
+            'document_id' => $document->id,
+            'storage_path' => $storagePath,
+            'document_type' => $document->document_type,
+        ]);
+
         if (!Storage::disk('local')->exists($storagePath)) {
             throw new \RuntimeException("Fichier non trouvé: {$storagePath}");
         }
@@ -25,7 +32,13 @@ class DocumentExtractorService
         $fullPath = Storage::disk('local')->path($storagePath);
         $extension = strtolower($document->document_type);
 
-        return match ($extension) {
+        Log::info('DocumentExtractor: File found', [
+            'full_path' => $fullPath,
+            'extension' => $extension,
+            'file_size' => filesize($fullPath),
+        ]);
+
+        $text = match ($extension) {
             'pdf' => $this->extractFromPdf($fullPath),
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
@@ -33,6 +46,13 @@ class DocumentExtractorService
             'html', 'htm' => $this->extractFromHtml($fullPath),
             default => throw new \RuntimeException("Type de document non supporté: {$extension}"),
         };
+
+        Log::info('DocumentExtractor: Extraction completed', [
+            'document_id' => $document->id,
+            'text_length' => strlen($text),
+        ]);
+
+        return $text;
     }
 
     /**
@@ -40,20 +60,76 @@ class DocumentExtractorService
      */
     private function extractFromPdf(string $path): string
     {
+        $text = '';
+
+        // Méthode 1: Essayer avec pdftotext (poppler-utils) - meilleure qualité
+        $text = $this->extractWithPdfToText($path);
+
+        if (!empty($text)) {
+            Log::info('PDF extracted with pdftotext', ['path' => $path]);
+            return $this->cleanText($text);
+        }
+
+        // Méthode 2: Fallback sur smalot/pdfparser
         try {
+            Log::info('Trying smalot/pdfparser', ['path' => $path]);
             $parser = new PdfParser();
             $pdf = $parser->parseFile($path);
             $text = $pdf->getText();
 
-            // Nettoyer le texte extrait
-            return $this->cleanText($text);
+            if (!empty(trim($text))) {
+                Log::info('PDF extracted with pdfparser', ['path' => $path]);
+                return $this->cleanText($text);
+            }
         } catch (\Exception $e) {
-            Log::error('PDF extraction failed', [
+            Log::warning('smalot/pdfparser failed', [
                 'path' => $path,
                 'error' => $e->getMessage(),
             ]);
-            throw new \RuntimeException("Erreur extraction PDF: {$e->getMessage()}");
         }
+
+        // Si aucune méthode n'a fonctionné
+        throw new \RuntimeException(
+            "Impossible d'extraire le texte du PDF. " .
+            "Le fichier est peut-être un scan (image), protégé, ou corrompu. " .
+            "Essayez de convertir le PDF en texte avec un outil OCR."
+        );
+    }
+
+    /**
+     * Extrait le texte avec pdftotext (poppler-utils)
+     */
+    private function extractWithPdfToText(string $path): string
+    {
+        // Vérifier si pdftotext est disponible
+        $checkResult = Process::run('which pdftotext');
+        if (!$checkResult->successful()) {
+            Log::info('pdftotext not available on this system');
+            return '';
+        }
+
+        try {
+            // -layout préserve la mise en page, -enc UTF-8 pour l'encodage
+            $result = Process::timeout(60)->run(
+                sprintf('pdftotext -layout -enc UTF-8 %s -', escapeshellarg($path))
+            );
+
+            if ($result->successful()) {
+                return $result->output();
+            }
+
+            Log::warning('pdftotext failed', [
+                'path' => $path,
+                'error' => $result->errorOutput(),
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('pdftotext exception', [
+                'path' => $path,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return '';
     }
 
     /**
