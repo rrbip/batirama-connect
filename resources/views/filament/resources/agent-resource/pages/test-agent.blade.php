@@ -9,7 +9,11 @@
          x-data="{
             pendingMessage: null,
             isProcessing: false,
+            timeoutId: null,
+            elapsedTime: 0,
+            timerInterval: null,
             inputMessage: @entangle('userMessage'),
+
             scrollToBottom() {
                 this.$nextTick(() => {
                     const container = document.getElementById('chat-messages');
@@ -18,8 +22,25 @@
                     }
                 });
             },
+
+            resetState() {
+                this.pendingMessage = null;
+                this.isProcessing = false;
+                this.elapsedTime = 0;
+                if (this.timeoutId) {
+                    clearTimeout(this.timeoutId);
+                    this.timeoutId = null;
+                }
+                if (this.timerInterval) {
+                    clearInterval(this.timerInterval);
+                    this.timerInterval = null;
+                }
+                this.scrollToBottom();
+            },
+
             sendOptimistic() {
                 if (!this.inputMessage || this.inputMessage.trim() === '') return;
+                if (this.isProcessing) return;
 
                 // Afficher immédiatement le message utilisateur
                 this.pendingMessage = {
@@ -27,20 +48,25 @@
                     timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
                 };
                 this.isProcessing = true;
+                this.elapsedTime = 0;
                 this.scrollToBottom();
 
-                // Vider le champ (sera aussi vidé côté serveur)
-                const msg = this.inputMessage;
+                // Timer pour afficher le temps écoulé
+                this.timerInterval = setInterval(() => {
+                    this.elapsedTime++;
+                }, 1000);
+
+                // Vider le champ
                 this.inputMessage = '';
 
                 // Soumettre au serveur
                 $wire.sendMessage();
             }
          }"
-         x-on:message-received.window="
-            pendingMessage = null;
-            isProcessing = false;
-            $nextTick(() => scrollToBottom());
+         x-init="
+            Livewire.on('message-received', () => {
+                resetState();
+            });
          "
     >
         {{-- Info Agent --}}
@@ -137,7 +163,7 @@
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                En cours...
+                                <span x-text="elapsedTime + 's'"></span>
                             </span>
                         </template>
                     </div>
@@ -207,7 +233,10 @@
                                         <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
                                         <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
                                     </div>
-                                    <span class="text-sm text-gray-500 dark:text-gray-400">{{ $agent->name }} réfléchit...</span>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">
+                                        {{ $agent->name }} réfléchit...
+                                        <span x-show="elapsedTime > 0" x-text="'(' + elapsedTime + 's)'"></span>
+                                    </span>
                                 </div>
                             </div>
                         </div>
