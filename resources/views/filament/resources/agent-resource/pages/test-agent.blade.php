@@ -87,7 +87,7 @@
                     @empty
                         <div class="flex items-center justify-center h-full text-gray-400">
                             <div class="text-center">
-                                <x-heroicon-o-chat-bubble-left-right class="w-12 h-12 mx-auto mb-2" />
+                                <x-heroicon-o-chat-bubble-left-ellipsis class="w-12 h-12 mx-auto mb-2" />
                                 <p>Envoyez un message pour commencer</p>
                             </div>
                         </div>
