@@ -88,13 +88,17 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        // En développement, tous les utilisateurs vérifiés peuvent accéder
-        // En production, ajouter une vérification de rôle admin
-        if (app()->environment('local', 'development')) {
+        // Vérifier si l'utilisateur a un rôle admin
+        // Si aucun rôle n'existe encore, autoriser tous les utilisateurs vérifiés
+        if ($this->hasRole('super-admin') || $this->hasRole('admin')) {
             return true;
         }
 
-        return $this->hasRole('super-admin') || $this->hasRole('admin');
+        // Fallback: si aucun rôle admin n'existe dans le système, autoriser l'accès
+        // Cela permet le premier setup avant la création des rôles
+        $adminRolesExist = \App\Models\Role::whereIn('slug', ['super-admin', 'admin'])->exists();
+
+        return !$adminRolesExist;
     }
 
     /**
