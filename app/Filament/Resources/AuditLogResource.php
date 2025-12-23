@@ -103,25 +103,61 @@ class AuditLogResource extends Resource
                 Tables\Columns\TextColumn::make('action')
                     ->label('Action')
                     ->badge()
-                    ->formatStateUsing(fn (AuditLog $record) => $record->getActionLabel())
-                    ->color(fn (AuditLog $record) => $record->getActionColor()),
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'create' => 'Création',
+                        'update' => 'Modification',
+                        'delete' => 'Suppression',
+                        'restore' => 'Restauration',
+                        'login' => 'Connexion',
+                        'logout' => 'Déconnexion',
+                        'export' => 'Export',
+                        default => ucfirst($state ?? '-'),
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'create' => 'success',
+                        'update' => 'info',
+                        'delete' => 'danger',
+                        'restore' => 'warning',
+                        'login' => 'primary',
+                        'logout' => 'gray',
+                        default => 'secondary',
+                    }),
 
                 Tables\Columns\TextColumn::make('auditable_type')
                     ->label('Type')
-                    ->formatStateUsing(fn (AuditLog $record) => $record->getAuditableLabel())
+                    ->formatStateUsing(function (?string $state): string {
+                        if (! $state) {
+                            return '-';
+                        }
+                        $modelName = class_basename($state);
+
+                        return match ($modelName) {
+                            'User' => 'Utilisateur',
+                            'Role' => 'Rôle',
+                            'Permission' => 'Permission',
+                            'Agent' => 'Agent IA',
+                            'AiSession' => 'Session IA',
+                            'Ouvrage' => 'Ouvrage',
+                            'Document' => 'Document',
+                            'Partner' => 'Partenaire',
+                            default => $modelName,
+                        };
+                    })
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('auditable_id')
                     ->label('ID')
+                    ->default('-')
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('user.name')
+                Tables\Columns\TextColumn::make('user_email')
                     ->label('Utilisateur')
-                    ->default(fn (AuditLog $record) => $record->user_email ?? 'Système')
+                    ->default('Système')
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('ip_address')
                     ->label('IP')
+                    ->default('-')
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([

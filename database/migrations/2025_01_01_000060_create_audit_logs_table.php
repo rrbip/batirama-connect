@@ -22,8 +22,8 @@ return new class extends Migration
             // Action
             $table->string('action', 50); // create, update, delete, login, logout, export
 
-            // Cible
-            $table->string('auditable_type', 100);
+            // Cible (nullable pour les événements sans modèle spécifique)
+            $table->string('auditable_type', 100)->nullable();
             $table->unsignedBigInteger('auditable_id')->nullable();
 
             // Données
