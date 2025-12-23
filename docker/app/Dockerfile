@@ -70,6 +70,21 @@ WORKDIR /var/www/html
 # Copie des fichiers de l'application
 COPY --chown=www-data:www-data . .
 
+# Création des dossiers Laravel nécessaires AVANT composer install
+# Ces dossiers sont requis par Laravel pour le cache et les sessions.
+# Ils doivent exister avant l'exécution de composer install car
+# certains scripts post-install de Composer peuvent en avoir besoin.
+# Le dossier resources/views est également créé car il est requis
+# pour les commandes artisan view:cache en production.
+RUN mkdir -p bootstrap/cache \
+    && mkdir -p storage/framework/sessions \
+    && mkdir -p storage/framework/views \
+    && mkdir -p storage/framework/cache \
+    && mkdir -p storage/logs \
+    && mkdir -p resources/views \
+    && chown -R www-data:www-data bootstrap storage resources \
+    && chmod -R 775 bootstrap storage
+
 # Copie du script d'entrypoint
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -81,12 +96,8 @@ RUN if [ "$APP_ENV" = "production" ]; then \
         composer install --optimize-autoloader --no-interaction; \
     fi
 
-# Optimisations Laravel pour production
-RUN if [ "$APP_ENV" = "production" ]; then \
-        php artisan config:cache \
-        && php artisan route:cache \
-        && php artisan view:cache; \
-    fi
+# Note: Les optimisations Laravel (config:cache, route:cache, view:cache)
+# sont exécutées par l'entrypoint au démarrage du conteneur
 
 # Permissions
 RUN chown -R www-data:www-data storage bootstrap/cache \

@@ -2,14 +2,21 @@
     "name": "batirama/ai-manager-cms",
     "type": "project",
     "description": "AI-Manager CMS - Plateforme de gestion d'agents IA pour le BTP",
-    "keywords": ["laravel", "ai", "btp", "rag", "ollama"],
+    "keywords": [
+        "laravel",
+        "ai",
+        "btp",
+        "rag",
+        "ollama"
+    ],
     "license": "proprietary",
     "require": {
         "php": "^8.4",
+        "filament/filament": "^3.2",
+        "guzzlehttp/guzzle": "^7.9",
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10",
-        "livewire/livewire": "^3.6",
-        "guzzlehttp/guzzle": "^7.9"
+        "livewire/livewire": "^3.6"
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",
@@ -35,7 +42,8 @@
     "scripts": {
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
-            "@php artisan package:discover --ansi"
+            "@php artisan package:discover --ansi",
+            "@php artisan filament:upgrade"
         ],
         "post-update-cmd": [
             "@php artisan vendor:publish --tag=laravel-assets --ansi --force"

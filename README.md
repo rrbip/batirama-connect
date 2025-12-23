@@ -367,6 +367,41 @@ QDRANT_VECTOR_SIZE=768
 
 ## Troubleshooting
 
+### Qdrant reste "unhealthy"
+
+Le conteneur Qdrant n'inclut pas `curl`. Le healthcheck utilise `wget` :
+
+```bash
+# Vérifier que le fix est appliqué
+grep wget docker-compose.yml
+# Doit afficher la ligne avec wget --spider
+```
+
+### Erreur GPU pour Ollama
+
+Si vous voyez "could not select device driver nvidia" :
+
+```bash
+# Cette erreur signifie que le serveur n'a pas de GPU NVIDIA
+# Le docker-compose.yml par défaut fonctionne en mode CPU
+# Aucune action requise sauf si vous voulez utiliser un GPU
+```
+
+Pour activer le GPU sur un serveur équipé, voir `docs/05_deployment_guide.md`.
+
+### Ports 80/443 déjà utilisés
+
+Par défaut, l'application utilise les ports 8080/8443 :
+
+```bash
+# Vérifier .env
+grep WEB_PORT .env
+
+# Changer les ports si nécessaire
+WEB_PORT=8080
+WEB_SSL_PORT=8443
+```
+
 ### Les workers ne traitent pas les jobs
 
 ```bash
@@ -413,6 +448,11 @@ docker compose exec app php artisan qdrant:init --force
 docker compose exec app chmod -R 775 storage bootstrap/cache
 docker compose exec app chown -R www-data:www-data storage bootstrap/cache
 ```
+
+### Documentation Complète
+
+Pour plus de détails sur le déploiement et la configuration, voir :
+- `docs/05_deployment_guide.md` - Guide complet avec GPU, ports, firewall
 
 ---
 

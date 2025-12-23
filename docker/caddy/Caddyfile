@@ -1,16 +1,26 @@
 # ===========================================
 # AI-Manager CMS - Caddyfile
 # ===========================================
+# Configuration automatique selon .env :
+#
+# Mode 1 - Derrière CWP/Apache (SSL géré par le proxy) :
+#   SITE_ADDRESS=:80
+#   → Caddy écoute sur le port 80, pas de SSL
+#
+# Mode 2 - Serveur dédié avec SSL Let's Encrypt :
+#   SITE_ADDRESS=ai.mondomaine.com
+#   ACME_EMAIL=admin@mondomaine.com
+#   → Caddy gère SSL automatiquement
+#
+# Mode 3 - Développement local :
+#   SITE_ADDRESS=localhost
+#   → Certificat auto-signé automatique
+# ===========================================
 
 # Configuration globale
 {
-    # Email pour Let's Encrypt (production)
-    email {$ACME_EMAIL:admin@example.com}
-
-    # Mode développement : certificats auto-signés
-    # IMPORTANT: Commenter ou supprimer cette ligne en production
-    # pour activer Let's Encrypt
-    local_certs
+    # Email pour Let's Encrypt (requis pour les domaines réels)
+    email {$ACME_EMAIL:}
 
     # Logs
     log {
@@ -19,10 +29,10 @@
     }
 }
 
-# Site principal - Le domaine est configuré via SITE_ADDRESS
-# Exemples : localhost, monsite.com, *.monsite.com
-{$SITE_ADDRESS:localhost} {
-    # Racine du site
+# Site principal - configuré via SITE_ADDRESS dans .env
+# Exemples : :80, localhost, ai.mondomaine.com
+{$SITE_ADDRESS::80} {
+    # Racine du site Laravel
     root * /var/www/html/public
 
     # Compression
@@ -51,19 +61,16 @@
     }
     header @static Cache-Control "public, max-age=31536000, immutable"
 
-    # PHP-FPM
+    # PHP-FPM - connexion au conteneur app
     php_fastcgi app:9000 {
         resolve_root_symlink
+        # Faire confiance aux headers des proxies locaux
+        trusted_proxies private_ranges
     }
 
     # Fichiers statiques
     file_server
 
-    # Fallback Laravel
+    # Fallback Laravel (toutes les routes vers index.php)
     try_files {path} {path}/ /index.php?{query}
-}
-
-# Health check endpoint (interne)
-:8080 {
-    respond /health "OK" 200
 }

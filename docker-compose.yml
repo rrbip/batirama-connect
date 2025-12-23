@@ -1,5 +1,3 @@
-version: '3.8'
-
 name: ai-manager-cms
 
 services:
@@ -20,12 +18,28 @@ services:
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
     environment:
       - APP_ENV=${APP_ENV:-local}
+      - APP_KEY=${APP_KEY:-}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost}
+      - DB_CONNECTION=${DB_CONNECTION:-pgsql}
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_DATABASE=${DB_DATABASE:-ai_manager}
+      - DB_USERNAME=${DB_USERNAME:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_ENABLED=${REDIS_ENABLED:-false}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - QDRANT_HOST=${QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${QDRANT_PORT:-6333}
+      - OLLAMA_HOST=${OLLAMA_HOST:-ollama}
+      - OLLAMA_PORT=${OLLAMA_PORT:-11434}
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-*}
     depends_on:
       db:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ai_network
     healthcheck:
@@ -37,13 +51,27 @@ services:
   # ===========================================
   # SERVEUR WEB CADDY
   # ===========================================
+  # Configuration via .env :
+  #
+  # Mode CWP/Apache (SSL externe) :
+  #   SITE_ADDRESS=:80
+  #   WEB_PORT=8080
+  #
+  # Mode Serveur Dédié (SSL Caddy) :
+  #   SITE_ADDRESS=ai.mondomaine.com
+  #   ACME_EMAIL=admin@mondomaine.com
+  #   WEB_PORT=80
+  #   WEB_SSL_PORT=443
   web:
     image: caddy:2.10-alpine
     container_name: aim_web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-80}:80"
-      - "${WEB_SSL_PORT:-443}:443"
+      - "${WEB_PORT:-8080}:80"
+      - "${WEB_SSL_PORT:-8443}:443"
+    environment:
+      - SITE_ADDRESS=${SITE_ADDRESS:-:80}
+      - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - .:/var/www/html:ro
@@ -102,6 +130,8 @@ services:
   # ===========================================
   # QDRANT - BASE VECTORIELLE
   # ===========================================
+  # Note: L'image Qdrant minimale n'a pas curl/wget pour un healthcheck.
+  # L'application gère la connexion avec retry dans l'entrypoint.
   qdrant:
     image: qdrant/qdrant:v1.16.2
     container_name: aim_qdrant
@@ -117,17 +147,13 @@ services:
       - "${QDRANT_EXTERNAL_PORT:-6333}:6333"
     networks:
       - ai_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ===========================================
-  # OLLAMA - SERVEUR IA
+  # OLLAMA - SERVEUR IA (CPU par défaut)
   # ===========================================
+  # Pour activer le GPU Nvidia, utilisez docker-compose.gpu.yml
   ollama:
-    image: ollama/ollama:${OLLAMA_VERSION:-0.13.5}
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
     container_name: aim_ollama
     restart: unless-stopped
     environment:
@@ -140,15 +166,6 @@ services:
       - "${OLLAMA_EXTERNAL_PORT:-11434}:11434"
     networks:
       - ai_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # Fallback sans GPU (commenté pour environnements sans GPU)
-    # deploy: {}
 
   # ===========================================
   # SCHEDULER (CRON LARAVEL)

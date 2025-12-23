@@ -15,6 +15,69 @@ echo ""
 # Fichier marqueur pour éviter la réinitialisation
 INIT_MARKER="/var/www/html/storage/.initialized"
 
+# ===========================================
+# VÉRIFICATION DES DÉPENDANCES
+# ===========================================
+
+# Fonction pour vérifier si vendor est à jour
+vendor_needs_update() {
+    # Si vendor n'existe pas, besoin d'install
+    if [ ! -d "/var/www/html/vendor" ]; then
+        return 0
+    fi
+
+    # Si composer.lock n'existe pas, besoin d'install
+    if [ ! -f "/var/www/html/composer.lock" ]; then
+        return 0
+    fi
+
+    # Si vendor/autoload.php n'existe pas, besoin d'install
+    if [ ! -f "/var/www/html/vendor/autoload.php" ]; then
+        return 0
+    fi
+
+    # Si installed.json n'existe pas, besoin d'install
+    if [ ! -f "/var/www/html/vendor/composer/installed.json" ]; then
+        return 0
+    fi
+
+    # Comparer les checksums de composer.lock
+    # Si le hash de composer.lock a changé depuis la dernière install, mettre à jour
+    local current_hash=$(md5sum /var/www/html/composer.lock 2>/dev/null | cut -d' ' -f1)
+    local stored_hash=""
+
+    if [ -f "/var/www/html/vendor/.composer-lock-hash" ]; then
+        stored_hash=$(cat /var/www/html/vendor/.composer-lock-hash 2>/dev/null)
+    fi
+
+    if [ "$current_hash" != "$stored_hash" ]; then
+        return 0
+    fi
+
+    # Vendor est à jour
+    return 1
+}
+
+# Installer/mettre à jour les dépendances si nécessaire
+if vendor_needs_update; then
+    echo "📦 Installation/Mise à jour des dépendances Composer..."
+    if [ "$APP_ENV" = "production" ]; then
+        composer install --no-dev --optimize-autoloader --no-interaction
+    else
+        composer install --optimize-autoloader --no-interaction
+    fi
+    # Sauvegarder le hash de composer.lock
+    md5sum /var/www/html/composer.lock | cut -d' ' -f1 > /var/www/html/vendor/.composer-lock-hash
+    echo "✅ Dépendances installées"
+else
+    echo "✅ Dépendances à jour"
+fi
+
+# Créer les dossiers Laravel et fixer les permissions
+mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
 
@@ -27,12 +90,27 @@ wait_for_db() {
     local max_attempts=30
     local attempt=0
 
-    until php artisan db:monitor --database=pgsql 2>/dev/null; do
+    # Utiliser une connexion PHP directe au lieu de artisan
+    until php -r "
+        \$host = getenv('DB_HOST') ?: 'db';
+        \$port = getenv('DB_PORT') ?: '5432';
+        \$dbname = getenv('DB_DATABASE') ?: 'ai_manager';
+        \$user = getenv('DB_USERNAME') ?: 'postgres';
+        \$pass = getenv('DB_PASSWORD') ?: 'secret';
+        try {
+            new PDO(\"pgsql:host=\$host;port=\$port;dbname=\$dbname\", \$user, \$pass);
+            exit(0);
+        } catch (Exception \$e) {
+            exit(1);
+        }
+    " 2>/dev/null; do
         attempt=$((attempt + 1))
         if [ $attempt -ge $max_attempts ]; then
             echo "❌ PostgreSQL non disponible après ${max_attempts} tentatives"
+            echo "   Host: ${DB_HOST:-db}, Port: ${DB_PORT:-5432}, DB: ${DB_DATABASE:-ai_manager}"
             exit 1
         fi
+        echo "   Tentative $attempt/$max_attempts..."
         sleep 2
     done
     echo "✅ PostgreSQL connecté"
@@ -127,11 +205,11 @@ initialize_app() {
     echo "   🧠 Initialisation des collections Qdrant..."
     php artisan qdrant:init --with-test-data
 
-    # Optimisations
+    # Optimisations (ignorer les erreurs de permissions non critiques)
     echo "   ⚡ Optimisation des caches..."
-    php artisan config:clear
-    php artisan cache:clear
-    php artisan view:clear
+    php artisan config:clear || true
+    php artisan cache:clear || true
+    php artisan view:clear || true
 
     # Créer le fichier marqueur
     touch "$INIT_MARKER"

@@ -71,8 +71,10 @@ services:
     container_name: aim_web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-80}:80"
-      - "${WEB_SSL_PORT:-443}:443"
+      # Ports 8080/8443 par défaut pour éviter les conflits avec Apache/Nginx
+      # Modifiable via WEB_PORT et WEB_SSL_PORT dans .env
+      - "${WEB_PORT:-8080}:80"
+      - "${WEB_SSL_PORT:-8443}:443"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - .:/var/www/html:ro
@@ -146,17 +148,20 @@ services:
       - "${QDRANT_EXTERNAL_PORT:-6333}:6333"
     networks:
       - ai_network
+    # Note: On utilise wget car curl n'est pas installé dans l'image Qdrant
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/readyz"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ===========================================
-  # OLLAMA - SERVEUR IA
+  # OLLAMA - SERVEUR IA (CPU par défaut)
   # ===========================================
+  # Par défaut, Ollama fonctionne en mode CPU.
+  # Pour activer le GPU NVIDIA, utilisez docker-compose.gpu.yml
   ollama:
-    image: ollama/ollama:${OLLAMA_VERSION:-0.13.5}
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
     container_name: aim_ollama
     restart: unless-stopped
     environment:
@@ -169,15 +174,6 @@ services:
       - "${OLLAMA_EXTERNAL_PORT:-11434}:11434"
     networks:
       - ai_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # Fallback sans GPU (commenté pour environnements sans GPU)
-    # deploy: {}
 
   # ===========================================
   # SCHEDULER (CRON LARAVEL)
@@ -456,6 +452,21 @@ WORKDIR /var/www/html
 # Copie des fichiers de l'application
 COPY --chown=www-data:www-data . .
 
+# Création des dossiers Laravel nécessaires AVANT composer install
+# Ces dossiers sont requis par Laravel pour le cache et les sessions.
+# Ils doivent exister avant l'exécution de composer install car
+# certains scripts post-install de Composer peuvent en avoir besoin.
+# Le dossier resources/views est également créé car il est requis
+# pour les commandes artisan view:cache en production.
+RUN mkdir -p bootstrap/cache \
+    && mkdir -p storage/framework/sessions \
+    && mkdir -p storage/framework/views \
+    && mkdir -p storage/framework/cache \
+    && mkdir -p storage/logs \
+    && mkdir -p resources/views \
+    && chown -R www-data:www-data bootstrap storage resources \
+    && chmod -R 775 bootstrap storage
+
 # Copie du script d'entrypoint
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -467,12 +478,8 @@ RUN if [ "$APP_ENV" = "production" ]; then \
         composer install --optimize-autoloader --no-interaction; \
     fi
 
-# Optimisations Laravel pour production
-RUN if [ "$APP_ENV" = "production" ]; then \
-        php artisan config:cache \
-        && php artisan route:cache \
-        && php artisan view:cache; \
-    fi
+# Note: Les optimisations Laravel (config:cache, route:cache, view:cache)
+# sont exécutées par l'entrypoint au démarrage du conteneur
 
 # Permissions
 RUN chown -R www-data:www-data storage bootstrap/cache \
@@ -688,6 +695,28 @@ echo ""
 # Fichier marqueur pour éviter la réinitialisation
 INIT_MARKER="/var/www/html/storage/.initialized"
 
+# ===========================================
+# VÉRIFICATION DES DÉPENDANCES
+# ===========================================
+
+# Installer composer si vendor n'existe pas (cas du volume mount)
+# Important: quand un volume est monté, il écrase le contenu du build Docker
+if [ ! -d "/var/www/html/vendor" ]; then
+    echo "📦 Installation des dépendances Composer..."
+    if [ "$APP_ENV" = "production" ]; then
+        composer install --no-dev --optimize-autoloader --no-interaction
+    else
+        composer install --optimize-autoloader --no-interaction
+    fi
+    echo "✅ Dépendances installées"
+fi
+
+# Créer les dossiers Laravel et fixer les permissions
+# Note: chown est nécessaire car le volume mount peut avoir des permissions différentes
+mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
+chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
 
@@ -700,12 +729,27 @@ wait_for_db() {
     local max_attempts=30
     local attempt=0
 
-    until php artisan db:monitor --database=pgsql 2>/dev/null; do
+    # Utiliser une connexion PHP/PDO directe (plus fiable que artisan)
+    until php -r "
+        \$host = getenv('DB_HOST') ?: 'db';
+        \$port = getenv('DB_PORT') ?: '5432';
+        \$dbname = getenv('DB_DATABASE') ?: 'ai_manager';
+        \$user = getenv('DB_USERNAME') ?: 'postgres';
+        \$pass = getenv('DB_PASSWORD') ?: 'secret';
+        try {
+            new PDO(\"pgsql:host=\$host;port=\$port;dbname=\$dbname\", \$user, \$pass);
+            exit(0);
+        } catch (Exception \$e) {
+            exit(1);
+        }
+    " 2>/dev/null; do
         attempt=$((attempt + 1))
         if [ $attempt -ge $max_attempts ]; then
             echo "❌ PostgreSQL non disponible après ${max_attempts} tentatives"
+            echo "   Host: ${DB_HOST:-db}, Port: ${DB_PORT:-5432}, DB: ${DB_DATABASE:-ai_manager}"
             exit 1
         fi
+        echo "   Tentative $attempt/$max_attempts..."
         sleep 2
     done
     echo "✅ PostgreSQL connecté"
@@ -800,11 +844,12 @@ initialize_app() {
     echo "   🧠 Initialisation des collections Qdrant..."
     php artisan qdrant:init --with-test-data
 
-    # Optimisations
+    # Optimisations (ignorer les erreurs de permissions non critiques)
+    # Le || true évite que set -e arrête le script sur ces erreurs
     echo "   ⚡ Optimisation des caches..."
-    php artisan config:clear
-    php artisan cache:clear
-    php artisan view:clear
+    php artisan config:clear || true
+    php artisan cache:clear || true
+    php artisan view:clear || true
 
     # Créer le fichier marqueur
     touch "$INIT_MARKER"
