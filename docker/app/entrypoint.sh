@@ -27,12 +27,27 @@ wait_for_db() {
     local max_attempts=30
     local attempt=0
 
-    until php artisan db:monitor --database=pgsql 2>/dev/null; do
+    # Utiliser une connexion PHP directe au lieu de artisan
+    until php -r "
+        \$host = getenv('DB_HOST') ?: 'db';
+        \$port = getenv('DB_PORT') ?: '5432';
+        \$dbname = getenv('DB_DATABASE') ?: 'ai_manager';
+        \$user = getenv('DB_USERNAME') ?: 'postgres';
+        \$pass = getenv('DB_PASSWORD') ?: 'secret';
+        try {
+            new PDO(\"pgsql:host=\$host;port=\$port;dbname=\$dbname\", \$user, \$pass);
+            exit(0);
+        } catch (Exception \$e) {
+            exit(1);
+        }
+    " 2>/dev/null; do
         attempt=$((attempt + 1))
         if [ $attempt -ge $max_attempts ]; then
             echo "❌ PostgreSQL non disponible après ${max_attempts} tentatives"
+            echo "   Host: ${DB_HOST:-db}, Port: ${DB_PORT:-5432}, DB: ${DB_DATABASE:-ai_manager}"
             exit 1
         fi
+        echo "   Tentative $attempt/$max_attempts..."
         sleep 2
     done
     echo "✅ PostgreSQL connecté"
