@@ -225,6 +225,7 @@ batirama-connect/
 | [03_ai_core_logic.md](./03_ai_core_logic.md) | Logique du Dispatcher, RAG et apprentissage |
 | [04_partners_api.md](./04_partners_api.md) | API Partenaires (ZOOMBAT, EBP, etc.) et intégrations |
 | [05_deployment_guide.md](./05_deployment_guide.md) | Guide de déploiement, configuration GPU, troubleshooting |
+| [06_admin_panel.md](./06_admin_panel.md) | **[NEW]** Cahier des charges du panneau d'administration |
 
 ---
 
@@ -310,12 +311,42 @@ WEBHOOK_TIMEOUT=30
 
 ## Roadmap Fonctionnelle
 
-### Phase 1 : Core (Ce projet)
+### Phase 1 : Core Backend (Terminé)
 - [x] Infrastructure Docker
 - [x] Système d'agents dynamiques
 - [x] Moteur RAG hybride
-- [x] Interface d'apprentissage
+- [x] Services d'apprentissage
 - [x] Gestion des ouvrages BTP
+- [x] API Partenaires
+- [x] API Chat Public
+
+### Phase 1.5 : Panneau d'Administration (En cours)
+> Voir [06_admin_panel.md](./06_admin_panel.md) pour le cahier des charges complet
+
+- [ ] **Phase 1** : Fondations Filament
+  - [ ] Installation et configuration Filament v3
+  - [ ] Gestion utilisateurs (UserResource)
+  - [ ] Gestion rôles/permissions (RoleResource)
+  - [ ] Dashboard basique avec widgets
+
+- [ ] **Phase 2** : Gestion Agents
+  - [ ] CRUD agents IA (AgentResource)
+  - [ ] Interface de test d'agent (AgentTester)
+  - [ ] Historique des system prompts
+
+- [ ] **Phase 3** : Monitoring
+  - [ ] Vue sessions IA (AiSessionResource)
+  - [ ] Dashboard avancé avec graphiques
+  - [ ] Exports et filtres
+
+- [ ] **Phase 4** : Apprentissage
+  - [ ] Interface de validation des réponses
+  - [ ] Gestion learned_responses
+
+- [ ] **Phase 5** : Données Métier
+  - [ ] Gestion ouvrages BTP
+  - [ ] Import/Export CSV
+  - [ ] Gestion partenaires API
 
 ### Phase 2 : Intégration (Future)
 - [ ] API authentification OAuth2
