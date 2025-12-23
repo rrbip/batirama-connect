@@ -8,6 +8,7 @@ use App\Filament\Resources\AgentResource;
 use App\Models\Agent;
 use App\Models\AiSession;
 use App\Services\AI\DispatcherService;
+use App\Services\AI\OllamaService;
 use Filament\Actions;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -84,6 +85,15 @@ class TestAgent extends Page implements HasForms
         ];
 
         try {
+            // Vérifier la disponibilité d'Ollama avant d'envoyer
+            $ollama = OllamaService::forAgent($this->getRecord());
+            if (!$ollama->isAvailable()) {
+                throw new \RuntimeException(
+                    "Le serveur Ollama n'est pas accessible ({$ollama->getBaseUrl()}). " .
+                    "Vérifiez que Ollama est installé et lancé, ou configurez un autre provider LLM."
+                );
+            }
+
             /** @var DispatcherService $dispatcher */
             $dispatcher = app(DispatcherService::class);
 
@@ -136,6 +146,19 @@ class TestAgent extends Page implements HasForms
             'Max tokens' => $record->max_tokens ?? 2048,
             'Mode RAG' => $record->retrieval_mode ?? 'VECTOR_ONLY',
             'Collection' => $record->qdrant_collection ?? '-',
+        ];
+    }
+
+    #[Computed]
+    public function ollamaStatus(): array
+    {
+        $ollama = OllamaService::forAgent($this->getRecord());
+        $available = $ollama->isAvailable();
+
+        return [
+            'available' => $available,
+            'url' => $ollama->getBaseUrl(),
+            'models' => $available ? $ollama->listModels() : [],
         ];
     }
 

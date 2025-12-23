@@ -2,6 +2,7 @@
     @php
         $agent = $this->getRecord();
         $testSession = $this->getTestSession();
+        $ollamaStatus = $this->ollamaStatus;
     @endphp
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6"
@@ -84,6 +85,51 @@
                         </div>
                     </div>
                 @endif
+            </x-filament::section>
+
+            {{-- Statut Ollama --}}
+            <x-filament::section class="mt-4">
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-server class="w-5 h-5" />
+                        Serveur LLM
+                    </div>
+                </x-slot>
+
+                <div class="space-y-2 text-sm">
+                    <div class="flex items-center gap-2">
+                        @if($ollamaStatus['available'])
+                            <span class="w-2 h-2 bg-success-500 rounded-full"></span>
+                            <span class="text-success-600 dark:text-success-400">Connecté</span>
+                        @else
+                            <span class="w-2 h-2 bg-danger-500 rounded-full animate-pulse"></span>
+                            <span class="text-danger-600 dark:text-danger-400">Non disponible</span>
+                        @endif
+                    </div>
+
+                    <div class="text-xs text-gray-500">
+                        {{ $ollamaStatus['url'] }}
+                    </div>
+
+                    @if($ollamaStatus['available'] && !empty($ollamaStatus['models']))
+                        <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <span class="text-xs text-gray-500">Modèles disponibles:</span>
+                            <ul class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                @foreach(array_slice($ollamaStatus['models'], 0, 5) as $model)
+                                    <li>• {{ $model }}</li>
+                                @endforeach
+                                @if(count($ollamaStatus['models']) > 5)
+                                    <li class="text-gray-400">... et {{ count($ollamaStatus['models']) - 5 }} autres</li>
+                                @endif
+                            </ul>
+                        </div>
+                    @elseif(!$ollamaStatus['available'])
+                        <div class="mt-2 p-2 bg-danger-50 dark:bg-danger-950 rounded text-xs text-danger-700 dark:text-danger-300">
+                            <p class="font-medium">Ollama n'est pas accessible.</p>
+                            <p class="mt-1">Vérifiez que le serveur est lancé ou configurez un autre provider.</p>
+                        </div>
+                    @endif
+                </div>
             </x-filament::section>
         </div>
 
