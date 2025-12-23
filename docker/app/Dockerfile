@@ -71,6 +71,11 @@ WORKDIR /var/www/html
 COPY --chown=www-data:www-data . .
 
 # Création des dossiers Laravel nécessaires AVANT composer install
+# Ces dossiers sont requis par Laravel pour le cache et les sessions.
+# Ils doivent exister avant l'exécution de composer install car
+# certains scripts post-install de Composer peuvent en avoir besoin.
+# Le dossier resources/views est également créé car il est requis
+# pour les commandes artisan view:cache en production.
 RUN mkdir -p bootstrap/cache \
     && mkdir -p storage/framework/sessions \
     && mkdir -p storage/framework/views \

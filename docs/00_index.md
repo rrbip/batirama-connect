@@ -224,6 +224,7 @@ batirama-connect/
 | [02_database_schema.md](./02_database_schema.md) | Schémas PostgreSQL et collections Qdrant |
 | [03_ai_core_logic.md](./03_ai_core_logic.md) | Logique du Dispatcher, RAG et apprentissage |
 | [04_partners_api.md](./04_partners_api.md) | API Partenaires (ZOOMBAT, EBP, etc.) et intégrations |
+| [05_deployment_guide.md](./05_deployment_guide.md) | Guide de déploiement, configuration GPU, troubleshooting |
 
 ---
 
