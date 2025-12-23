@@ -23,7 +23,7 @@ services:
       db:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
+        condition: service_started
     networks:
       - ai_network
     healthcheck:
@@ -100,6 +100,8 @@ services:
   # ===========================================
   # QDRANT - BASE VECTORIELLE
   # ===========================================
+  # Note: L'image Qdrant minimale n'a pas curl/wget pour un healthcheck.
+  # L'application gère la connexion avec retry dans l'entrypoint.
   qdrant:
     image: qdrant/qdrant:v1.16.2
     container_name: aim_qdrant
@@ -115,13 +117,6 @@ services:
       - "${QDRANT_EXTERNAL_PORT:-6333}:6333"
     networks:
       - ai_network
-    # Note: On utilise wget car curl n'est pas installé dans l'image Qdrant
-    # --spider vérifie l'URL sans télécharger le contenu
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ===========================================
   # OLLAMA - SERVEUR IA (CPU par défaut)
