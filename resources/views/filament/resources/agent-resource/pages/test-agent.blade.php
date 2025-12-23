@@ -4,7 +4,52 @@
         $testSession = $this->getTestSession();
     @endphp
 
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6"
+         x-data="{
+            pendingMessage: null,
+            isProcessing: false,
+            inputMessage: @entangle('userMessage'),
+            scrollToBottom() {
+                this.$nextTick(() => {
+                    const container = document.getElementById('chat-messages');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                });
+            },
+            sendOptimistic() {
+                if (!this.inputMessage || this.inputMessage.trim() === '') return;
+
+                // Afficher immédiatement le message utilisateur
+                this.pendingMessage = {
+                    content: this.inputMessage,
+                    timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                };
+                this.isProcessing = true;
+                this.scrollToBottom();
+
+                // Vider le champ (sera aussi vidé côté serveur)
+                const msg = this.inputMessage;
+                this.inputMessage = '';
+
+                // Soumettre au serveur
+                $wire.sendMessage();
+            }
+         }"
+         x-init="
+            $watch('$wire.messages', () => {
+                pendingMessage = null;
+                isProcessing = false;
+                scrollToBottom();
+            });
+            $watch('$wire.isLoading', (value) => {
+                if (!value) {
+                    isProcessing = false;
+                    pendingMessage = null;
+                }
+            });
+         "
+    >
         {{-- Info Agent --}}
         <div class="lg:col-span-1">
             <x-filament::section>
@@ -35,7 +80,7 @@
                 @if($testSession)
                     <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <div class="text-xs text-gray-500">
-                            Session: {{ Str::limit($testSession->id, 8) }}
+                            Session: {{ Str::limit($testSession->uuid, 8) }}
                         </div>
                     </div>
                 @endif
@@ -46,7 +91,18 @@
         <div class="lg:col-span-3">
             <x-filament::section class="h-full">
                 <x-slot name="heading">
-                    Console de test
+                    <div class="flex items-center gap-2">
+                        Console de test
+                        <template x-if="isProcessing">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-800 dark:bg-warning-900 dark:text-warning-200">
+                                <svg class="animate-spin -ml-0.5 mr-1.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                En cours...
+                            </span>
+                        </template>
+                    </div>
                 </x-slot>
 
                 {{-- Messages --}}
@@ -81,60 +137,75 @@
                             </div>
                         </div>
                     @empty
-                        <div class="flex items-center justify-center h-full text-gray-400">
-                            <div class="text-center">
-                                <x-heroicon-o-chat-bubble-left-ellipsis class="w-12 h-12 mx-auto mb-2" />
-                                <p>Envoyez un message pour commencer</p>
+                        <template x-if="!pendingMessage">
+                            <div class="flex items-center justify-center h-full text-gray-400">
+                                <div class="text-center">
+                                    <x-heroicon-o-chat-bubble-left-ellipsis class="w-12 h-12 mx-auto mb-2" />
+                                    <p>Envoyez un message pour commencer</p>
+                                </div>
                             </div>
-                        </div>
+                        </template>
                     @endforelse
 
-                    @if($isLoading)
-                        <div class="flex justify-start">
-                            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
-                                <div class="flex items-center gap-2">
-                                    <x-filament::loading-indicator class="h-5 w-5" />
-                                    <span class="text-sm text-gray-500">L'agent réfléchit...</span>
+                    {{-- Message optimiste (affiché immédiatement) --}}
+                    <template x-if="pendingMessage">
+                        <div class="flex justify-end">
+                            <div class="max-w-[80%] bg-primary-500 text-white rounded-lg p-3 shadow-sm">
+                                <div class="prose prose-sm prose-invert max-w-none" x-text="pendingMessage.content"></div>
+                                <div class="flex items-center justify-between mt-2 text-xs text-primary-200">
+                                    <span x-text="pendingMessage.timestamp"></span>
                                 </div>
                             </div>
                         </div>
-                    @endif
+                    </template>
+
+                    {{-- Indicateur de réflexion de l'IA --}}
+                    <template x-if="isProcessing">
+                        <div class="flex justify-start">
+                            <div class="max-w-[80%] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                <div class="flex items-center gap-3">
+                                    <div class="flex space-x-1">
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
+                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
+                                    </div>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">{{ $agent->name }} réfléchit...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
                 </div>
 
                 {{-- Input --}}
-                <form wire:submit="sendMessage" class="flex gap-2">
+                <form x-on:submit.prevent="sendOptimistic" class="flex gap-2">
                     <div class="flex-1">
                         <x-filament::input.wrapper>
                             <x-filament::input
                                 type="text"
-                                wire:model="userMessage"
+                                x-model="inputMessage"
                                 placeholder="Tapez votre message..."
-                                :disabled="$isLoading"
+                                x-bind:disabled="isProcessing"
                                 autofocus
+                                x-on:keydown.enter.prevent="sendOptimistic"
                             />
                         </x-filament::input.wrapper>
                     </div>
                     <x-filament::button
                         type="submit"
-                        :disabled="$isLoading"
+                        x-bind:disabled="isProcessing"
                         icon="heroicon-o-paper-airplane"
                     >
-                        Envoyer
+                        <span x-show="!isProcessing">Envoyer</span>
+                        <span x-show="isProcessing" class="flex items-center gap-1">
+                            <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Envoi...
+                        </span>
                     </x-filament::button>
                 </form>
             </x-filament::section>
         </div>
     </div>
-
-    @push('scripts')
-    <script>
-        // Auto-scroll to bottom on new messages
-        document.addEventListener('livewire:updated', () => {
-            const container = document.getElementById('chat-messages');
-            if (container) {
-                container.scrollTop = container.scrollHeight;
-            }
-        });
-    </script>
-    @endpush
 </x-filament-panels::page>
