@@ -63,11 +63,7 @@
                 $wire.sendMessage();
             }
          }"
-         x-init="
-            $wire.on('message-received', () => {
-                resetState();
-            });
-         "
+         x-on:message-received.window="resetState()"
     >
         {{-- Info Agent --}}
         <div class="lg:col-span-1">
