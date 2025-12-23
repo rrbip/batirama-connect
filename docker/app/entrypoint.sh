@@ -30,8 +30,9 @@ if [ ! -d "/var/www/html/vendor" ]; then
     echo "✅ Dépendances installées"
 fi
 
-# Créer les dossiers Laravel si nécessaires
+# Créer les dossiers Laravel et fixer les permissions
 mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
 chmod -R 775 storage bootstrap/cache 2>/dev/null || true
 
 # Modèles IA à télécharger automatiquement
