@@ -70,6 +70,15 @@ WORKDIR /var/www/html
 # Copie des fichiers de l'application
 COPY --chown=www-data:www-data . .
 
+# Création des dossiers Laravel nécessaires AVANT composer install
+RUN mkdir -p bootstrap/cache \
+    && mkdir -p storage/framework/sessions \
+    && mkdir -p storage/framework/views \
+    && mkdir -p storage/framework/cache \
+    && mkdir -p storage/logs \
+    && chown -R www-data:www-data bootstrap storage \
+    && chmod -R 775 bootstrap storage
+
 # Copie du script d'entrypoint
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
