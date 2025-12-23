@@ -76,7 +76,8 @@ RUN mkdir -p bootstrap/cache \
     && mkdir -p storage/framework/views \
     && mkdir -p storage/framework/cache \
     && mkdir -p storage/logs \
-    && chown -R www-data:www-data bootstrap storage \
+    && mkdir -p resources/views \
+    && chown -R www-data:www-data bootstrap storage resources \
     && chmod -R 775 bootstrap storage
 
 # Copie du script d'entrypoint
@@ -90,12 +91,8 @@ RUN if [ "$APP_ENV" = "production" ]; then \
         composer install --optimize-autoloader --no-interaction; \
     fi
 
-# Optimisations Laravel pour production
-RUN if [ "$APP_ENV" = "production" ]; then \
-        php artisan config:cache \
-        && php artisan route:cache \
-        && php artisan view:cache; \
-    fi
+# Note: Les optimisations Laravel (config:cache, route:cache, view:cache)
+# sont exécutées par l'entrypoint au démarrage du conteneur
 
 # Permissions
 RUN chown -R www-data:www-data storage bootstrap/cache \
