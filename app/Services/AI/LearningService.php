@@ -78,10 +78,13 @@ class LearningService
         int $validatorId
     ): bool {
         try {
+            // S'assurer que la collection existe
+            $this->ensureCollectionExists();
+
             // Générer l'embedding de la question
             $vector = $this->embeddingService->embed($question);
 
-            $pointId = "learned_{$messageId}";
+            $pointId = Str::uuid()->toString();
 
             $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
                 [
@@ -217,5 +220,34 @@ class LearningService
             'total_learned' => $total,
             'collection' => $collection,
         ];
+    }
+
+    /**
+     * S'assure que la collection learned_responses existe
+     */
+    private function ensureCollectionExists(): void
+    {
+        if ($this->qdrantService->collectionExists(self::LEARNED_RESPONSES_COLLECTION)) {
+            return;
+        }
+
+        $config = config('qdrant.collections.' . self::LEARNED_RESPONSES_COLLECTION, [
+            'vector_size' => config('ai.qdrant.vector_size', 768),
+            'distance' => 'Cosine',
+        ]);
+
+        $created = $this->qdrantService->createCollection(self::LEARNED_RESPONSES_COLLECTION, $config);
+
+        if ($created) {
+            Log::info('Collection learned_responses créée automatiquement');
+
+            // Créer les index sur les champs payload
+            $indexes = $config['payload_indexes'] ?? [];
+            foreach ($indexes as $field => $type) {
+                $this->qdrantService->createPayloadIndex(self::LEARNED_RESPONSES_COLLECTION, $field, $type);
+            }
+        } else {
+            Log::error('Impossible de créer la collection learned_responses');
+        }
     }
 }
