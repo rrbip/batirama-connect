@@ -210,17 +210,22 @@
                                         $documentSources = $context['document_sources'] ?? [];
                                         $stats = $context['stats'] ?? [];
                                         $totalSources = count($learnedSources) + count($documentSources);
+                                        $hasSystemPrompt = !empty($context['system_prompt_sent']);
                                     @endphp
 
-                                    @if($totalSources > 0)
+                                    @if($totalSources > 0 || $hasSystemPrompt)
                                         <details class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg">
                                             <summary class="p-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg flex items-center gap-2">
                                                 <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
-                                                <span>{{ $totalSources }} source(s) utilisée(s) par l'IA</span>
-                                                @if(!empty($stats))
-                                                    <span class="text-gray-400">
-                                                        ({{ $stats['learned_count'] ?? 0 }} apprises, {{ $stats['document_count'] ?? 0 }} docs)
-                                                    </span>
+                                                @if($totalSources > 0)
+                                                    <span>{{ $totalSources }} source(s) utilisée(s) par l'IA</span>
+                                                    @if(!empty($stats))
+                                                        <span class="text-gray-400">
+                                                            ({{ $stats['learned_count'] ?? 0 }} apprises, {{ $stats['document_count'] ?? 0 }} docs)
+                                                        </span>
+                                                    @endif
+                                                @else
+                                                    <span>Voir le contexte envoyé à l'IA</span>
                                                 @endif
                                             </summary>
 
