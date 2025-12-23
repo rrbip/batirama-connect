@@ -5,15 +5,43 @@
 
 ---
 
+## Déploiement Rapide
+
+### Script de déploiement automatique
+
+Le projet inclut un script `deploy.sh` qui automatise toutes les étapes de déploiement :
+
+```bash
+# Mise à jour standard
+./deploy.sh
+
+# Rebuild complet (après modification Dockerfile ou ajout de dépendances)
+./deploy.sh --rebuild
+
+# Reset complet (supprime les données et réinitialise)
+./deploy.sh --fresh
+```
+
+Le script effectue automatiquement :
+1. Pull des dernières modifications Git
+2. Build des images Docker (si nécessaire)
+3. Démarrage des services
+4. Publication des assets (Filament, etc.)
+5. Exécution des migrations
+6. Vidage des caches
+
+---
+
 ## Architecture de l'Application
 
-AI-Manager CMS est un **backend API** pour les agents IA du secteur BTP. Il n'y a pas d'interface d'administration web (pas de panneau Filament).
+AI-Manager CMS est un **backend API** avec un **panneau d'administration Filament v3**.
 
 ### Points d'accès
 
 | Endpoint | Description |
 |----------|-------------|
 | `/` | Page de statut JSON (santé de l'API) |
+| `/admin` | Panneau d'administration Filament |
 | `/api/health` | Health check pour les load balancers |
 | `/api/v1/partners/*` | API partenaires (authentifiée) |
 | `/api/c/{token}/*` | Chat public (via token) |
@@ -555,29 +583,52 @@ ufw allow 8443/tcp
 
 ## Mise à Jour du Projet
 
-### Depuis une branche de développement
+### Méthode recommandée : Script deploy.sh
 
 ```bash
-cd ~/batirama-connect
+cd /opt/batirama-connect
 
-# Arrêter les services
-docker compose down
+# Mise à jour standard (pull + restart + migrations)
+./deploy.sh
 
-# Récupérer les mises à jour
+# Si des dépendances ont changé (nouveau package composer)
+./deploy.sh --rebuild
+```
+
+### Méthode manuelle
+
+Si vous préférez contrôler chaque étape :
+
+```bash
+cd /opt/batirama-connect
+
+# 1. Récupérer les mises à jour
 git pull origin <branche>
 
-# Reconstruire et relancer
-docker compose up -d --build
+# 2. Reconstruire si nécessaire (nouvelles dépendances)
+docker compose build app
 
-# Exécuter les migrations
+# 3. Redémarrer les services
+docker compose up -d
+
+# 4. Installer les dépendances (important si composer.json a changé)
+docker compose exec app composer install --no-dev --optimize-autoloader
+
+# 5. Publier les assets Filament
+docker compose exec app php artisan filament:assets
+
+# 6. Vider les caches et migrer
+docker compose exec app php artisan optimize:clear
 docker compose exec app php artisan migrate --force
 ```
 
-### Depuis la branche principale
+### Gestion des dépendances vendor
 
-```bash
-make update  # ou make update-prod pour la production
-```
+Le système détecte automatiquement si le dossier `vendor/` est à jour :
+
+- **À chaque démarrage**, l'entrypoint compare le hash de `composer.lock` avec celui stocké dans `vendor/.composer-lock-hash`
+- Si le hash diffère, `composer install` est automatiquement exécuté
+- Cela permet de mettre à jour les dépendances automatiquement après un `git pull`
 
 ---
 
