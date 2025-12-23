@@ -284,13 +284,81 @@
 
                                                 {{-- Prompt système complet --}}
                                                 @if(!empty($context['system_prompt_sent']))
+                                                    @php
+                                                        $promptSections = preg_split('/(?=## )/', $context['system_prompt_sent']);
+                                                        $promptSections = array_filter($promptSections, fn($s) => trim($s) !== '');
+                                                        $promptSections = array_values($promptSections);
+                                                    @endphp
                                                     <div>
                                                         <details>
                                                             <summary class="cursor-pointer text-gray-500 hover:text-gray-700 flex items-center gap-1">
                                                                 <x-heroicon-o-command-line class="w-4 h-4" />
-                                                                Voir le prompt système complet envoyé
+                                                                Voir le prompt système complet envoyé ({{ count($promptSections) }} sections)
                                                             </summary>
-                                                            <div class="mt-2 p-3 bg-gray-100 dark:bg-gray-900 rounded font-mono text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">{{ $context['system_prompt_sent'] }}</div>
+                                                            <div class="mt-2 space-y-3">
+                                                                @foreach($promptSections as $index => $section)
+                                                                    @php
+                                                                        $section = trim($section);
+                                                                        $isSystemPrompt = $index === 0 && !str_starts_with($section, '## ');
+                                                                        $sectionTitle = '';
+                                                                        $sectionContent = $section;
+
+                                                                        if (preg_match('/^## (.+?)[\r\n]/', $section, $matches)) {
+                                                                            $sectionTitle = trim($matches[1]);
+                                                                            $sectionContent = trim(substr($section, strlen($matches[0])));
+                                                                        } elseif ($isSystemPrompt) {
+                                                                            $sectionTitle = 'Instructions Agent';
+                                                                        }
+
+                                                                        $isSimilaires = str_contains($sectionTitle, 'SIMILAIRES');
+                                                                        $isDocumentaire = str_contains($sectionTitle, 'DOCUMENTAIRE');
+                                                                        $isHistorique = str_contains($sectionTitle, 'HISTORIQUE');
+                                                                        $isInstructions = str_contains($sectionTitle, 'Instructions');
+                                                                    @endphp
+
+                                                                    @if($isSimilaires)
+                                                                        <div class="border border-primary-200 dark:border-primary-800 rounded-lg overflow-hidden">
+                                                                            <div class="bg-primary-50 dark:bg-primary-950 px-3 py-2 flex items-center gap-2 border-b border-primary-200 dark:border-primary-800">
+                                                                                <x-heroicon-o-academic-cap class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                                                                                <span class="font-semibold text-primary-700 dark:text-primary-300">{{ $sectionTitle }}</span>
+                                                                            </div>
+                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
+                                                                        </div>
+                                                                    @elseif($isDocumentaire)
+                                                                        <div class="border border-info-200 dark:border-info-800 rounded-lg overflow-hidden">
+                                                                            <div class="bg-info-50 dark:bg-info-950 px-3 py-2 flex items-center gap-2 border-b border-info-200 dark:border-info-800">
+                                                                                <x-heroicon-o-document-text class="w-4 h-4 text-info-600 dark:text-info-400" />
+                                                                                <span class="font-semibold text-info-700 dark:text-info-300">{{ $sectionTitle }}</span>
+                                                                            </div>
+                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
+                                                                        </div>
+                                                                    @elseif($isHistorique)
+                                                                        <div class="border border-warning-200 dark:border-warning-800 rounded-lg overflow-hidden">
+                                                                            <div class="bg-warning-50 dark:bg-warning-950 px-3 py-2 flex items-center gap-2 border-b border-warning-200 dark:border-warning-800">
+                                                                                <x-heroicon-o-chat-bubble-left-right class="w-4 h-4 text-warning-600 dark:text-warning-400" />
+                                                                                <span class="font-semibold text-warning-700 dark:text-warning-300">{{ $sectionTitle }}</span>
+                                                                            </div>
+                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
+                                                                        </div>
+                                                                    @elseif($isInstructions)
+                                                                        <div class="border border-success-200 dark:border-success-800 rounded-lg overflow-hidden">
+                                                                            <div class="bg-success-50 dark:bg-success-950 px-3 py-2 flex items-center gap-2 border-b border-success-200 dark:border-success-800">
+                                                                                <x-heroicon-o-cog-6-tooth class="w-4 h-4 text-success-600 dark:text-success-400" />
+                                                                                <span class="font-semibold text-success-700 dark:text-success-300">{{ $sectionTitle }}</span>
+                                                                            </div>
+                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
+                                                                        </div>
+                                                                    @else
+                                                                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                                                            <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2 flex items-center gap-2 border-b border-gray-200 dark:border-gray-700">
+                                                                                <x-heroicon-o-document class="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                                                                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $sectionTitle ?: 'Section ' . ($index + 1) }}</span>
+                                                                            </div>
+                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
+                                                                        </div>
+                                                                    @endif
+                                                                @endforeach
+                                                            </div>
                                                         </details>
                                                     </div>
                                                 @endif
