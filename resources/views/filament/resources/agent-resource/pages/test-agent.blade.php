@@ -64,7 +64,7 @@
             }
          }"
          x-init="
-            Livewire.on('message-received', () => {
+            $wire.on('message-received', () => {
                 resetState();
             });
          "
