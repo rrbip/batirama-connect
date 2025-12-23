@@ -159,27 +159,40 @@ class LearningService
     }
 
     /**
-     * Rejette un message (pas d'apprentissage)
+     * Valide un message sans apprentissage
      */
-    public function reject(AiMessage $message, User $validator): bool
+    public function validate(AiMessage $message, int $validatorId): bool
     {
         return $message->update([
-            'validation_status' => 'rejected',
-            'validated_by' => $validator->id,
+            'validation_status' => 'validated',
+            'validated_by' => $validatorId,
             'validated_at' => now(),
         ]);
     }
 
     /**
-     * Valide un message sans apprentissage
+     * Rejette un message (pas d'apprentissage)
      */
-    public function validate(AiMessage $message, User $validator): bool
+    public function reject(AiMessage $message, int $validatorId, ?string $reason = null): bool
     {
         return $message->update([
-            'validation_status' => 'validated',
-            'validated_by' => $validator->id,
+            'validation_status' => 'rejected',
+            'validated_by' => $validatorId,
             'validated_at' => now(),
         ]);
+    }
+
+    /**
+     * Apprend d'un message corrigé
+     */
+    public function learn(AiMessage $message, string $correctedContent, int $validatorId): bool
+    {
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return false;
+        }
+
+        return $this->validateAndLearn($message, $validator, $correctedContent);
     }
 
     /**
