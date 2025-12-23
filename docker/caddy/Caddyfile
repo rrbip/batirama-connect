@@ -4,13 +4,12 @@
 
 # Configuration globale
 {
-    # Email pour Let's Encrypt (requis pour les vrais domaines)
-    # Configurez ACME_EMAIL dans .env avec votre email
-    email {$ACME_EMAIL}
+    # Mode derrière un reverse proxy (CWP, Apache, Nginx)
+    # Quand BEHIND_PROXY=true, Caddy ne gère pas SSL
+    # Le proxy externe (CWP/Apache) gère SSL et redirige vers :8080
 
-    # Caddy gère automatiquement les certificats :
-    # - localhost / 127.0.0.1 → certificats auto-signés
-    # - domaine réel (ex: ai.bipinfopro.com) → Let's Encrypt automatique
+    # Email pour Let's Encrypt (uniquement si BEHIND_PROXY != true)
+    email {$ACME_EMAIL:}
 
     # Logs
     log {
@@ -19,9 +18,10 @@
     }
 }
 
-# Site principal - Le domaine est configuré via SITE_ADDRESS dans .env
-# Exemples : localhost, monsite.com, *.monsite.com
-{$SITE_ADDRESS:localhost} {
+# Site principal
+# Mode 1: Derrière un proxy (CWP/Apache) → écoute sur :80 uniquement
+# Mode 2: Accès direct → SITE_ADDRESS avec SSL automatique
+:80 {
     # Racine du site
     root * /var/www/html/public
 
@@ -54,6 +54,8 @@
     # PHP-FPM
     php_fastcgi app:9000 {
         resolve_root_symlink
+        # Passer les headers du proxy pour Laravel
+        trusted_proxies private_ranges
     }
 
     # Fichiers statiques
@@ -63,7 +65,7 @@
     try_files {path} {path}/ /index.php?{query}
 }
 
-# Health check endpoint (interne)
-:8080 {
+# Health check endpoint (interne - port différent)
+:8081 {
     respond /health "OK" 200
 }

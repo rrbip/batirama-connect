@@ -51,10 +51,160 @@ WEB_SSL_PORT=443
 | Service | Port Interne | Port Externe (défaut) | Variable |
 |---------|--------------|----------------------|----------|
 | Web HTTP | 80 | 8080 | `WEB_PORT` |
-| Web HTTPS | 443 | 8443 | `WEB_SSL_PORT` |
 | PostgreSQL | 5432 | 5432 | `DB_EXTERNAL_PORT` |
 | Qdrant | 6333 | 6333 | `QDRANT_EXTERNAL_PORT` |
 | Ollama | 11434 | 11434 | `OLLAMA_EXTERNAL_PORT` |
+
+---
+
+## Intégration avec CWP (CentOS WebPanel)
+
+### Architecture Recommandée
+
+Avec CWP, l'architecture recommandée est :
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      SERVEUR CWP                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│   Internet                                                  │
+│      │                                                      │
+│      ▼                                                      │
+│   ┌─────────────────────┐                                   │
+│   │  Apache (CWP)       │ ◄── Ports 80/443                  │
+│   │  + Let's Encrypt    │     SSL géré par CWP              │
+│   └──────────┬──────────┘                                   │
+│              │ ProxyPass                                    │
+│              ▼                                              │
+│   ┌─────────────────────┐                                   │
+│   │  Docker (Caddy)     │ ◄── Port 8080                     │
+│   │  + Laravel App      │     HTTP uniquement               │
+│   └─────────────────────┘                                   │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Avantages** :
+- CWP gère automatiquement les certificats SSL (Let's Encrypt)
+- La configuration survit aux mises à jour CWP
+- Pas de conflit de ports
+
+### Étape 1 : Créer le Domaine dans CWP
+
+1. Connectez-vous au panneau CWP (port 2031)
+2. Allez dans **Domains → Add Domain**
+3. Ajoutez votre domaine (ex: `ai.bipinfopro.com`)
+4. **Important** : Ne créez PAS de compte utilisateur, utilisez le compte root
+
+### Étape 2 : Activer SSL avec AutoSSL
+
+1. Dans CWP, allez dans **WebServer Settings → SSL Certificates**
+2. Ou utilisez **AutoSSL** dans le menu de gauche
+3. Sélectionnez votre domaine et activez Let's Encrypt
+4. Attendez que le certificat soit généré (quelques minutes)
+
+### Étape 3 : Configurer le Reverse Proxy
+
+CWP permet d'ajouter des directives personnalisées qui **ne seront pas écrasées**.
+
+**Méthode 1 : Via l'interface CWP (recommandé)**
+
+1. Allez dans **WebServer Settings → Apache vHosts**
+2. Trouvez votre domaine dans la liste
+3. Cliquez sur **Edit** ou l'icône de configuration
+4. Dans la section "Custom Directives" ou "Additional Apache Directives", ajoutez :
+
+```apache
+# Proxy vers Docker
+ProxyPreserveHost On
+ProxyPass / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/
+
+# Timeouts pour les requêtes IA longues
+ProxyTimeout 300
+```
+
+5. Sauvegardez et redémarrez Apache
+
+**Méthode 2 : Fichier include personnalisé**
+
+Si l'interface ne permet pas d'ajouter des directives, créez un fichier include :
+
+```bash
+# Créer le répertoire pour les includes personnalisés
+mkdir -p /usr/local/apache/conf/userdata/std/2_4/root/ai.bipinfopro.com
+
+# Créer le fichier de configuration
+cat > /usr/local/apache/conf/userdata/std/2_4/root/ai.bipinfopro.com/proxy.conf << 'EOF'
+ProxyPreserveHost On
+ProxyPass / http://127.0.0.1:8080/
+ProxyPassReverse / http://127.0.0.1:8080/
+ProxyTimeout 300
+EOF
+
+# Reconstruire les vhosts
+/scripts/rebuildhttpdconf
+# ou
+cwp_restart_httpd
+```
+
+**Méthode 3 : Configuration via cwpcli**
+
+```bash
+# Si disponible
+cwpcli domain proxy-add ai.bipinfopro.com 127.0.0.1:8080
+```
+
+### Étape 4 : Redémarrer les Services
+
+```bash
+# Redémarrer Apache
+systemctl restart httpd
+
+# Vérifier la configuration
+httpd -t
+
+# Vérifier que le proxy fonctionne
+curl -I http://127.0.0.1:8080
+curl -I https://ai.bipinfopro.com
+```
+
+### Vérification
+
+```bash
+# 1. Docker doit écouter sur 8080
+docker compose ps
+# aim_web doit montrer 0.0.0.0:8080->80/tcp
+
+# 2. Apache doit avoir les modules proxy
+httpd -M | grep proxy
+# Doit afficher : proxy_module, proxy_http_module
+
+# 3. Test direct du conteneur
+curl http://127.0.0.1:8080
+
+# 4. Test via le domaine
+curl -I https://ai.bipinfopro.com
+```
+
+### Configuration Laravel pour le Proxy
+
+Dans votre fichier `.env` Laravel, configurez les proxies de confiance :
+
+```env
+# Faire confiance au proxy Apache
+TRUSTED_PROXIES=127.0.0.1
+```
+
+Le Caddyfile est déjà configuré avec `trusted_proxies private_ranges` pour transmettre correctement les headers.
+
+### Notes Importantes
+
+1. **Ne modifiez PAS directement** `/usr/local/apache/conf/httpd.conf` - CWP l'écrasera
+2. **Utilisez les fichiers userdata** pour les configurations personnalisées
+3. **Les certificats SSL** sont gérés par CWP/AutoSSL, pas par Caddy
+4. **Le port 8080** doit être accessible uniquement en local (localhost)
 
 ---
 
@@ -140,16 +290,12 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 ### Qdrant
 
-L'image Qdrant n'inclut pas `curl`. Le healthcheck utilise `wget` :
+L'image Qdrant minimale n'inclut ni `curl` ni `wget`. Le healthcheck est désactivé et l'application gère la connexion avec retry dans l'entrypoint.
 
 ```yaml
 qdrant:
-  healthcheck:
-    # Note: wget est utilisé car curl n'est pas disponible dans l'image Qdrant
-    test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/readyz"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
+  # Pas de healthcheck - l'image n'a pas curl/wget
+  # L'application utilise service_started au lieu de service_healthy
 ```
 
 ### PostgreSQL
@@ -178,17 +324,23 @@ app:
 
 ## Troubleshooting
 
-### Erreur : "curl: executable file not found"
+### Erreur : "curl: executable file not found" ou "wget: not found"
 
 **Symptôme** : Le conteneur Qdrant reste "unhealthy"
 
-**Cause** : L'image Qdrant n'inclut pas curl
+**Cause** : L'image Qdrant minimale n'inclut ni curl ni wget
 
-**Solution** : Le healthcheck utilise maintenant wget (fix appliqué dans docker-compose.yml)
+**Solution** : Le healthcheck a été supprimé du docker-compose.yml. L'application utilise `service_started` au lieu de `service_healthy` pour Qdrant.
 
-```bash
-# Vérifier que le fix est appliqué
-grep -A3 "healthcheck" docker-compose.yml | grep wget
+```yaml
+# docker-compose.yml - Configuration actuelle
+qdrant:
+  # Pas de healthcheck
+
+app:
+  depends_on:
+    qdrant:
+      condition: service_started  # Pas service_healthy
 ```
 
 ### Erreur : "could not select device driver nvidia"
@@ -347,24 +499,36 @@ make update  # ou make update-prod pour la production
 
 - [ ] Docker et Docker Compose installés
 - [ ] Git installé
-- [ ] Ports 8080/8443 ouverts dans le firewall
+- [ ] Port 8080 accessible (localement si derrière CWP)
 - [ ] Clone du repository
 - [ ] Fichier `.env` créé depuis `.env.example`
-- [ ] Variables configurées (domaine, email, mots de passe)
+- [ ] Variables configurées (mots de passe)
 - [ ] `./install.sh` exécuté avec succès
-- [ ] Tous les conteneurs "healthy"
-- [ ] Accès à l'application via navigateur
+- [ ] Tous les conteneurs démarrés
+- [ ] Accès à l'application via `http://localhost:8080`
 
-### Configuration Production
+### Configuration Production avec CWP
 
 - [ ] `APP_ENV=production` dans `.env`
 - [ ] `APP_DEBUG=false` dans `.env`
 - [ ] Mot de passe DB sécurisé
 - [ ] `WEBHOOK_SECRET` personnalisé
-- [ ] Domaine configuré dans Caddyfile
-- [ ] `local_certs` supprimé du Caddyfile (pour Let's Encrypt)
+- [ ] Domaine créé dans CWP
+- [ ] SSL activé via AutoSSL/Let's Encrypt dans CWP
+- [ ] Proxy Apache configuré vers 127.0.0.1:8080
+- [ ] `TRUSTED_PROXIES=127.0.0.1` dans `.env`
 - [ ] DNS pointant vers le serveur
-- [ ] Certificat SSL actif (Let's Encrypt)
+- [ ] Test HTTPS fonctionnel
+- [ ] Backups configurés pour PostgreSQL
+
+### Configuration Production (Serveur Dédié sans CWP)
+
+- [ ] `APP_ENV=production` dans `.env`
+- [ ] `APP_DEBUG=false` dans `.env`
+- [ ] `WEB_PORT=80` dans `.env`
+- [ ] `ACME_EMAIL=votre@email.com` dans `.env`
+- [ ] DNS pointant vers le serveur
+- [ ] Certificat SSL automatique via Caddy
 - [ ] Backups configurés pour PostgreSQL
 
 ---
