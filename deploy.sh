@@ -63,7 +63,8 @@ echo -e "${YELLOW}📥 Récupération des dernières modifications...${NC}"
 # Sauvegarder les modifications locales si présentes
 if [ -n "$(git status --porcelain)" ]; then
     echo -e "${YELLOW}   ⚠️  Modifications locales détectées, création d'un stash...${NC}"
-    git stash push -m "deploy-$(date +%Y%m%d-%H%M%S)"
+    # Utiliser 'git stash save' pour compatibilité avec Git < 2.13
+    git stash save "deploy-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || git stash
 fi
 
 # Pull les changements

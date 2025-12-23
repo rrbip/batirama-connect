@@ -47,20 +47,32 @@ class PublicChatController extends Controller
             ], 410);
         }
 
+        // Charger l'agent directement depuis le token (session peut ne pas exister)
+        $agent = $accessToken->agent;
+
+        if (!$agent) {
+            return response()->json([
+                'error' => 'agent_not_found',
+                'message' => 'Agent non trouvé',
+            ], 404);
+        }
+
         $session = $accessToken->session;
-        $agent = $session->agent;
+        $usesCount = $accessToken->uses_count ?? $accessToken->use_count ?? 0;
+        $maxUses = $accessToken->max_uses ?? 1;
 
         return response()->json([
             'success' => true,
             'data' => [
-                'session_id' => $session->uuid,
+                'session_id' => $session?->uuid,
+                'has_session' => $session !== null,
                 'agent' => [
                     'name' => $agent->name,
                     'description' => $agent->description,
-                    'avatar_url' => $agent->avatar_url,
+                    'avatar_url' => $agent->avatar_url ?? null,
                 ],
-                'expires_at' => $accessToken->expires_at->toIso8601String(),
-                'uses_remaining' => $accessToken->max_uses - $accessToken->uses_count,
+                'expires_at' => $accessToken->expires_at?->toIso8601String(),
+                'uses_remaining' => max(0, $maxUses - $usesCount),
             ],
         ]);
     }
@@ -73,18 +85,53 @@ class PublicChatController extends Controller
     {
         $accessToken = PublicAccessToken::where('token', $token)->first();
 
-        if (!$accessToken || $accessToken->isExpired() || $accessToken->isExhausted()) {
+        if (!$accessToken) {
             return response()->json([
-                'error' => 'invalid_token',
-                'message' => 'Lien invalide ou expiré',
+                'error' => 'token_not_found',
+                'message' => 'Lien invalide',
+            ], 404);
+        }
+
+        if ($accessToken->isExpired()) {
+            return response()->json([
+                'error' => 'token_expired',
+                'message' => 'Lien expiré',
             ], 410);
         }
 
-        // Incrémenter le compteur
-        $accessToken->increment('uses_count');
+        if ($accessToken->isExhausted()) {
+            return response()->json([
+                'error' => 'token_exhausted',
+                'message' => 'Lien déjà utilisé',
+            ], 410);
+        }
 
+        // Charger l'agent
+        $agent = $accessToken->agent;
+
+        if (!$agent) {
+            return response()->json([
+                'error' => 'agent_not_found',
+                'message' => 'Agent non trouvé',
+            ], 404);
+        }
+
+        // Créer une session si elle n'existe pas encore
         $session = $accessToken->session;
-        $agent = $session->agent;
+
+        if (!$session) {
+            $session = $this->dispatcherService->createSession($agent);
+
+            // Lier la session au token
+            $accessToken->update(['session_id' => $session->id]);
+            $accessToken->refresh();
+        }
+
+        // Incrémenter le compteur
+        $usesField = $accessToken->getConnection()->getSchemaBuilder()->hasColumn('public_access_tokens', 'uses_count')
+            ? 'uses_count'
+            : 'use_count';
+        $accessToken->increment($usesField);
 
         // Récupérer le message d'accueil de l'agent
         $welcomeMessage = $agent->welcome_message ?? "Bonjour ! Je suis {$agent->name}. Comment puis-je vous aider ?";
@@ -101,7 +148,7 @@ class PublicChatController extends Controller
                 'welcome_message' => $welcomeMessage,
                 'agent' => [
                     'name' => $agent->name,
-                    'avatar_url' => $agent->avatar_url,
+                    'avatar_url' => $agent->avatar_url ?? null,
                 ],
             ],
         ]);
@@ -115,10 +162,17 @@ class PublicChatController extends Controller
     {
         $accessToken = PublicAccessToken::where('token', $token)->first();
 
-        if (!$accessToken || $accessToken->isExpired()) {
+        if (!$accessToken) {
             return response()->json([
-                'error' => 'invalid_token',
-                'message' => 'Session invalide ou expirée',
+                'error' => 'token_not_found',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        if ($accessToken->isExpired()) {
+            return response()->json([
+                'error' => 'token_expired',
+                'message' => 'Session expirée',
             ], 410);
         }
 
@@ -132,8 +186,25 @@ class PublicChatController extends Controller
             ], 400);
         }
 
+        // Charger l'agent
+        $agent = $accessToken->agent;
+
+        if (!$agent) {
+            return response()->json([
+                'error' => 'agent_not_found',
+                'message' => 'Agent non trouvé',
+            ], 404);
+        }
+
+        // La session doit exister (créée via /start)
         $session = $accessToken->session;
-        $agent = $session->agent;
+
+        if (!$session) {
+            // Auto-créer la session si elle n'existe pas (compatibilité)
+            $session = $this->dispatcherService->createSession($agent);
+            $accessToken->update(['session_id' => $session->id]);
+            $accessToken->refresh();
+        }
 
         try {
             // Traiter le message via le dispatcher
@@ -156,11 +227,13 @@ class PublicChatController extends Controller
             Log::error('Public chat error', [
                 'session_id' => $session->uuid,
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'error' => 'server_error',
                 'message' => 'Une erreur est survenue. Veuillez réessayer.',
+                'debug' => config('app.debug') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -176,11 +249,18 @@ class PublicChatController extends Controller
         if (!$accessToken) {
             return response()->json([
                 'error' => 'invalid_token',
-                'message' => 'Session invalide',
+                'message' => 'Token invalide',
             ], 404);
         }
 
         $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'no_session',
+                'message' => 'Aucune session active',
+            ], 404);
+        }
 
         // Terminer la session
         $this->dispatcherService->endSession($session);
@@ -194,7 +274,7 @@ class PublicChatController extends Controller
             'success' => true,
             'data' => [
                 'session_id' => $session->uuid,
-                'message_count' => $session->message_count,
+                'message_count' => $session->message_count ?? 0,
                 'ended_at' => now()->toIso8601String(),
             ],
         ]);
@@ -211,11 +291,22 @@ class PublicChatController extends Controller
         if (!$accessToken) {
             return response()->json([
                 'error' => 'invalid_token',
-                'message' => 'Session invalide',
+                'message' => 'Token invalide',
             ], 404);
         }
 
         $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'session_id' => null,
+                    'messages' => [],
+                ],
+            ]);
+        }
+
         $history = $this->dispatcherService->getSessionHistory($session);
 
         return response()->json([
@@ -235,10 +326,17 @@ class PublicChatController extends Controller
     {
         $accessToken = PublicAccessToken::where('token', $token)->first();
 
-        if (!$accessToken || $accessToken->isExpired()) {
+        if (!$accessToken) {
             return response()->json([
                 'error' => 'invalid_token',
-                'message' => 'Session invalide ou expirée',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        if ($accessToken->isExpired()) {
+            return response()->json([
+                'error' => 'token_expired',
+                'message' => 'Session expirée',
             ], 410);
         }
 
@@ -249,8 +347,11 @@ class PublicChatController extends Controller
         $file = $request->file('file');
         $session = $accessToken->session;
 
+        // Si pas de session, utiliser un identifiant temporaire basé sur le token
+        $sessionIdentifier = $session?->uuid ?? 'temp_' . substr($token, 0, 16);
+
         // Stocker le fichier
-        $path = $file->store("sessions/{$session->uuid}", 'public');
+        $path = $file->store("sessions/{$sessionIdentifier}", 'public');
 
         $attachment = [
             'id' => 'att_' . uniqid(),
@@ -263,7 +364,7 @@ class PublicChatController extends Controller
         ];
 
         Log::info('File uploaded', [
-            'session_id' => $session->uuid,
+            'session_id' => $sessionIdentifier,
             'file' => $attachment['name'],
             'size' => $attachment['size'],
         ]);
