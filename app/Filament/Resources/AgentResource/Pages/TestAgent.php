@@ -7,7 +7,7 @@ namespace App\Filament\Resources\AgentResource\Pages;
 use App\Filament\Resources\AgentResource;
 use App\Models\Agent;
 use App\Models\AiSession;
-use App\Services\ChatDispatcherService;
+use App\Services\AI\DispatcherService;
 use Filament\Actions;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -84,12 +84,12 @@ class TestAgent extends Page implements HasForms
         ];
 
         try {
-            /** @var ChatDispatcherService $dispatcher */
-            $dispatcher = app(ChatDispatcherService::class);
+            /** @var DispatcherService $dispatcher */
+            $dispatcher = app(DispatcherService::class);
 
             // Créer une session de test si nécessaire
             if (!$this->testSessionId) {
-                $session = $dispatcher->createSession($this->getRecord());
+                $session = $dispatcher->createSession($this->getRecord(), auth()->user());
                 $this->testSessionId = $session->id;
             }
 
@@ -97,15 +97,15 @@ class TestAgent extends Page implements HasForms
             $session = AiSession::find($this->testSessionId);
 
             // Envoyer le message
-            $response = $dispatcher->chat($session, $message);
+            $response = $dispatcher->dispatch($message, $this->getRecord(), auth()->user(), $session);
 
             // Ajouter la réponse
             $this->messages[] = [
                 'role' => 'assistant',
-                'content' => $response['response'] ?? 'Erreur: pas de réponse',
+                'content' => $response->content ?? 'Erreur: pas de réponse',
                 'timestamp' => now()->format('H:i'),
-                'tokens' => $response['tokens_used'] ?? null,
-                'sources' => $response['sources'] ?? [],
+                'tokens' => $response->raw['tokens_used'] ?? null,
+                'sources' => $response->raw['sources'] ?? [],
             ];
 
         } catch (\Throwable $e) {
