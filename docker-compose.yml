@@ -1,5 +1,3 @@
-version: '3.8'
-
 name: ai-manager-cms
 
 services:
@@ -42,8 +40,8 @@ services:
     container_name: aim_web
     restart: unless-stopped
     ports:
-      - "${WEB_PORT:-80}:80"
-      - "${WEB_SSL_PORT:-443}:443"
+      - "${WEB_PORT:-8080}:80"
+      - "${WEB_SSL_PORT:-8443}:443"
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - .:/var/www/html:ro
@@ -124,10 +122,11 @@ services:
       retries: 5
 
   # ===========================================
-  # OLLAMA - SERVEUR IA
+  # OLLAMA - SERVEUR IA (CPU par défaut)
   # ===========================================
+  # Pour activer le GPU Nvidia, utilisez docker-compose.gpu.yml
   ollama:
-    image: ollama/ollama:${OLLAMA_VERSION:-0.13.5}
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
     container_name: aim_ollama
     restart: unless-stopped
     environment:
@@ -140,15 +139,6 @@ services:
       - "${OLLAMA_EXTERNAL_PORT:-11434}:11434"
     networks:
       - ai_network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    # Fallback sans GPU (commenté pour environnements sans GPU)
-    # deploy: {}
 
   # ===========================================
   # SCHEDULER (CRON LARAVEL)
