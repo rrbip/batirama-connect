@@ -77,48 +77,43 @@ class LearningService
         int $messageId,
         int $validatorId
     ): bool {
-        try {
-            // S'assurer que la collection existe
-            $this->ensureCollectionExists();
+        // S'assurer que la collection existe
+        $this->ensureCollectionExists();
 
-            // Générer l'embedding de la question
-            $vector = $this->embeddingService->embed($question);
+        // Générer l'embedding de la question
+        $vector = $this->embeddingService->embed($question);
 
-            $pointId = Str::uuid()->toString();
+        $pointId = Str::uuid()->toString();
 
-            $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
-                [
-                    'id' => $pointId,
-                    'vector' => $vector,
-                    'payload' => [
-                        'agent_id' => $agentId,
-                        'agent_slug' => $agentSlug,
-                        'message_id' => $messageId,
-                        'question' => $question,
-                        'answer' => $answer,
-                        'validated_by' => $validatorId,
-                        'validated_at' => now()->toIso8601String(),
-                    ],
-                ]
-            ]);
-
-            if ($result) {
-                Log::info('Learned response indexed', [
+        $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
+            [
+                'id' => $pointId,
+                'vector' => $vector,
+                'payload' => [
+                    'agent_id' => $agentId,
+                    'agent_slug' => $agentSlug,
                     'message_id' => $messageId,
-                    'agent' => $agentSlug,
-                ]);
-            }
+                    'question' => $question,
+                    'answer' => $answer,
+                    'validated_by' => $validatorId,
+                    'validated_at' => now()->toIso8601String(),
+                ],
+            ]
+        ]);
 
-            return $result;
-
-        } catch (\Exception $e) {
-            Log::error('Failed to index learned response', [
+        if ($result) {
+            Log::info('Learned response indexed', [
                 'message_id' => $messageId,
-                'error' => $e->getMessage()
+                'agent' => $agentSlug,
             ]);
-
-            return false;
+        } else {
+            Log::error('Failed to upsert learned response to Qdrant', [
+                'message_id' => $messageId,
+                'agent' => $agentSlug,
+            ]);
         }
+
+        return $result;
     }
 
     /**

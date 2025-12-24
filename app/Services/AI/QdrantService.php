@@ -153,12 +153,13 @@ class QdrantService implements VectorStoreInterface
         ]);
 
         if (!$response->successful()) {
+            $errorBody = $response->body();
             Log::error('Qdrant upsert failed', [
                 'collection' => $collection,
                 'status' => $response->status(),
-                'error' => $response->body(),
+                'error' => $errorBody,
             ]);
-            return false;
+            throw new \RuntimeException("Erreur Qdrant: {$errorBody}");
         }
 
         Log::info('Qdrant upsert successful', [
