@@ -81,13 +81,42 @@ class AiStatusPage extends Page
             $qdrant = app(QdrantService::class);
             $isHealthy = $qdrant->isHealthy();
             $collections = $isHealthy ? $qdrant->listCollections() : [];
+
+            // Récupérer les détails de chaque collection (nombre de points)
+            $collectionDetails = [];
+            $totalPoints = 0;
+            if ($isHealthy) {
+                foreach ($collections as $collectionName) {
+                    try {
+                        $info = $qdrant->getCollectionInfo($collectionName);
+                        $pointsCount = $info['points_count'] ?? 0;
+                        $vectorsCount = $info['vectors_count'] ?? $pointsCount;
+                        $collectionDetails[$collectionName] = [
+                            'name' => $collectionName,
+                            'points_count' => $pointsCount,
+                            'vectors_count' => $vectorsCount,
+                            'status' => $info['status'] ?? 'unknown',
+                        ];
+                        $totalPoints += $pointsCount;
+                    } catch (\Exception $e) {
+                        $collectionDetails[$collectionName] = [
+                            'name' => $collectionName,
+                            'points_count' => 0,
+                            'error' => $e->getMessage(),
+                        ];
+                    }
+                }
+            }
+
             $services['qdrant'] = [
                 'name' => 'Qdrant (Vector DB)',
                 'status' => $isHealthy ? 'online' : 'offline',
                 'details' => $isHealthy
-                    ? count($collections) . ' collection(s): ' . implode(', ', $collections)
+                    ? count($collections) . ' collection(s), ' . number_format($totalPoints) . ' point(s) total'
                     : 'Service non disponible',
                 'collections' => $collections,
+                'collection_details' => $collectionDetails,
+                'total_points' => $totalPoints,
                 'restartable' => true,
                 'restart_command' => 'docker restart qdrant',
             ];
@@ -96,6 +125,8 @@ class AiStatusPage extends Page
                 'name' => 'Qdrant (Vector DB)',
                 'status' => 'offline',
                 'details' => $e->getMessage(),
+                'collections' => [],
+                'collection_details' => [],
                 'restartable' => true,
                 'restart_command' => 'docker restart qdrant',
             ];

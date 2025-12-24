@@ -94,10 +94,26 @@ Tableau des 10 derniers jobs échoués :
 | Date | Date de l'échec |
 | Actions | Relancer / Supprimer |
 
-### 1.6 Sections repliables
+### 1.6 Collections Qdrant (détaillé)
 
-- **Collections Qdrant** : Liste des collections vectorielles
-- **Modèles Ollama** : Liste des modèles LLM disponibles
+Section dépliable affichant pour chaque collection vectorielle :
+
+| Métrique | Description |
+|----------|-------------|
+| **Points** | Nombre de chunks/documents indexés |
+| **Vecteurs** | Nombre de vecteurs dans la collection |
+| **Statut** | État de la collection (actif/inactif) |
+
+Cette section permet de vérifier :
+- Si les documents ont bien été indexés
+- Quelle collection contient combien de données
+- Si une collection est vide (problème d'indexation)
+
+**Total points** affiché dans le titre de la section pour un aperçu rapide.
+
+### 1.7 Modèles Ollama
+
+Section dépliable listant les modèles LLM disponibles sur le serveur Ollama.
 
 ---
 
@@ -265,6 +281,36 @@ Les services Docker ne sont pas accessibles. Vérifier :
 docker-compose ps
 docker-compose logs ollama
 docker-compose logs qdrant
+```
+
+### Le RAG ne trouve pas les documents
+
+1. **Vérifier la collection** : Dans la section "Collections Qdrant", le nombre de points doit être > 0
+2. **Vérifier l'agent** : L'agent doit avoir une `Collection Qdrant` configurée dans ses paramètres
+3. **Vérifier les logs** : Activer les logs RAG pour voir les scores de recherche :
+   ```bash
+   docker compose logs -f app 2>&1 | grep -i "RAG"
+   ```
+4. **Score minimum** : Le score minimum est configuré dans `config/ai.php` :
+   ```php
+   'rag' => [
+       'min_score' => env('RAG_MIN_SCORE', 0.5), // 50% similaire minimum
+   ],
+   ```
+5. **Retraiter le document** : Si le document a 0 chunks, utiliser le bouton "Retraiter"
+
+### Erreur mémoire lors du traitement PDF
+
+Vérifier que le php.ini personnalisé est utilisé :
+```bash
+docker compose exec app php -i | grep memory_limit
+# Doit afficher: memory_limit => 512M
+```
+
+Si la limite est 128M, rebuilder le conteneur :
+```bash
+docker compose build app queue --no-cache
+docker compose up -d
 ```
 
 ---

@@ -346,19 +346,52 @@
 
         {{-- Collections Qdrant Details --}}
         @if(isset($services['qdrant']) && $services['qdrant']['status'] === 'online' && !empty($services['qdrant']['collections']))
-            <x-filament::section collapsible collapsed>
+            <x-filament::section collapsible>
                 <x-slot name="heading">
                     <div class="flex items-center gap-2">
                         <x-heroicon-o-circle-stack class="w-5 h-5" />
                         Collections Qdrant
+                        <span class="text-xs font-normal text-gray-500">
+                            ({{ number_format($services['qdrant']['total_points'] ?? 0) }} points total)
+                        </span>
                     </div>
                 </x-slot>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    @foreach($services['qdrant']['collections'] as $collection)
-                        <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-center">
-                            <x-heroicon-o-folder class="w-6 h-6 mx-auto mb-1 text-primary-500" />
-                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $collection }}</span>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    @foreach($services['qdrant']['collection_details'] ?? [] as $collectionName => $details)
+                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex items-center gap-2">
+                                    <x-heroicon-o-circle-stack class="w-5 h-5 text-primary-500" />
+                                    <span class="font-medium text-gray-900 dark:text-gray-100">{{ $collectionName }}</span>
+                                </div>
+                                @if(($details['status'] ?? '') === 'green')
+                                    <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full bg-success-100 text-success-700 dark:bg-success-800 dark:text-success-300">
+                                        Actif
+                                    </span>
+                                @endif
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="text-center p-2 bg-white dark:bg-gray-900 rounded">
+                                    <div class="text-xl font-bold text-primary-600 dark:text-primary-400">
+                                        {{ number_format($details['points_count'] ?? 0) }}
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Points</div>
+                                </div>
+                                <div class="text-center p-2 bg-white dark:bg-gray-900 rounded">
+                                    <div class="text-xl font-bold text-gray-600 dark:text-gray-400">
+                                        {{ number_format($details['vectors_count'] ?? 0) }}
+                                    </div>
+                                    <div class="text-xs text-gray-500 dark:text-gray-400">Vecteurs</div>
+                                </div>
+                            </div>
+
+                            @if(isset($details['error']))
+                                <div class="mt-2 p-2 bg-danger-50 dark:bg-danger-900/20 rounded text-xs text-danger-600 dark:text-danger-400">
+                                    {{ $details['error'] }}
+                                </div>
+                            @endif
                         </div>
                     @endforeach
                 </div>
