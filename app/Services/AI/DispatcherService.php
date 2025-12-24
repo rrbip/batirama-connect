@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Services\AI;
 
 use App\DTOs\AI\LLMResponse;
+use App\Jobs\ProcessAiMessageJob;
 use App\Models\Agent;
+use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -58,9 +60,61 @@ class DispatcherService
     }
 
     /**
+     * Dispatch une question de manière asynchrone
+     * Retourne immédiatement avec l'ID du message en attente
+     */
+    public function dispatchAsync(
+        string $userMessage,
+        Agent $agent,
+        ?User $user = null,
+        ?AiSession $session = null,
+        ?string $source = 'api'
+    ): AiMessage {
+        // Créer ou récupérer la session
+        if (!$session) {
+            $session = $this->createSession($agent, $user, $source);
+        }
+
+        // Sauvegarder le message utilisateur
+        $this->ragService->saveMessage($session, 'user', $userMessage);
+
+        // Créer le message assistant en attente (contenu vide pour l'instant)
+        $assistantMessage = AiMessage::create([
+            'uuid' => Str::uuid()->toString(),
+            'session_id' => $session->id,
+            'role' => 'assistant',
+            'content' => '',
+            'processing_status' => AiMessage::STATUS_PENDING,
+            'created_at' => now(),
+        ]);
+
+        Log::info('DispatcherService: Creating async message', [
+            'message_id' => $assistantMessage->id,
+            'message_uuid' => $assistantMessage->uuid,
+            'session_id' => $session->id,
+            'agent' => $agent->slug,
+        ]);
+
+        // Dispatcher le job de traitement
+        $job = new ProcessAiMessageJob($assistantMessage, $userMessage);
+        dispatch($job);
+
+        // Mettre à jour le statut comme "queued"
+        $assistantMessage->markAsQueued();
+
+        Log::info('DispatcherService: Job dispatched', [
+            'message_id' => $assistantMessage->id,
+            'message_uuid' => $assistantMessage->uuid,
+            'queue' => 'ai-messages',
+        ]);
+
+        return $assistantMessage;
+    }
+
+    /**
      * Crée une nouvelle session de chat
      */
-    public function createSession(Agent $agent, ?User $user = null): AiSession
+    public function createSession(Agent $agent, ?User $user = null, string $source = 'admin_test'): AiSession
     {
         return AiSession::create([
             'uuid' => Str::uuid()->toString(),
@@ -69,7 +123,7 @@ class DispatcherService
             'tenant_id' => $agent->tenant_id,
             'external_context' => [
                 'agent_slug' => $agent->slug,
-                'source' => 'admin_test',
+                'source' => $source,
             ],
             'status' => 'active',
         ]);

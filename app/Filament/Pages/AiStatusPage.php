@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Jobs\ProcessAiMessageJob;
 use App\Jobs\ProcessDocumentJob;
+use App\Models\AiMessage;
 use App\Models\Document;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\OllamaService;
@@ -36,6 +38,11 @@ class AiStatusPage extends Page
     public array $failedDocuments = [];
     public array $failedJobs = [];
 
+    // Nouvelles propriétés pour les messages IA
+    public array $aiMessageStats = [];
+    public array $aiMessageQueue = [];
+    public array $failedAiMessages = [];
+
     public function mount(): void
     {
         $this->refreshStatus();
@@ -48,6 +55,11 @@ class AiStatusPage extends Page
         $this->documentStats = $this->getDocumentStats();
         $this->failedDocuments = $this->getFailedDocuments();
         $this->failedJobs = $this->getFailedJobs();
+
+        // Stats des messages IA
+        $this->aiMessageStats = $this->getAiMessageStats();
+        $this->aiMessageQueue = $this->getAiMessageQueue();
+        $this->failedAiMessages = $this->getFailedAiMessages();
     }
 
     protected function checkServices(): array
@@ -284,6 +296,144 @@ class AiStatusPage extends Page
         } catch (\Exception $e) {
             return [];
         }
+    }
+
+    /**
+     * Statistiques des messages IA asynchrones
+     */
+    protected function getAiMessageStats(): array
+    {
+        try {
+            return [
+                'pending' => AiMessage::assistantMessages()->pending()->count(),
+                'queued' => AiMessage::assistantMessages()->queued()->count(),
+                'processing' => AiMessage::assistantMessages()->processing()->count(),
+                'completed_today' => AiMessage::assistantMessages()
+                    ->completed()
+                    ->whereDate('processing_completed_at', today())
+                    ->count(),
+                'failed_today' => AiMessage::assistantMessages()
+                    ->failed()
+                    ->whereDate('processing_completed_at', today())
+                    ->count(),
+                'failed_total' => AiMessage::assistantMessages()->failed()->count(),
+                'avg_generation_time_ms' => (int) AiMessage::assistantMessages()
+                    ->completed()
+                    ->whereDate('processing_completed_at', today())
+                    ->avg('generation_time_ms'),
+                'in_queue_total' => AiMessage::assistantMessages()->inQueue()->count(),
+            ];
+        } catch (\Exception $e) {
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Messages IA actuellement en file d'attente
+     */
+    protected function getAiMessageQueue(): array
+    {
+        try {
+            return AiMessage::assistantMessages()
+                ->inQueue()
+                ->with(['session.agent'])
+                ->orderBy('queued_at')
+                ->orderBy('created_at')
+                ->limit(20)
+                ->get()
+                ->map(function ($msg, $index) {
+                    return [
+                        'position' => $index + 1,
+                        'id' => $msg->id,
+                        'uuid' => $msg->uuid,
+                        'agent' => $msg->session?->agent?->name ?? 'Inconnu',
+                        'status' => $msg->processing_status,
+                        'queued_at' => $msg->queued_at?->format('H:i:s'),
+                        'processing_started_at' => $msg->processing_started_at?->format('H:i:s'),
+                        'wait_time' => $msg->queued_at
+                            ? $msg->queued_at->diffForHumans(short: true)
+                            : ($msg->created_at ? $msg->created_at->diffForHumans(short: true) : null),
+                    ];
+                })
+                ->toArray();
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Messages IA en échec
+     */
+    protected function getFailedAiMessages(): array
+    {
+        try {
+            return AiMessage::assistantMessages()
+                ->failed()
+                ->with(['session.agent'])
+                ->orderByDesc('processing_completed_at')
+                ->limit(20)
+                ->get()
+                ->map(fn ($msg) => [
+                    'id' => $msg->id,
+                    'uuid' => $msg->uuid,
+                    'session_uuid' => $msg->session?->uuid,
+                    'agent' => $msg->session?->agent?->name ?? 'Inconnu',
+                    'error' => Str::limit($msg->processing_error ?? 'Erreur inconnue', 150),
+                    'full_error' => $msg->processing_error,
+                    'retry_count' => $msg->retry_count,
+                    'failed_at' => $msg->processing_completed_at?->format('d/m/Y H:i'),
+                    'queued_at' => $msg->queued_at?->format('d/m/Y H:i'),
+                ])
+                ->toArray();
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Relance un message IA en échec
+     */
+    public function retryAiMessage(int $messageId): void
+    {
+        $message = AiMessage::find($messageId);
+
+        if (!$message || $message->processing_status !== AiMessage::STATUS_FAILED) {
+            Notification::make()
+                ->title('Message non trouvé ou pas en échec')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Récupérer le message utilisateur original
+        $userMessage = AiMessage::where('session_id', $message->session_id)
+            ->where('role', 'user')
+            ->where('created_at', '<', $message->created_at)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$userMessage) {
+            Notification::make()
+                ->title('Message utilisateur non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Réinitialiser et relancer
+        $message->resetForRetry();
+        $message->increment('retry_count');
+
+        dispatch(new ProcessAiMessageJob($message, $userMessage->content));
+        $message->markAsQueued();
+
+        $this->refreshStatus();
+
+        Notification::make()
+            ->title('Message relancé')
+            ->body("Le message a été remis en file d'attente.")
+            ->success()
+            ->send();
     }
 
     /**

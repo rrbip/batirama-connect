@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessAiMessageJob;
+use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\PublicAccessToken;
 use App\Services\AI\DispatcherService;
@@ -156,7 +158,10 @@ class PublicChatController extends Controller
 
     /**
      * POST /c/{token}/message
-     * Envoie un message dans la session
+     * Envoie un message dans la session (mode asynchrone)
+     *
+     * Le message est mis en file d'attente et traité par un worker.
+     * Utilisez GET /messages/{uuid}/status pour récupérer le résultat.
      */
     public function sendMessage(Request $request, string $token): JsonResponse
     {
@@ -178,6 +183,7 @@ class PublicChatController extends Controller
 
         $message = $request->input('message');
         $attachments = $request->input('attachments', []);
+        $async = $request->boolean('async', true); // Par défaut async
 
         if (empty($message) && empty($attachments)) {
             return response()->json([
@@ -201,22 +207,45 @@ class PublicChatController extends Controller
 
         if (!$session) {
             // Auto-créer la session si elle n'existe pas (compatibilité)
-            $session = $this->dispatcherService->createSession($agent);
+            $session = $this->dispatcherService->createSession($agent, null, 'public_chat');
             $accessToken->update(['session_id' => $session->id]);
             $accessToken->refresh();
         }
 
         try {
-            // Traiter le message via le dispatcher
+            // Mode asynchrone (par défaut) - retourne immédiatement
+            if ($async) {
+                $aiMessage = $this->dispatcherService->dispatchAsync(
+                    $message,
+                    $agent,
+                    null,
+                    $session,
+                    'public_chat'
+                );
+
+                return response()->json([
+                    'success' => true,
+                    'async' => true,
+                    'data' => [
+                        'message_id' => $aiMessage->uuid,
+                        'status' => $aiMessage->processing_status,
+                        'session_id' => $session->uuid,
+                        'poll_url' => url("/api/messages/{$aiMessage->uuid}/status"),
+                    ],
+                ]);
+            }
+
+            // Mode synchrone (rétrocompatibilité) - attend la réponse
             $response = $this->dispatcherService->dispatch(
                 $message,
                 $agent,
-                null, // Pas d'utilisateur authentifié
+                null,
                 $session
             );
 
             return response()->json([
                 'success' => true,
+                'async' => false,
                 'data' => [
                     'response' => $response->content,
                     'session_id' => $session->uuid,
@@ -387,5 +416,125 @@ class PublicChatController extends Controller
             $mimeType === 'application/pdf' => 'pdf',
             default => 'document',
         };
+    }
+
+    /**
+     * GET /messages/{uuid}/status
+     * Récupère le statut d'un message en cours de traitement
+     */
+    public function messageStatus(string $uuid): JsonResponse
+    {
+        $message = AiMessage::where('uuid', $uuid)->first();
+
+        if (!$message) {
+            return response()->json([
+                'error' => 'message_not_found',
+                'message' => 'Message non trouvé',
+            ], 404);
+        }
+
+        // Calculer la position dans la queue si pending/queued
+        $queuePosition = null;
+        if (in_array($message->processing_status, [AiMessage::STATUS_PENDING, AiMessage::STATUS_QUEUED])) {
+            $queuePosition = AiMessage::where('role', 'assistant')
+                ->whereIn('processing_status', [AiMessage::STATUS_PENDING, AiMessage::STATUS_QUEUED])
+                ->where(function ($query) use ($message) {
+                    $query->where('queued_at', '<', $message->queued_at ?? $message->created_at)
+                        ->orWhere(function ($q) use ($message) {
+                            $q->where('queued_at', '=', $message->queued_at ?? $message->created_at)
+                              ->where('id', '<', $message->id);
+                        });
+                })
+                ->count() + 1;
+        }
+
+        $response = [
+            'success' => true,
+            'data' => [
+                'message_id' => $message->uuid,
+                'status' => $message->processing_status,
+                'queue_position' => $queuePosition,
+                'queued_at' => $message->queued_at?->toIso8601String(),
+                'processing_started_at' => $message->processing_started_at?->toIso8601String(),
+                'processing_completed_at' => $message->processing_completed_at?->toIso8601String(),
+                'retry_count' => $message->retry_count,
+            ],
+        ];
+
+        // Ajouter le contenu si terminé avec succès
+        if ($message->processing_status === AiMessage::STATUS_COMPLETED) {
+            $response['data']['content'] = $message->content;
+            $response['data']['model'] = $message->model_used;
+            $response['data']['generation_time_ms'] = $message->generation_time_ms;
+            $response['data']['tokens_prompt'] = $message->tokens_prompt;
+            $response['data']['tokens_completion'] = $message->tokens_completion;
+        }
+
+        // Ajouter l'erreur si échec
+        if ($message->processing_status === AiMessage::STATUS_FAILED) {
+            $response['data']['error'] = $message->processing_error;
+            $response['data']['can_retry'] = true;
+            $response['data']['retry_url'] = url("/api/messages/{$message->uuid}/retry");
+        }
+
+        return response()->json($response);
+    }
+
+    /**
+     * POST /messages/{uuid}/retry
+     * Relance un message en échec
+     */
+    public function retryMessage(string $uuid): JsonResponse
+    {
+        $message = AiMessage::where('uuid', $uuid)
+            ->where('processing_status', AiMessage::STATUS_FAILED)
+            ->first();
+
+        if (!$message) {
+            return response()->json([
+                'error' => 'message_not_found',
+                'message' => 'Message non trouvé ou pas en échec',
+            ], 404);
+        }
+
+        // Récupérer le message utilisateur original (le précédent dans la session)
+        $userMessage = AiMessage::where('session_id', $message->session_id)
+            ->where('role', 'user')
+            ->where('created_at', '<', $message->created_at)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$userMessage) {
+            return response()->json([
+                'error' => 'user_message_not_found',
+                'message' => 'Message utilisateur original non trouvé',
+            ], 404);
+        }
+
+        // Réinitialiser et relancer
+        $message->resetForRetry();
+        $message->increment('retry_count');
+
+        // Dispatcher le nouveau job
+        $job = new ProcessAiMessageJob($message, $userMessage->content);
+        dispatch($job);
+
+        $message->markAsQueued();
+
+        Log::info('Message retry dispatched', [
+            'message_id' => $message->id,
+            'message_uuid' => $message->uuid,
+            'retry_count' => $message->retry_count,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'message_id' => $message->uuid,
+                'status' => $message->processing_status,
+                'retry_count' => $message->retry_count,
+                'poll_url' => url("/api/messages/{$message->uuid}/status"),
+            ],
+        ]);
     }
 }

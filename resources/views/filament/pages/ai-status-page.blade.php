@@ -193,6 +193,176 @@
             </x-filament::section>
         </div>
 
+        {{-- AI Messages Stats --}}
+        @if(!isset($aiMessageStats['error']))
+            <x-filament::section>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-chat-bubble-left-right class="w-5 h-5" />
+                        Messages IA (Async)
+                    </div>
+                </x-slot>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-2xl font-bold text-warning-600 dark:text-warning-400">
+                            {{ ($aiMessageStats['pending'] ?? 0) + ($aiMessageStats['queued'] ?? 0) }}
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">En file</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-2xl font-bold text-primary-600 dark:text-primary-400">
+                            {{ $aiMessageStats['processing'] ?? 0 }}
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">En cours</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-2xl font-bold text-success-600 dark:text-success-400">
+                            {{ $aiMessageStats['completed_today'] ?? 0 }}
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">Complétés (j)</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-2xl font-bold text-danger-600 dark:text-danger-400">
+                            {{ $aiMessageStats['failed_today'] ?? 0 }}
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">Échoués (j)</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-2xl font-bold text-danger-600 dark:text-danger-400">
+                            {{ $aiMessageStats['failed_total'] ?? 0 }}
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">Échoués (total)</div>
+                    </div>
+                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div class="text-xl font-bold text-gray-600 dark:text-gray-400">
+                            @if(($aiMessageStats['avg_generation_time_ms'] ?? 0) > 0)
+                                {{ number_format(($aiMessageStats['avg_generation_time_ms'] ?? 0) / 1000, 1) }}s
+                            @else
+                                -
+                            @endif
+                        </div>
+                        <div class="text-sm text-gray-500 dark:text-gray-400">Temps moyen</div>
+                    </div>
+                </div>
+
+                {{-- Queue des messages en cours --}}
+                @if(count($aiMessageQueue) > 0)
+                    <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                            File d'attente des messages ({{ count($aiMessageQueue) }})
+                        </h4>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 dark:bg-gray-800">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">#</th>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Agent</th>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Status</th>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">En queue</th>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Démarré</th>
+                                        <th class="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Attente</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                                    @foreach($aiMessageQueue as $msg)
+                                        <tr>
+                                            <td class="px-3 py-2 text-gray-500">{{ $msg['position'] }}</td>
+                                            <td class="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{{ $msg['agent'] }}</td>
+                                            <td class="px-3 py-2">
+                                                <span class="px-2 py-1 text-xs font-medium rounded-full {{
+                                                    $msg['status'] === 'processing' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                                    ($msg['status'] === 'queued' ? 'bg-warning-100 text-warning-700 dark:bg-warning-800 dark:text-warning-300' :
+                                                    'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300')
+                                                }}">
+                                                    @if($msg['status'] === 'processing')
+                                                        <x-heroicon-s-arrow-path class="w-3 h-3 inline animate-spin mr-1" />
+                                                    @endif
+                                                    {{ $msg['status'] }}
+                                                </span>
+                                            </td>
+                                            <td class="px-3 py-2 text-gray-500 text-xs">{{ $msg['queued_at'] ?? '-' }}</td>
+                                            <td class="px-3 py-2 text-gray-500 text-xs">{{ $msg['processing_started_at'] ?? '-' }}</td>
+                                            <td class="px-3 py-2 text-gray-500 text-xs">{{ $msg['wait_time'] ?? '-' }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                @endif
+            </x-filament::section>
+        @endif
+
+        {{-- Failed AI Messages Section --}}
+        @if(count($failedAiMessages) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2 text-danger-600 dark:text-danger-400">
+                        <x-heroicon-o-chat-bubble-left-right class="w-5 h-5" />
+                        Messages IA en échec ({{ count($failedAiMessages) }})
+                    </div>
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Agent</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Erreur</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Retries</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Date</th>
+                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            @foreach($failedAiMessages as $msg)
+                                <tr>
+                                    <td class="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                                        {{ $msg['agent'] }}
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div x-data="{ showFull: false }" class="max-w-md">
+                                            <p class="text-danger-600 dark:text-danger-400 text-xs font-mono break-words">
+                                                {{ $msg['error'] }}
+                                            </p>
+                                            @if($msg['full_error'] && strlen($msg['full_error']) > 150)
+                                                <button
+                                                    @click="showFull = !showFull"
+                                                    class="text-xs text-primary-600 hover:underline mt-1"
+                                                >
+                                                    <span x-show="!showFull">Voir plus...</span>
+                                                    <span x-show="showFull" x-cloak>Réduire</span>
+                                                </button>
+                                                <pre x-show="showFull" x-cloak class="mt-2 p-2 bg-gray-800 text-green-400 text-xs rounded overflow-x-auto max-h-32 overflow-y-auto">{{ $msg['full_error'] }}</pre>
+                                            @endif
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-center">
+                                        {{ $msg['retry_count'] }}
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                                        {{ $msg['failed_at'] }}
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <button
+                                            wire:click="retryAiMessage({{ $msg['id'] }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="retryAiMessage({{ $msg['id'] }})"
+                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                        >
+                                            <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryAiMessage({{ $msg['id'] }})" />
+                                            Relancer
+                                        </button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </x-filament::section>
+        @endif
+
         {{-- Failed Documents Section --}}
         @if(count($failedDocuments) > 0)
             <x-filament::section>
