@@ -303,16 +303,16 @@
                                                         <div class="flex-1 overflow-y-auto p-6 space-y-6">
                                                             {{-- 1. Prompt systeme --}}
                                                             @if(!empty($systemPrompt))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                     <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-emerald-50 dark:bg-emerald-900/30 border-b border-gray-200 dark:border-gray-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors">
-                                                                            <span class="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-emerald-50 dark:bg-emerald-950 border-b border-gray-200 dark:border-gray-600 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors">
+                                                                            <span class="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                                                                                 <x-heroicon-o-cog-6-tooth class="w-5 h-5" />
                                                                                 1. Prompt systeme
                                                                             </span>
                                                                         </summary>
-                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-800/50">
-                                                                            <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{{ $systemPrompt }}</pre>
+                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $systemPrompt }}</pre>
                                                                         </div>
                                                                     </details>
                                                                 </div>
@@ -320,31 +320,31 @@
 
                                                             {{-- 2. Historique de conversation --}}
                                                             @if(!empty($conversationHistory))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                     <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-violet-50 dark:bg-violet-900/30 border-b border-gray-200 dark:border-gray-700 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors">
-                                                                            <span class="font-semibold text-violet-700 dark:text-violet-400 flex items-center gap-2">
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-violet-50 dark:bg-violet-950 border-b border-gray-200 dark:border-gray-600 hover:bg-violet-100 dark:hover:bg-violet-900 transition-colors">
+                                                                            <span class="font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-2">
                                                                                 <x-heroicon-o-clock class="w-5 h-5" />
                                                                                 2. Historique de conversation ({{ count($conversationHistory) }} messages)
                                                                                 @if(isset($stats['context_window_size']))
-                                                                                    <span class="text-xs font-normal text-violet-500 dark:text-violet-500">(fenetre: {{ $stats['context_window_size'] }} echanges max)</span>
+                                                                                    <span class="text-xs font-normal text-violet-500 dark:text-violet-400">(fenetre: {{ $stats['context_window_size'] }} echanges max)</span>
                                                                                 @endif
                                                                             </span>
                                                                         </summary>
-                                                                        <div class="p-4 space-y-3">
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                                                                             @foreach($conversationHistory as $historyMsg)
                                                                                 <div class="flex gap-3 {{ $historyMsg['role'] === 'user' ? 'flex-row-reverse' : '' }}">
-                                                                                    <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900' : 'bg-gray-100 dark:bg-gray-700' }}">
+                                                                                    <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-800' : 'bg-gray-200 dark:bg-gray-700' }}">
                                                                                         @if($historyMsg['role'] === 'user')
-                                                                                            <x-heroicon-o-user class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                                                                            <x-heroicon-o-user class="w-4 h-4 text-blue-600 dark:text-blue-300" />
                                                                                         @else
-                                                                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                                                                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-600 dark:text-gray-300" />
                                                                                         @endif
                                                                                     </div>
                                                                                     <div class="flex-1 {{ $historyMsg['role'] === 'user' ? 'text-right' : '' }}">
-                                                                                        <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-50 dark:bg-blue-900/30 text-left' : 'bg-gray-50 dark:bg-gray-700/50' }}">
-                                                                                            <p class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{{ $historyMsg['content'] }}</p>
-                                                                                            <p class="text-xs text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
+                                                                                        <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-left' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' }}">
+                                                                                            <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ $historyMsg['content'] }}</p>
+                                                                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
                                                                                         </div>
                                                                                     </div>
                                                                                 </div>
@@ -356,20 +356,20 @@
 
                                                             {{-- 3. Documents indexes (RAG) --}}
                                                             @if(!empty($documentSources))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                     <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-900/30 border-b border-gray-200 dark:border-gray-700 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 transition-colors">
-                                                                            <span class="font-semibold text-cyan-700 dark:text-cyan-400 flex items-center gap-2">
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-950 border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
+                                                                            <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
                                                                                 <x-heroicon-o-document-text class="w-5 h-5" />
                                                                                 3. Documents indexes - RAG ({{ count($documentSources) }})
                                                                             </span>
                                                                         </summary>
-                                                                        <div class="p-4 space-y-3">
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                                                                             @foreach($documentSources as $doc)
                                                                                 <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                                                                                     <details>
-                                                                                        <summary class="px-4 py-2 cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                            <span class="font-medium text-gray-800 dark:text-gray-200">
+                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
                                                                                                 Document #{{ $doc['index'] ?? $loop->iteration }}
                                                                                                 @if(isset($doc['metadata']['title']))
                                                                                                     - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
@@ -377,12 +377,12 @@
                                                                                                     - {{ $doc['metadata']['filename'] }}
                                                                                                 @endif
                                                                                             </span>
-                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200">
+                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
                                                                                                 {{ $doc['score'] ?? 0 }}% pertinent
                                                                                             </span>
                                                                                         </summary>
-                                                                                        <div class="p-4 bg-white dark:bg-gray-800">
-                                                                                            <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
+                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
+                                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
                                                                                         </div>
                                                                                     </details>
                                                                                 </div>
@@ -394,34 +394,34 @@
 
                                                             {{-- 4. Sources d'apprentissage --}}
                                                             @if(!empty($learnedSources))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                     <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-amber-50 dark:bg-amber-900/30 border-b border-gray-200 dark:border-gray-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors">
-                                                                            <span class="font-semibold text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-amber-50 dark:bg-amber-950 border-b border-gray-200 dark:border-gray-600 hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors">
+                                                                            <span class="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-2">
                                                                                 <x-heroicon-o-academic-cap class="w-5 h-5" />
                                                                                 4. Sources d'apprentissage ({{ count($learnedSources) }})
                                                                             </span>
                                                                         </summary>
-                                                                        <div class="p-4 space-y-3">
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                                                                             @foreach($learnedSources as $learned)
                                                                                 <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                                                                                     <details>
-                                                                                        <summary class="px-4 py-2 cursor-pointer bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                            <span class="font-medium text-gray-800 dark:text-gray-200">
+                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
                                                                                                 Cas #{{ $learned['index'] ?? $loop->iteration }}
                                                                                             </span>
-                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
                                                                                                 {{ $learned['score'] ?? 0 }}% similaire
                                                                                             </span>
                                                                                         </summary>
-                                                                                        <div class="p-4 bg-white dark:bg-gray-800 space-y-3">
+                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
                                                                                             <div>
-                                                                                                <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Question</p>
-                                                                                                <p class="text-sm text-gray-800 dark:text-gray-200">{{ $learned['question'] ?? '' }}</p>
+                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Question</p>
+                                                                                                <p class="text-sm text-gray-800 dark:text-gray-100">{{ $learned['question'] ?? '' }}</p>
                                                                                             </div>
                                                                                             <div>
-                                                                                                <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">Reponse validee</p>
-                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-sans leading-relaxed bg-amber-50 dark:bg-amber-900/20 p-3 rounded">{{ $learned['answer'] ?? '' }}</pre>
+                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Reponse validee</p>
+                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-amber-50 dark:bg-amber-900/50 p-3 rounded border border-amber-200 dark:border-amber-700">{{ $learned['answer'] ?? '' }}</pre>
                                                                                             </div>
                                                                                         </div>
                                                                                     </details>
@@ -433,15 +433,15 @@
                                                             @endif
 
                                                             {{-- 5. Donnees brutes JSON --}}
-                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                 <details>
-                                                                    <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                                                                        <span class="font-semibold text-gray-600 dark:text-gray-300 flex items-center gap-2">
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                                                                        <span class="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
                                                                             <x-heroicon-o-code-bracket class="w-5 h-5" />
                                                                             5. Donnees brutes (JSON)
                                                                         </span>
                                                                     </summary>
-                                                                    <div class="p-4 bg-gray-900">
+                                                                    <div class="p-4 bg-gray-950">
                                                                         <pre class="text-xs text-green-400 font-mono whitespace-pre-wrap overflow-x-auto">{{ json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
                                                                     </div>
                                                                 </details>
