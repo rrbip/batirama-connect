@@ -706,7 +706,146 @@ class ProcessAiMessageJobTest extends TestCase
 
 ---
 
-## 12. Récapitulatif des changements
+## 12. Page de Test Admin (TestAgent)
+
+La page de test des agents dans l'admin (`/admin/agents/{id}/test`) utilise maintenant le même mécanisme asynchrone que l'API publique.
+
+### 12.1 Fonctionnalités
+
+1. **Mode Async Unifié** : Le test admin utilise `dispatchAsync()` comme l'API publique
+2. **Persistance de Session** : La session de test est sauvegardée et restaurée automatiquement au retour sur la page
+3. **Contexte RAG sur Message Utilisateur** : Le contexte envoyé à l'IA est affiché sous le message utilisateur (pas sur la réponse)
+4. **Retry des Messages Échoués** : Bouton pour relancer un message en erreur
+5. **Polling Temps Réel** : Statut mis à jour toutes les 500ms pendant le traitement
+
+### 12.2 Persistance de Session
+
+```php
+// Cache key par agent et utilisateur
+protected function getSessionCacheKey(): string
+{
+    return "agent_test_session_{$this->getRecord()->id}_" . auth()->id();
+}
+
+// Sauvegarde automatique (TTL 7 jours)
+Cache::put($cacheKey, $session->id, now()->addDays(7));
+
+// Restauration au chargement de la page
+protected function restoreLastSession(): void
+{
+    $savedSessionId = Cache::get($this->getSessionCacheKey());
+    if ($savedSessionId) {
+        $this->testSession = AiSession::find($savedSessionId);
+        $this->loadMessagesFromSession($this->testSession);
+    }
+}
+```
+
+### 12.3 Contexte RAG sur Message Utilisateur
+
+Le contexte RAG (chunks, scores, sources) est maintenant affiché sous le message utilisateur plutôt que sur la réponse de l'assistant. Cela permet de voir le contexte même en cas d'erreur de traitement.
+
+```php
+// Lors du chargement des messages
+if ($msg->role === 'user') {
+    // Trouver le message assistant suivant
+    $nextAssistant = AiMessage::where('session_id', $msg->session_id)
+        ->where('role', 'assistant')
+        ->where('created_at', '>', $msg->created_at)
+        ->orderBy('created_at')
+        ->first();
+
+    // Attacher le contexte RAG au message utilisateur
+    if ($nextAssistant && $nextAssistant->rag_context) {
+        $data['rag_context'] = $nextAssistant->rag_context;
+    }
+}
+```
+
+### 12.4 Interface Utilisateur
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Console de test                    [En file #3] (12s)          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  [Vous] Quel est le prix du béton armé ?          14:32        │
+│         ▼ Voir le contexte envoyé à l'IA                        │
+│         ┌──────────────────────────────────────────┐            │
+│         │ 3 chunk(s) envoyé(s):                    │            │
+│         │ #1 - beton-arme.pdf (score: 0.92)        │            │
+│         │ #2 - tarifs-2024.pdf (score: 0.87)       │            │
+│         └──────────────────────────────────────────┘            │
+│                                                                  │
+│  [Bot] ⚠️ Erreur de traitement                                  │
+│        Connection timeout to Ollama                             │
+│        [🔄 Réessayer]                                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 12.5 Polling JavaScript
+
+```javascript
+// Dans test-agent.blade.php
+startPolling() {
+    this.pollingInterval = setInterval(async () => {
+        const result = await $wire.checkMessageStatus();
+
+        if (result.done) {
+            this.stopPolling();
+        } else {
+            this.queuePosition = result.queue_position;
+            this.processingStatus = result.status;
+        }
+    }, 500);
+}
+
+// Événements Livewire
+x-on:message-sent.window="startPolling()"
+x-on:message-received.window="resetState()"
+```
+
+### 12.6 Méthode checkMessageStatus
+
+```php
+public function checkMessageStatus(): array
+{
+    if (!$this->pendingMessageUuid) {
+        return ['done' => true];
+    }
+
+    $message = AiMessage::where('uuid', $this->pendingMessageUuid)->first();
+
+    if ($message->processing_status === 'completed') {
+        $this->loadMessagesFromSession($this->testSession);
+        $this->dispatch('message-received');
+        return ['done' => true, 'status' => 'completed'];
+    }
+
+    if ($message->processing_status === 'failed') {
+        $this->loadMessagesFromSession($this->testSession);
+        $this->dispatch('message-received');
+        return ['done' => true, 'status' => 'failed', 'error' => $message->processing_error];
+    }
+
+    // Calculer position dans la queue
+    $queuePosition = AiMessage::where('role', 'assistant')
+        ->whereIn('processing_status', ['pending', 'queued'])
+        ->where('created_at', '<', $message->created_at)
+        ->count() + 1;
+
+    return [
+        'done' => false,
+        'status' => $message->processing_status,
+        'queue_position' => $queuePosition,
+    ];
+}
+```
+
+---
+
+## 13. Récapitulatif des changements
 
 | Composant | Modification |
 |-----------|--------------|
@@ -714,14 +853,15 @@ class ProcessAiMessageJobTest extends TestCase
 | **ProcessAiMessageJob** | Nouveau job pour traitement async |
 | **DispatcherService** | Nouvelle méthode `dispatchAsync()` |
 | **PublicChatController** | Utiliser `dispatchAsync()` au lieu de `dispatch()` |
+| **TestAgent (admin)** | Converti en mode async avec polling |
 | **API** | +2 endpoints (status, retry) |
 | **AiStatusPage** | +3 sections (stats, queue, failed messages) |
-| **Frontend** | Polling JavaScript |
+| **Frontend** | Polling JavaScript (API + Admin) |
 | **Queue** | Nouvelle queue `ai-messages` |
 
 ---
 
-## 13. Rétrocompatibilité
+## 14. Rétrocompatibilité
 
 - Les messages existants ont `processing_status = 'completed'`
 - La méthode `dispatch()` synchrone reste disponible pour les tests
@@ -729,7 +869,7 @@ class ProcessAiMessageJobTest extends TestCase
 
 ---
 
-## 14. Métriques et Alertes
+## 15. Métriques et Alertes
 
 ### Métriques à surveiller
 

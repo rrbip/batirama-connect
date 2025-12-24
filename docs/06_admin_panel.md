@@ -253,14 +253,22 @@ app/
    - ✏️ Corriger et sauvegarder (ajoute à learned_responses)
    - ❌ Rejeter (ne pas apprendre)
 
-### 4.8 Page de Test d'Agent (AgentTester)
+### 4.8 Page de Test d'Agent (TestAgent)
 
-**Interface interactive :**
-- Sélecteur d'agent
-- Zone de chat en temps réel
-- Affichage des sources RAG utilisées
-- Métriques (tokens, temps)
-- Mode debug (voir le prompt complet envoyé)
+**Interface interactive asynchrone :**
+- Zone de chat en temps réel avec polling (500ms)
+- Affichage du statut de traitement (en file, position, génération...)
+- Persistance de session (la dernière session est restaurée automatiquement)
+- Bouton "Nouvelle session" pour recommencer
+- Contexte RAG affiché sous le message utilisateur (visible même en cas d'erreur)
+- Bouton "Réessayer" sur les messages en échec
+- Métriques (tokens, temps de génération, modèle utilisé)
+
+**Fonctionnement unifié avec l'API publique :**
+- Utilise `dispatchAsync()` comme l'API publique `/c/{token}/message`
+- Les messages passent par la queue `ai-messages`
+- Visibles dans la page de statut des services IA
+- Même comportement de retry et gestion d'erreurs
 
 ### 4.9 Paramètres Système (SystemSettings)
 
@@ -431,36 +439,48 @@ app/
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.3 Test d'Agent
+### 7.3 Test d'Agent (Async avec Polling)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Tester l'Agent: Expert BTP                            [Fermer] │
+│  Console de test             [En file #2 (5s)] [Nouvelle session]│
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────────────────┐ ┌────────────────────────────┐ │
-│  │                             │ │ Sources RAG utilisées:     │ │
-│  │  [Bot] Bonjour ! Comment   │ │                            │ │
-│  │  puis-je vous aider ?      │ │ • Ouvrage #1234 (0.89)     │ │
-│  │                             │ │   "Béton armé fondation"   │ │
-│  │  [Vous] Quel est le prix   │ │                            │ │
-│  │  du béton armé pour une    │ │ • Ouvrage #1235 (0.82)     │ │
-│  │  fondation ?               │ │   "Ferraillage standard"   │ │
-│  │                             │ │                            │ │
-│  │  [Bot] Le prix du béton    │ ├────────────────────────────┤ │
-│  │  armé pour fondation varie │ │ Métriques:                 │ │
-│  │  entre 150€ et 200€/m³...  │ │ • Temps: 2.3s              │ │
-│  │                             │ │ • Tokens: 847              │ │
-│  │                             │ │ • Sources: 2               │ │
-│  ├─────────────────────────────┤ └────────────────────────────┘ │
-│  │ [Tapez votre message...  ] │                                │
-│  │                    [Envoyer]│                                │
-│  └─────────────────────────────┘                                │
-│                                                                 │
-│  [✓] Mode debug (voir prompt complet)                          │
-│                                                                 │
+│  Session: a1b2c3d4                                              │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │                                                             ││
+│  │  [Bot] Bonjour ! Comment puis-je vous aider ?       10:32  ││
+│  │                                                             ││
+│  │  [Vous] Quel est le prix du béton armé ?            10:33  ││
+│  │         ▼ Voir le contexte envoyé à l'IA                   ││
+│  │         ┌─────────────────────────────────────────────────┐││
+│  │         │ 3 chunk(s) envoyé(s):                           │││
+│  │         │ #1 - beton-arme.pdf (score: 0.92)               │││
+│  │         │ #2 - tarifs-2024.pdf (score: 0.87)              │││
+│  │         └─────────────────────────────────────────────────┘││
+│  │                                                             ││
+│  │  [Bot] Le prix du béton armé pour fondation         10:33  ││
+│  │        varie entre 150€ et 200€/m³...                      ││
+│  │        mistral:7b • 847 tokens • 2.3s                      ││
+│  │                                                             ││
+│  │  [Vous] Et pour un mur porteur ?                    10:35  ││
+│  │         ▼ Voir le contexte envoyé à l'IA                   ││
+│  │                                                             ││
+│  │  [Bot] ⚠️ Erreur de traitement                             ││
+│  │        Connection timeout to Ollama                        ││
+│  │        [🔄 Réessayer]                                      ││
+│  │                                                             ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ [Tapez votre message...                           ] [Envoyer]││
+│  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Légende :**
+- Le contexte RAG est affiché sous chaque message utilisateur
+- En cas d'erreur, le contexte reste visible pour le debug
+- Le statut async (position file, temps) s'affiche dans l'en-tête
+- La session persiste 7 jours et est restaurée automatiquement
 
 ---
 
