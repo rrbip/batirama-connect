@@ -14,6 +14,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Storage;
 
 class DocumentResource extends Resource
 {
@@ -47,6 +48,7 @@ class DocumentResource extends Resource
                                             ->searchable()
                                             ->preload(),
 
+                                        // Upload pour nouveau document
                                         Forms\Components\FileUpload::make('storage_path')
                                             ->label('Document')
                                             ->required()
@@ -90,6 +92,92 @@ class DocumentResource extends Resource
                                             ]),
                                     ])
                                     ->columns(2),
+
+                                // Section fichier actuel (uniquement en édition)
+                                Forms\Components\Section::make('Fichier actuel')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('current_file_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                if (!$record || !$record->storage_path) {
+                                                    return 'Aucun fichier';
+                                                }
+
+                                                $exists = Storage::disk('local')->exists($record->storage_path);
+                                                $icon = $exists ? '✓' : '✗';
+                                                $statusClass = $exists ? 'text-success-600' : 'text-danger-600';
+
+                                                return new \Illuminate\Support\HtmlString(sprintf(
+                                                    '<div class="space-y-2">
+                                                        <div class="flex items-center gap-3">
+                                                            <span class="font-medium">%s</span>
+                                                            <span class="px-2 py-1 text-xs rounded bg-gray-100 dark:bg-gray-700">%s</span>
+                                                            <span class="%s">%s %s</span>
+                                                        </div>
+                                                        <div class="text-sm text-gray-500">
+                                                            Taille: %s | Ajouté le: %s
+                                                        </div>
+                                                        <div class="text-xs text-gray-400 font-mono">
+                                                            %s
+                                                        </div>
+                                                    </div>',
+                                                    e($record->original_name ?? $record->storage_path),
+                                                    strtoupper($record->document_type ?? 'N/A'),
+                                                    $statusClass,
+                                                    $icon,
+                                                    $exists ? 'Fichier présent' : 'Fichier manquant',
+                                                    $record->getFileSizeForHumans() ?? 'N/A',
+                                                    $record->created_at?->format('d/m/Y H:i') ?? 'N/A',
+                                                    e($record->storage_path)
+                                                ));
+                                            })
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Actions::make([
+                                            Forms\Components\Actions\Action::make('download')
+                                                ->label('Télécharger')
+                                                ->icon('heroicon-o-arrow-down-tray')
+                                                ->color('primary')
+                                                ->url(fn ($record) => $record ? route('admin.documents.download', $record) : null)
+                                                ->openUrlInNewTab()
+                                                ->visible(fn ($record) => $record && Storage::disk('local')->exists($record->storage_path ?? '')),
+
+                                            Forms\Components\Actions\Action::make('view')
+                                                ->label('Voir')
+                                                ->icon('heroicon-o-eye')
+                                                ->color('gray')
+                                                ->url(fn ($record) => $record ? route('admin.documents.view', $record) : null)
+                                                ->openUrlInNewTab()
+                                                ->visible(fn ($record) => $record && in_array($record->document_type, ['pdf']) && Storage::disk('local')->exists($record->storage_path ?? '')),
+                                        ])->columnSpanFull(),
+                                    ])
+                                    ->visible(fn ($record) => $record !== null)
+                                    ->collapsed(false),
+
+                                // Section remplacement de fichier
+                                Forms\Components\Section::make('Remplacer le fichier')
+                                    ->schema([
+                                        Forms\Components\FileUpload::make('new_file')
+                                            ->label('Nouveau fichier')
+                                            ->disk('local')
+                                            ->directory('documents')
+                                            ->acceptedFileTypes([
+                                                'application/pdf',
+                                                'text/plain',
+                                                'text/markdown',
+                                                'application/msword',
+                                                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                            ])
+                                            ->maxSize(50 * 1024) // 50MB
+                                            ->helperText('Uploadez un nouveau fichier pour remplacer l\'actuel. Le document sera automatiquement retraité.')
+                                            ->columnSpanFull()
+                                            ->live()
+                                            ->afterStateUpdated(function ($state, $record, Forms\Set $set) {
+                                                // Le fichier sera traité lors de la sauvegarde
+                                            }),
+                                    ])
+                                    ->visible(fn ($record) => $record !== null)
+                                    ->collapsed(),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Extraction')
@@ -312,11 +400,18 @@ class DocumentResource extends Resource
                     ]),
             ])
             ->actions([
+                Tables\Actions\Action::make('download')
+                    ->label('Télécharger')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->url(fn ($record) => route('admin.documents.download', $record))
+                    ->openUrlInNewTab()
+                    ->visible(fn ($record) => Storage::disk('local')->exists($record->storage_path ?? '')),
+
                 Tables\Actions\Action::make('reprocess')
                     ->label('Retraiter')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
-                    ->visible(fn ($record) => in_array($record->extraction_status, ['failed', 'pending']))
                     ->requiresConfirmation()
                     ->modalHeading('Retraiter le document')
                     ->modalDescription('Le document sera ré-extrait, re-découpé et ré-indexé. Continuer ?')
