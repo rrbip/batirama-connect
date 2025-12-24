@@ -1,8 +1,41 @@
 # 12 - Améliorations Futures (Machine Plus Puissante)
 
-> **Statut** : À planifier
+> **Statut** : 🚫 DOCUMENT DE RÉFLEXION - NE PAS DÉVELOPPER
 > **Date** : Décembre 2025
 > **Prérequis** : Infrastructure avec GPU dédié ou machine plus performante
+
+---
+
+## ⚠️ AVERTISSEMENT IMPORTANT
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║   🚫  CE DOCUMENT EST UNIQUEMENT UNE RÉFLEXION TECHNIQUE                    ║
+║                                                                              ║
+║   AUCUN DÉVELOPPEMENT NE DOIT ÊTRE LANCÉ SANS :                             ║
+║                                                                              ║
+║   1. ✅ Un cahier des charges formel validé (comme 06_admin_panel.md)       ║
+║   2. ✅ L'approbation explicite du client                                   ║
+║   3. ✅ L'infrastructure machine disponible et validée                      ║
+║   4. ✅ Un budget temps/ressources approuvé                                 ║
+║                                                                              ║
+║   Ce document capture des IDÉES pour ne pas les oublier.                    ║
+║   Le code présenté est ILLUSTRATIF, pas une implémentation finale.          ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+### Processus obligatoire avant développement
+
+| Étape | Description | Responsable |
+|-------|-------------|-------------|
+| 1 | Créer un cahier des charges détaillé (nouveau fichier .md) | Tech Lead |
+| 2 | Valider les spécifications avec le client | Product Owner |
+| 3 | Estimer le temps et les ressources | Équipe Dev |
+| 4 | Obtenir l'approbation budget | Client |
+| 5 | Vérifier les prérequis machine | DevOps |
+| 6 | **Seulement alors** : Commencer le développement | Équipe Dev |
 
 ---
 
