@@ -127,6 +127,70 @@
                     @endif
                 </div>
             </x-filament::section>
+
+            {{-- Guide des actions --}}
+            <x-filament::section collapsible collapsed>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-question-mark-circle class="w-5 h-5" />
+                        Guide des actions
+                    </div>
+                </x-slot>
+
+                <div class="space-y-4 text-xs">
+                    {{-- Valider --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-success-100 dark:bg-success-900">
+                                <x-heroicon-o-check class="w-4 h-4 text-success-600 dark:text-success-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-success-600 dark:text-success-400">Valider</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Marque la reponse comme correcte. Utile pour le suivi qualite mais n'impacte pas les futures reponses.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Corriger --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-primary-100 dark:bg-primary-900">
+                                <x-heroicon-o-pencil class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-primary-600 dark:text-primary-400">Corriger</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Modifie la reponse et l'indexe pour l'apprentissage. Les futures questions similaires beneficieront de cette correction via le RAG.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Rejeter --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-danger-100 dark:bg-danger-900">
+                                <x-heroicon-o-x-mark class="w-4 h-4 text-danger-600 dark:text-danger-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-danger-600 dark:text-danger-400">Rejeter</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Marque la reponse comme incorrecte. Utile pour identifier les problemes mais n'indexe rien.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Info supplementaire --}}
+                    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                        <p class="text-gray-400 dark:text-gray-500 italic">
+                            Seul "Corriger" ameliore les futures reponses de l'agent en indexant la correction dans la base vectorielle.
+                        </p>
+                    </div>
+                </div>
+            </x-filament::section>
         </div>
 
         {{-- Main: Conversation --}}
