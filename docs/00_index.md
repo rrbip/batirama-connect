@@ -229,7 +229,8 @@ batirama-connect/
 | [08_sessions_feedback_implementation.md](./08_sessions_feedback_implementation.md) | Système de feedback et apprentissage continu |
 | [09_ai_status_page.md](./09_ai_status_page.md) | Page de monitoring des services IA |
 | [10_documents_rag.md](./10_documents_rag.md) | Gestion des documents RAG (upload, extraction, indexation) |
-| [11_async_ai_messages.md](./11_async_ai_messages.md) | **[NEW]** Traitement asynchrone des messages IA avec monitoring |
+| [11_async_ai_messages.md](./11_async_ai_messages.md) | Traitement asynchrone des messages IA avec monitoring |
+| [12_future_improvements.md](./12_future_improvements.md) | **[NEW]** Améliorations futures nécessitant machine puissante (Query Rewriting, embeddings avancés) |
 
 ---
 
