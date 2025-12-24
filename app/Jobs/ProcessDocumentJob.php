@@ -127,11 +127,18 @@ class ProcessDocumentJob implements ShouldQueue
             throw new \RuntimeException("L'agent n'a pas de collection Qdrant configurée");
         }
 
+        Log::info('Starting chunk indexation', [
+            'document_id' => $this->document->id,
+            'collection' => $collection,
+            'chunk_count' => count($chunks),
+        ]);
+
         // S'assurer que la collection existe
         $qdrantService->ensureCollectionExists($collection);
 
         // Préparer les points pour l'upsert en batch
         $points = [];
+        $chunkPointMapping = []; // Pour mettre à jour les chunks APRÈS l'upsert
 
         foreach ($chunks as $chunk) {
             try {
@@ -159,12 +166,8 @@ class ProcessDocumentJob implements ShouldQueue
                     ],
                 ];
 
-                // Mettre à jour le chunk comme indexé
-                $chunk->update([
-                    'qdrant_point_id' => $pointId,
-                    'is_indexed' => true,
-                    'indexed_at' => now(),
-                ]);
+                // Stocker le mapping chunk -> pointId pour mise à jour après upsert
+                $chunkPointMapping[$chunk->id] = $pointId;
 
             } catch (\Exception $e) {
                 Log::warning('Failed to embed chunk', [
@@ -177,11 +180,14 @@ class ProcessDocumentJob implements ShouldQueue
 
         // Upsert en batch
         if (!empty($points)) {
+            $allSuccess = true;
+
             // Découper en lots de 50 pour éviter les timeouts
             foreach (array_chunk($points, 50) as $batch) {
                 $success = $qdrantService->upsert($collection, $batch);
 
                 if (!$success) {
+                    $allSuccess = false;
                     Log::error('Failed to upsert batch to Qdrant', [
                         'document_id' => $this->document->id,
                         'batch_size' => count($batch),
@@ -189,11 +195,26 @@ class ProcessDocumentJob implements ShouldQueue
                 }
             }
 
-            Log::info('Chunks indexed in Qdrant', [
-                'document_id' => $this->document->id,
-                'points_count' => count($points),
-                'collection' => $collection,
-            ]);
+            // Mettre à jour les chunks SEULEMENT si l'upsert a réussi
+            if ($allSuccess) {
+                foreach ($chunks as $chunk) {
+                    if (isset($chunkPointMapping[$chunk->id])) {
+                        $chunk->update([
+                            'qdrant_point_id' => $chunkPointMapping[$chunk->id],
+                            'is_indexed' => true,
+                            'indexed_at' => now(),
+                        ]);
+                    }
+                }
+
+                Log::info('Chunks indexed in Qdrant successfully', [
+                    'document_id' => $this->document->id,
+                    'points_count' => count($points),
+                    'collection' => $collection,
+                ]);
+            } else {
+                throw new \RuntimeException("Échec de l'indexation dans Qdrant");
+            }
         }
     }
 
