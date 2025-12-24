@@ -31,16 +31,15 @@ class LearningService
             return false;
         }
 
-        // Récupérer la question originale
+        // Récupérer la question originale (utiliser id car created_at peut être identique)
         $questionMessage = $message->session->messages()
             ->where('role', 'user')
-            ->where('created_at', '<', $message->created_at)
-            ->orderBy('created_at', 'desc')
+            ->where('id', '<', $message->id)
+            ->orderBy('id', 'desc')
             ->first();
 
         if (!$questionMessage) {
-            Log::warning('No question found for learning', ['message_id' => $message->id]);
-            return false;
+            throw new \RuntimeException("Aucune question utilisateur trouvée avant ce message assistant (ID: {$message->id})");
         }
 
         // Contenu à apprendre
