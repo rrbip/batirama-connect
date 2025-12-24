@@ -453,9 +453,13 @@ app/
 │  │  [Vous] Quel est le prix du béton armé ?            10:33  ││
 │  │         ▼ Voir le contexte envoyé à l'IA                   ││
 │  │         ┌─────────────────────────────────────────────────┐││
-│  │         │ 3 chunk(s) envoyé(s):                           │││
-│  │         │ #1 - beton-arme.pdf (score: 0.92)               │││
-│  │         │ #2 - tarifs-2024.pdf (score: 0.87)              │││
+│  │         │ 1. Prompt système                [dépliable]    │││
+│  │         │ 2. Documents indexés (2)                        │││
+│  │         │    ▶ Document #1 - beton.pdf      [92%]        │││
+│  │         │    ▶ Document #2 - tarifs.pdf     [87%]        │││
+│  │         │ 3. Sources d'apprentissage (1)                  │││
+│  │         │    ▶ Cas #1                       [89%]        │││
+│  │         │ 4. Texte brut complet            [dépliable]    │││
 │  │         └─────────────────────────────────────────────────┘││
 │  │                                                             ││
 │  │  [Bot] Le prix du béton armé pour fondation         10:33  ││
@@ -477,10 +481,11 @@ app/
 ```
 
 **Légende :**
-- Le contexte RAG est affiché sous chaque message utilisateur
+- Le contexte RAG est structuré en 4 sections dépliables sous chaque message utilisateur
 - En cas d'erreur, le contexte reste visible pour le debug
-- Le statut async (position file, temps) s'affiche dans l'en-tête
+- Le statut async (position file, temps) s'affiche uniquement dans l'en-tête (pas de bulle redondante)
 - La session persiste 7 jours et est restaurée automatiquement
+- L'UI optimiste affiche le message utilisateur immédiatement avant confirmation serveur
 
 ---
 

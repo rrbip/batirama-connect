@@ -27,7 +27,7 @@
             },
 
             startPolling() {
-                // Arrêter le polling existant
+                // Arreter le polling existant
                 if (this.pollingInterval) {
                     clearInterval(this.pollingInterval);
                 }
@@ -66,6 +66,7 @@
                 }
                 this.queuePosition = null;
                 this.processingStatus = null;
+                this.elapsedTime = 0;
             },
 
             resetState() {
@@ -82,7 +83,7 @@
                 // Garder le message avant de vider
                 const messageToSend = this.inputMessage;
 
-                // Afficher immédiatement le message utilisateur
+                // Afficher immediatement le message utilisateur (optimiste)
                 this.pendingMessage = {
                     content: messageToSend,
                     timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -94,7 +95,7 @@
 
                 this.scrollToBottom();
 
-                // Timer pour afficher le temps ecoul
+                // Timer pour afficher le temps ecoule
                 this.timerInterval = setInterval(() => {
                     this.elapsedTime++;
                 }, 1000);
@@ -235,46 +236,119 @@
                                         </div>
                                     </div>
 
-                                    {{-- Contexte RAG envoye (sur le message utilisateur) --}}
+                                    {{-- Contexte envoye a l'IA (structure detaillee) --}}
                                     @if(!empty($message['rag_context']))
-                                        <div x-data="{ open: false }" class="mt-1">
-                                            <button
-                                                @click="open = !open"
-                                                class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-                                            >
-                                                <x-heroicon-o-document-text class="w-3 h-3" />
-                                                Voir le contexte envoye a l'IA
-                                                <x-heroicon-o-chevron-down class="w-3 h-3 transition-transform" x-bind:class="{ 'rotate-180': open }" />
-                                            </button>
-                                            <div
-                                                x-show="open"
-                                                x-transition
-                                                class="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-600 dark:text-gray-400 max-h-48 overflow-y-auto"
-                                            >
-                                                @if(!empty($message['rag_context']['chunks']))
-                                                    <div class="font-medium mb-1">{{ count($message['rag_context']['chunks']) }} chunk(s) envoye(s):</div>
-                                                    @foreach($message['rag_context']['chunks'] as $chunkIndex => $chunk)
-                                                        <div class="mb-2 p-2 bg-white dark:bg-gray-700 rounded border-l-2 border-primary-500">
-                                                            <div class="font-medium text-gray-700 dark:text-gray-300">
-                                                                #{{ $chunkIndex + 1 }}
-                                                                @if(isset($chunk['source']))
-                                                                    - {{ basename($chunk['source']) }}
-                                                                @endif
-                                                                @if(isset($chunk['score']))
-                                                                    <span class="text-gray-400">(score: {{ number_format($chunk['score'], 2) }})</span>
-                                                                @endif
-                                                            </div>
-                                                            <div class="mt-1 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{{ Str::limit($chunk['text'] ?? $chunk['content'] ?? '', 300) }}</div>
+                                        @php
+                                            $context = $message['rag_context'];
+                                            $learnedSources = $context['learned_sources'] ?? [];
+                                            $documentSources = $context['document_sources'] ?? [];
+                                            $systemPrompt = $context['system_prompt_sent'] ?? '';
+                                            $totalSources = count($learnedSources) + count($documentSources);
+                                        @endphp
+
+                                        <details class="mt-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800">
+                                            <summary class="p-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2">
+                                                <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
+                                                <span>Voir le contexte envoye a l'IA</span>
+                                                @if($totalSources > 0)
+                                                    <span class="text-gray-400">({{ $totalSources }} source(s))</span>
+                                                @endif
+                                            </summary>
+
+                                            <div class="p-3 space-y-4 text-xs border-t border-gray-200 dark:border-gray-700">
+                                                {{-- 1. Prompt systeme --}}
+                                                @if(!empty($systemPrompt))
+                                                    <div>
+                                                        <details>
+                                                            <summary class="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1 font-medium">
+                                                                <x-heroicon-o-cog-6-tooth class="w-4 h-4 text-success-600" />
+                                                                1. Prompt systeme
+                                                            </summary>
+                                                            <div class="mt-2 p-2 bg-success-50 dark:bg-success-950 rounded border border-success-200 dark:border-success-800 text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $systemPrompt }}</div>
+                                                        </details>
+                                                    </div>
+                                                @endif
+
+                                                {{-- 2. Documents indexes (RAG) --}}
+                                                @if(!empty($documentSources))
+                                                    <div>
+                                                        <h5 class="font-semibold text-info-600 dark:text-info-400 mb-2 flex items-center gap-1">
+                                                            <x-heroicon-o-document-text class="w-4 h-4" />
+                                                            2. Documents indexes ({{ count($documentSources) }})
+                                                        </h5>
+                                                        <div class="space-y-2">
+                                                            @foreach($documentSources as $doc)
+                                                                <div class="p-2 bg-gray-50 dark:bg-gray-900 rounded border-l-2 border-info-500">
+                                                                    <details>
+                                                                        <summary class="cursor-pointer flex items-center justify-between">
+                                                                            <span class="font-medium text-gray-700 dark:text-gray-300">
+                                                                                Document #{{ $doc['index'] ?? $loop->iteration }}
+                                                                                @if(isset($doc['metadata']['title']))
+                                                                                    - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 40) }}
+                                                                                @elseif(isset($doc['metadata']['filename']))
+                                                                                    - {{ $doc['metadata']['filename'] }}
+                                                                                @endif
+                                                                            </span>
+                                                                            <x-filament::badge size="sm" color="info">
+                                                                                {{ $doc['score'] ?? 0 }}% pertinent
+                                                                            </x-filament::badge>
+                                                                        </summary>
+                                                                        <div class="mt-2 p-2 bg-white dark:bg-gray-800 rounded text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-32 overflow-y-auto">{{ $doc['content'] ?? '' }}</div>
+                                                                    </details>
+                                                                </div>
+                                                            @endforeach
                                                         </div>
-                                                    @endforeach
-                                                @elseif(!empty($message['rag_context']['query']))
-                                                    <div class="font-medium">Requete:</div>
-                                                    <div class="italic">{{ $message['rag_context']['query'] }}</div>
-                                                @else
-                                                    <pre class="whitespace-pre-wrap">{{ json_encode($message['rag_context'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                                    </div>
+                                                @endif
+
+                                                {{-- 3. Sources d'apprentissage --}}
+                                                @if(!empty($learnedSources))
+                                                    <div>
+                                                        <h5 class="font-semibold text-primary-600 dark:text-primary-400 mb-2 flex items-center gap-1">
+                                                            <x-heroicon-o-academic-cap class="w-4 h-4" />
+                                                            3. Sources d'apprentissage ({{ count($learnedSources) }})
+                                                        </h5>
+                                                        <div class="space-y-2">
+                                                            @foreach($learnedSources as $learned)
+                                                                <div class="p-2 bg-primary-50 dark:bg-primary-950 rounded border-l-2 border-primary-500">
+                                                                    <details>
+                                                                        <summary class="cursor-pointer flex items-center justify-between">
+                                                                            <span class="font-medium text-gray-700 dark:text-gray-300">
+                                                                                Cas #{{ $learned['index'] ?? $loop->iteration }}
+                                                                            </span>
+                                                                            <x-filament::badge size="sm" color="primary">
+                                                                                {{ $learned['score'] ?? 0 }}% similaire
+                                                                            </x-filament::badge>
+                                                                        </summary>
+                                                                        <div class="mt-2 space-y-1">
+                                                                            <div class="text-gray-600 dark:text-gray-400">
+                                                                                <strong>Q:</strong> {{ $learned['question'] ?? '' }}
+                                                                            </div>
+                                                                            <div class="p-2 bg-white dark:bg-gray-900 rounded text-gray-700 dark:text-gray-300">
+                                                                                <strong>R:</strong> {{ $learned['answer'] ?? '' }}
+                                                                            </div>
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endforeach
+                                                        </div>
+                                                    </div>
+                                                @endif
+
+                                                {{-- 4. Texte brut complet envoye --}}
+                                                @if(!empty($systemPrompt))
+                                                    <div>
+                                                        <details>
+                                                            <summary class="cursor-pointer text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1 font-medium">
+                                                                <x-heroicon-o-code-bracket class="w-4 h-4 text-gray-500" />
+                                                                4. Texte brut complet (raw data)
+                                                            </summary>
+                                                            <div class="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded border border-gray-300 dark:border-gray-600 font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto text-[10px]">{{ $systemPrompt }}</div>
+                                                        </details>
+                                                    </div>
                                                 @endif
                                             </div>
-                                        </div>
+                                        </details>
                                     @endif
                                 </div>
                             </div>
@@ -283,7 +357,7 @@
                         @elseif($message['role'] === 'assistant')
                             <div class="flex justify-start">
                                 <div class="max-w-[80%]">
-                                    {{-- Statut en cours --}}
+                                    {{-- Statut en cours (bulle avec animation) --}}
                                     @if(isset($message['processing_status']) && in_array($message['processing_status'], ['pending', 'queued', 'processing']))
                                         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
                                             <div class="flex items-center gap-3">
@@ -351,18 +425,6 @@
                                                     @endif
                                                 </div>
                                             </div>
-
-                                            {{-- Sources (simplifiees) --}}
-                                            @if(!empty($message['sources']))
-                                                <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                                    <span class="text-xs text-gray-500">Sources utilisees:</span>
-                                                    <ul class="text-xs text-gray-500 mt-1">
-                                                        @foreach($message['sources'] as $source)
-                                                            <li>{{ $source['title'] ?? $source['id'] ?? 'Document' }}</li>
-                                                        @endforeach
-                                                    </ul>
-                                                </div>
-                                            @endif
                                         </div>
                                     @endif
                                 </div>
@@ -393,40 +455,13 @@
                         </template>
                     @endforelse
 
-                    {{-- Message optimiste (affiche immediatement) --}}
+                    {{-- Message optimiste utilisateur (affiche immediatement avant confirmation serveur) --}}
                     <template x-if="pendingMessage">
                         <div class="flex justify-end">
                             <div class="max-w-[80%] bg-primary-500 text-white rounded-lg p-3 shadow-sm">
                                 <div class="prose prose-sm prose-invert max-w-none" x-text="pendingMessage.content"></div>
                                 <div class="flex items-center justify-between mt-2 text-xs text-primary-200">
                                     <span x-text="pendingMessage.timestamp"></span>
-                                </div>
-                            </div>
-                        </div>
-                    </template>
-
-                    {{-- Indicateur de traitement --}}
-                    <template x-if="isProcessing && !pendingMessage">
-                        <div class="flex justify-start">
-                            <div class="max-w-[80%] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
-                                <div class="flex items-center gap-3">
-                                    <div class="flex space-x-1">
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
-                                        <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
-                                    </div>
-                                    <span class="text-sm text-gray-500 dark:text-gray-400">
-                                        <template x-if="processingStatus === 'queued'">
-                                            <span>En file d'attente (position <span x-text="queuePosition"></span>)...</span>
-                                        </template>
-                                        <template x-if="processingStatus === 'processing'">
-                                            <span>{{ $agent->name }} reflechit...</span>
-                                        </template>
-                                        <template x-if="!processingStatus || (processingStatus !== 'queued' && processingStatus !== 'processing')">
-                                            <span>Traitement en cours...</span>
-                                        </template>
-                                        <span x-show="elapsedTime > 0" x-text="'(' + elapsedTime + 's)'"></span>
-                                    </span>
                                 </div>
                             </div>
                         </div>

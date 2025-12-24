@@ -206,12 +206,8 @@ class TestAgent extends Page implements HasForms
         $this->isLoading = true;
         $this->userMessage = '';
 
-        // Ajouter le message utilisateur à l'affichage
-        $this->messages[] = [
-            'role' => 'user',
-            'content' => $message,
-            'timestamp' => now()->format('H:i'),
-        ];
+        // Note: Le message utilisateur est affiché via l'UI optimiste (pendingMessage)
+        // Il sera chargé depuis la DB quand le traitement sera terminé
 
         try {
             // Vérifier la disponibilité d'Ollama
@@ -246,14 +242,8 @@ class TestAgent extends Page implements HasForms
             // Stocker l'UUID pour le polling
             $this->pendingMessageUuid = $assistantMessage->uuid;
 
-            // Ajouter le message assistant en attente
-            $this->messages[] = [
-                'role' => 'assistant',
-                'content' => '',
-                'timestamp' => now()->format('H:i'),
-                'uuid' => $assistantMessage->uuid,
-                'processing_status' => $assistantMessage->processing_status,
-            ];
+            // Note: Les messages seront rechargés depuis la DB quand le traitement sera terminé
+            // L'UI affiche l'indicateur de traitement via isProcessing
 
         } catch (\Throwable $e) {
             $this->messages[] = [
@@ -301,8 +291,13 @@ class TestAgent extends Page implements HasForms
             $this->pendingMessageUuid = null;
             $this->isLoading = false;
 
-            // Mettre à jour le contexte RAG dans le message utilisateur précédent
-            $this->updateUserMessageContext($message);
+            // Recharger tous les messages depuis la DB (incluant le message utilisateur)
+            if ($this->testSessionId) {
+                $session = AiSession::find($this->testSessionId);
+                if ($session) {
+                    $this->loadMessagesFromSession($session);
+                }
+            }
 
             $this->js('window.dispatchEvent(new CustomEvent("message-received"))');
 
@@ -316,6 +311,14 @@ class TestAgent extends Page implements HasForms
         if ($status === AiMessage::STATUS_FAILED) {
             $this->pendingMessageUuid = null;
             $this->isLoading = false;
+
+            // Recharger tous les messages depuis la DB
+            if ($this->testSessionId) {
+                $session = AiSession::find($this->testSessionId);
+                if ($session) {
+                    $this->loadMessagesFromSession($session);
+                }
+            }
 
             $this->js('window.dispatchEvent(new CustomEvent("message-received"))');
 

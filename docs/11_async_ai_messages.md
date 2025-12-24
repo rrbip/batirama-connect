@@ -764,6 +764,12 @@ if ($msg->role === 'user') {
 
 ### 12.4 Interface Utilisateur
 
+L'interface de test utilise une UI optimiste avec polling :
+- Le message utilisateur s'affiche immédiatement (via Alpine.js `pendingMessage`)
+- Le statut s'affiche dans l'en-tête : "Console de test [En file #2 (5s)]"
+- Pas de bulle "Traitement en cours..." redondante dans le chat
+- Les messages sont rechargés depuis la DB quand le traitement est terminé
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  Console de test                    [En file #3] (12s)          │
@@ -772,9 +778,13 @@ if ($msg->role === 'user') {
 │  [Vous] Quel est le prix du béton armé ?          14:32        │
 │         ▼ Voir le contexte envoyé à l'IA                        │
 │         ┌──────────────────────────────────────────┐            │
-│         │ 3 chunk(s) envoyé(s):                    │            │
-│         │ #1 - beton-arme.pdf (score: 0.92)        │            │
-│         │ #2 - tarifs-2024.pdf (score: 0.87)       │            │
+│         │ 1. Prompt système       [dépliable]      │            │
+│         │ 2. Documents indexés (3)                 │            │
+│         │    - Document #1 - beton.pdf  [92%]     │            │
+│         │    - Document #2 - tarifs.pdf [87%]     │            │
+│         │ 3. Sources d'apprentissage (1)           │            │
+│         │    - Cas #1 [89% similaire]             │            │
+│         │ 4. Texte brut complet   [dépliable]      │            │
 │         └──────────────────────────────────────────┘            │
 │                                                                  │
 │  [Bot] ⚠️ Erreur de traitement                                  │
@@ -784,7 +794,16 @@ if ($msg->role === 'user') {
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 12.5 Polling JavaScript
+### 12.5 Structure du Contexte RAG
+
+Le contexte envoyé à l'IA est structuré en 4 sections dépliables :
+
+1. **Prompt système** : Instructions de l'agent (dépliable)
+2. **Documents indexés** : Documents RAG classés par pertinence (chaque doc dépliable)
+3. **Sources d'apprentissage** : Cas similaires validés (Q/R dépliables)
+4. **Texte brut complet** : Le prompt système complet tel qu'envoyé au LLM
+
+### 12.6 Polling JavaScript
 
 ```javascript
 // Dans test-agent.blade.php
@@ -806,7 +825,7 @@ x-on:message-sent.window="startPolling()"
 x-on:message-received.window="resetState()"
 ```
 
-### 12.6 Méthode checkMessageStatus
+### 12.7 Méthode checkMessageStatus
 
 ```php
 public function checkMessageStatus(): array
