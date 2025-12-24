@@ -15,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Ramsey\Uuid\Uuid;
 
 class ProcessDocumentJob implements ShouldQueue
 {
@@ -137,8 +138,11 @@ class ProcessDocumentJob implements ShouldQueue
                 // Générer l'embedding
                 $vector = $embeddingService->embed($chunk->content);
 
-                // Créer le point ID basé sur document + chunk index
-                $pointId = sprintf('%s_%d', $this->document->uuid, $chunk->chunk_index);
+                // Créer un UUID v5 valide pour Qdrant (déterministe basé sur document+chunk)
+                $pointId = Uuid::uuid5(
+                    Uuid::NAMESPACE_DNS,
+                    sprintf('document:%s:chunk:%d', $this->document->uuid, $chunk->chunk_index)
+                )->toString();
 
                 $points[] = [
                     'id' => $pointId,

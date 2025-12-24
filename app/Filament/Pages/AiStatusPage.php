@@ -528,6 +528,48 @@ class AiStatusPage extends Page
                         ->success()
                         ->send();
                 }),
+
+            Action::make('diagnose_qdrant')
+                ->label('Diagnostic Qdrant')
+                ->icon('heroicon-o-bug-ant')
+                ->color('gray')
+                ->action(function () {
+                    try {
+                        $qdrant = app(QdrantService::class);
+                        $collections = $qdrant->listCollections();
+                        $diagnostics = [];
+
+                        foreach ($collections as $collectionName) {
+                            $info = $qdrant->getCollectionInfo($collectionName);
+                            $count = $qdrant->count($collectionName);
+
+                            $diagnostics[] = sprintf(
+                                "%s: info.points_count=%d, count()=%d, status=%s",
+                                $collectionName,
+                                $info['points_count'] ?? 0,
+                                $count,
+                                $info['status'] ?? 'unknown'
+                            );
+                        }
+
+                        $message = empty($diagnostics)
+                            ? 'Aucune collection trouvée'
+                            : implode("\n", $diagnostics);
+
+                        Notification::make()
+                            ->title('Diagnostic Qdrant')
+                            ->body($message)
+                            ->success()
+                            ->persistent()
+                            ->send();
+                    } catch (\Exception $e) {
+                        Notification::make()
+                            ->title('Erreur diagnostic')
+                            ->body($e->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
         ];
     }
 }

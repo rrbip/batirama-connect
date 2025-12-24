@@ -141,6 +141,13 @@ class QdrantService implements VectorStoreInterface
             ];
         }
 
+        Log::info('Qdrant upsert starting', [
+            'collection' => $collection,
+            'points_count' => count($formattedPoints),
+            'first_point_id' => $formattedPoints[0]['id'] ?? null,
+            'vector_dimension' => isset($formattedPoints[0]['vector']) ? count($formattedPoints[0]['vector']) : null,
+        ]);
+
         $response = $this->request()->put("/collections/{$collection}/points", [
             'points' => $formattedPoints,
         ]);
@@ -148,10 +155,17 @@ class QdrantService implements VectorStoreInterface
         if (!$response->successful()) {
             Log::error('Qdrant upsert failed', [
                 'collection' => $collection,
-                'error' => $response->body()
+                'status' => $response->status(),
+                'error' => $response->body(),
             ]);
             return false;
         }
+
+        Log::info('Qdrant upsert successful', [
+            'collection' => $collection,
+            'points_count' => count($formattedPoints),
+            'response' => $response->json(),
+        ]);
 
         return true;
     }
