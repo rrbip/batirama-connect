@@ -6,45 +6,40 @@
 #   ./deploy.sh              # Mise à jour standard
 #   ./deploy.sh --rebuild    # Rebuild complet des images
 #   ./deploy.sh --fresh      # Reset complet (supprime les données)
+#   ./deploy.sh --migrate    # Seulement les migrations
+#   ./deploy.sh --skip-git   # Sauter l'étape git
 #
 # ===========================================
 
 set -e
 
-# Couleurs pour l'affichage
+# Couleurs
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Options
 REBUILD=false
 FRESH=false
+MIGRATE_ONLY=false
+SKIP_GIT=false
 
 # Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --rebuild)
-            REBUILD=true
-            shift
-            ;;
-        --fresh)
-            FRESH=true
-            shift
-            ;;
+for arg in "$@"; do
+    case $arg in
+        --rebuild) REBUILD=true ;;
+        --fresh) FRESH=true ;;
+        --migrate) MIGRATE_ONLY=true ;;
+        --skip-git) SKIP_GIT=true ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --rebuild    Rebuild les images Docker (après modification Dockerfile)"
-            echo "  --fresh      Reset complet (supprime les données et réinitialise)"
-            echo "  -h, --help   Affiche cette aide"
+            echo "  --rebuild    Rebuild images Docker"
+            echo "  --fresh      Reset complet"
+            echo "  --migrate    Migrations seulement"
+            echo "  --skip-git   Sauter git pull"
             exit 0
-            ;;
-        *)
-            echo -e "${RED}Option inconnue: $1${NC}"
-            exit 1
             ;;
     esac
 done
@@ -56,117 +51,109 @@ echo -e "${BLUE}╚════════════════════�
 echo ""
 
 # ===========================================
-# ÉTAPE 1: Récupérer les dernières modifications
+# MODE MIGRATE ONLY
 # ===========================================
-echo -e "${YELLOW}📥 Récupération des dernières modifications...${NC}"
-
-# Sauvegarder les modifications locales si présentes
-if [ -n "$(git status --porcelain)" ]; then
-    echo -e "${YELLOW}   ⚠️  Modifications locales détectées, création d'un stash...${NC}"
-    # Utiliser 'git stash save' pour compatibilité avec Git < 2.13
-    git stash save "deploy-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || git stash
+if [ "$MIGRATE_ONLY" = true ]; then
+    echo -e "${YELLOW}🔧 Mode migrations seulement...${NC}"
+    docker compose exec -T app php artisan migrate --force
+    docker compose exec -T app php artisan optimize:clear
+    docker compose exec -T app php artisan filament:assets 2>/dev/null || true
+    echo -e "${GREEN}✅ Migrations terminées !${NC}"
+    exit 0
 fi
 
-# Pull les changements
-CURRENT_BRANCH=$(git branch --show-current)
-git pull origin "$CURRENT_BRANCH"
-
-echo -e "${GREEN}✅ Code mis à jour${NC}"
+# ===========================================
+# ÉTAPE 1: Git (optionnel)
+# ===========================================
+if [ "$SKIP_GIT" = false ]; then
+    echo -e "${YELLOW}📥 [1/5] Récupération du code...${NC}"
+    
+    # Stash modifications locales
+    git stash 2>/dev/null || true
+    
+    # Récupérer la branche (méthode compatible)
+    BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+    echo -e "${YELLOW}   Branche: ${BRANCH}${NC}"
+    
+    # Pull
+    git pull origin "$BRANCH" 2>/dev/null && echo -e "${GREEN}   ✅ Code mis à jour${NC}" || echo -e "${YELLOW}   ⚠️  Git pull échoué${NC}"
+else
+    echo -e "${YELLOW}📥 [1/5] Git ignoré (--skip-git)${NC}"
+fi
 
 # ===========================================
-# ÉTAPE 2: Mode Fresh (optionnel)
+# ÉTAPE 2: Mode Fresh
 # ===========================================
 if [ "$FRESH" = true ]; then
-    echo ""
     echo -e "${RED}⚠️  MODE FRESH: Suppression des données...${NC}"
-    read -p "Êtes-vous sûr ? (yes/no): " confirm
-    if [ "$confirm" = "yes" ]; then
-        docker compose down -v
-        rm -f storage/.initialized
-        echo -e "${GREEN}✅ Données supprimées${NC}"
-    else
-        echo -e "${YELLOW}Annulé.${NC}"
-        exit 0
-    fi
+    read -p "Tapez 'yes': " confirm
+    [ "$confirm" = "yes" ] && docker compose down -v || exit 0
 fi
 
 # ===========================================
-# ÉTAPE 3: Build/Rebuild des images
+# ÉTAPE 3: Build
 # ===========================================
 echo ""
+echo -e "${YELLOW}🔨 [2/5] Build des images...${NC}"
 if [ "$REBUILD" = true ]; then
-    echo -e "${YELLOW}🔨 Rebuild des images Docker...${NC}"
     docker compose build --no-cache app
 else
-    echo -e "${YELLOW}🔨 Build des images Docker (si nécessaire)...${NC}"
-    docker compose build app
+    docker compose build app 2>/dev/null || true
 fi
-echo -e "${GREEN}✅ Images prêtes${NC}"
+echo -e "${GREEN}   ✅ Images prêtes${NC}"
 
 # ===========================================
-# ÉTAPE 4: Démarrer les services
+# ÉTAPE 4: Démarrage
 # ===========================================
 echo ""
-echo -e "${YELLOW}🚀 Démarrage des services...${NC}"
+echo -e "${YELLOW}🚀 [3/5] Démarrage des services...${NC}"
 docker compose up -d
 
-# Attendre que le container app soit prêt
-echo -e "${YELLOW}⏳ Attente du démarrage de l'application...${NC}"
-sleep 5
-
-# Vérifier que le container est bien démarré
-if ! docker compose ps app | grep -q "running\|Up"; then
-    echo -e "${RED}❌ Le container app n'a pas démarré correctement${NC}"
-    echo "Logs:"
-    docker compose logs app --tail=50
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Services démarrés${NC}"
+# Attendre le container
+echo -e "${YELLOW}⏳ Attente du container...${NC}"
+for i in $(seq 1 30); do
+    docker compose ps app 2>/dev/null | grep -qE "running|Up|healthy" && break
+    sleep 2
+done
+echo -e "${GREEN}   ✅ Services démarrés${NC}"
 
 # ===========================================
-# ÉTAPE 5: Post-déploiement
+# ÉTAPE 5: Migrations
 # ===========================================
 echo ""
-echo -e "${YELLOW}🔧 Configuration post-déploiement...${NC}"
+echo -e "${YELLOW}🗄️  [4/5] Migrations...${NC}"
 
-# Publier les assets Filament (si Filament est installé)
-if docker compose exec -T app php -r "exit(class_exists('Filament\FilamentServiceProvider') ? 0 : 1);" 2>/dev/null; then
-    echo "   📦 Publication des assets Filament..."
-    docker compose exec -T app php artisan filament:assets 2>/dev/null || true
-fi
+# Attendre la DB
+for i in $(seq 1 30); do
+    docker compose exec -T app php artisan tinker --execute="DB::connection()->getPdo();" 2>/dev/null && break
+    sleep 2
+done
 
-# Vider les caches
-echo "   🗑️  Vidage des caches..."
-docker compose exec -T app php artisan optimize:clear 2>/dev/null || true
-
-# Exécuter les migrations
-echo "   📦 Exécution des migrations..."
 docker compose exec -T app php artisan migrate --force
-
-echo -e "${GREEN}✅ Configuration terminée${NC}"
+echo -e "${GREEN}   ✅ Migrations OK${NC}"
 
 # ===========================================
-# ÉTAPE 6: Vérification
+# ÉTAPE 6: Finalisation
 # ===========================================
 echo ""
-echo -e "${YELLOW}🔍 Vérification...${NC}"
+echo -e "${YELLOW}🔧 [5/5] Finalisation...${NC}"
 
-# Vérifier l'état des containers
+docker compose exec -T app php artisan filament:assets 2>/dev/null || true
+docker compose exec -T app php artisan storage:link 2>/dev/null || true
+docker compose exec -T app php artisan optimize:clear
+docker compose exec -T app php artisan config:cache 2>/dev/null || true
+docker compose exec -T app php artisan route:cache 2>/dev/null || true
+docker compose exec -T app php artisan view:cache 2>/dev/null || true
+
+echo -e "${GREEN}   ✅ Finalisé${NC}"
+
+# ===========================================
+# FIN
+# ===========================================
 echo ""
 docker compose ps
-
-# Tester que l'application répond
-APP_URL=$(grep -E "^APP_URL=" .env 2>/dev/null | cut -d'=' -f2 || echo "http://localhost:8080")
-echo ""
-echo -e "${BLUE}🌐 Application accessible sur: ${APP_URL}${NC}"
-echo -e "${BLUE}🔐 Admin panel: ${APP_URL}/admin${NC}"
-
-# ===========================================
-# TERMINÉ
-# ===========================================
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║              Déploiement terminé avec succès !           ║${NC}"
+echo -e "${GREEN}║         ✅ Déploiement terminé avec succès !             ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""

@@ -32,6 +32,7 @@ RUN apk add --no-cache \
     postgresql-dev \
     linux-headers \
     bash \
+    poppler-utils \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP
@@ -61,8 +62,8 @@ RUN if [ "$INSTALL_XDEBUG" = "true" ]; then \
 # Installation de Composer
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Configuration PHP pour production
-RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+# Configuration PHP personnalisée (remplace la config par défaut)
+COPY docker/app/php.ini $PHP_INI_DIR/php.ini
 
 # Création du répertoire de travail
 WORKDIR /var/www/html

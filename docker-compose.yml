@@ -180,6 +180,7 @@ services:
     command: ["php", "artisan", "schedule:work"]
     volumes:
       - .:/var/www/html
+      - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
     depends_on:
       - app
       - db
@@ -196,9 +197,10 @@ services:
     container_name: aim_queue
     restart: unless-stopped
     working_dir: /var/www/html
-    command: ["php", "artisan", "queue:work", "--sleep=3", "--tries=3", "--max-time=3600"]
+    command: ["php", "artisan", "queue:work", "--queue=ai-messages,default", "--sleep=3", "--tries=3", "--max-time=3600"]
     volumes:
       - .:/var/www/html
+      - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
     depends_on:
       - app
       - db

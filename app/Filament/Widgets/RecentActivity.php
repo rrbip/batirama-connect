@@ -34,12 +34,35 @@ class RecentActivity extends BaseWidget
                 Tables\Columns\TextColumn::make('action')
                     ->label('Action')
                     ->badge()
-                    ->formatStateUsing(fn (AuditLog $record) => $record->getActionLabel())
-                    ->color(fn (AuditLog $record) => $record->getActionColor()),
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'create' => 'Création',
+                        'update' => 'Modification',
+                        'delete' => 'Suppression',
+                        'login' => 'Connexion',
+                        'logout' => 'Déconnexion',
+                        'export' => 'Export',
+                        default => $state ?? '-',
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'create' => 'success',
+                        'update' => 'warning',
+                        'delete' => 'danger',
+                        'login' => 'info',
+                        'logout' => 'gray',
+                        'export' => 'primary',
+                        default => 'gray',
+                    }),
 
                 Tables\Columns\TextColumn::make('auditable_type')
                     ->label('Type')
-                    ->formatStateUsing(fn (AuditLog $record) => $record->getAuditableLabel()),
+                    ->formatStateUsing(fn (?string $state): string => match ($state) {
+                        'App\\Models\\User' => 'Utilisateur',
+                        'App\\Models\\Agent' => 'Agent IA',
+                        'App\\Models\\Document' => 'Document',
+                        'App\\Models\\AiSession' => 'Session IA',
+                        'App\\Models\\Tenant' => 'Organisation',
+                        default => $state ? class_basename($state) : 'Système',
+                    }),
 
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Utilisateur')

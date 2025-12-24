@@ -41,6 +41,23 @@ class QdrantService implements VectorStoreInterface
         }
     }
 
+    /**
+     * Vérifie et crée une collection si elle n'existe pas
+     */
+    public function ensureCollectionExists(string $name, array $config = []): bool
+    {
+        if ($this->collectionExists($name)) {
+            return true;
+        }
+
+        $success = $this->createCollection($name, $config);
+        if ($success) {
+            Log::info("Qdrant: Collection '$name' créée");
+        }
+
+        return $success;
+    }
+
     public function collectionExists(string $name): bool
     {
         try {
@@ -124,17 +141,32 @@ class QdrantService implements VectorStoreInterface
             ];
         }
 
+        Log::info('Qdrant upsert starting', [
+            'collection' => $collection,
+            'points_count' => count($formattedPoints),
+            'first_point_id' => $formattedPoints[0]['id'] ?? null,
+            'vector_dimension' => isset($formattedPoints[0]['vector']) ? count($formattedPoints[0]['vector']) : null,
+        ]);
+
         $response = $this->request()->put("/collections/{$collection}/points", [
             'points' => $formattedPoints,
         ]);
 
         if (!$response->successful()) {
+            $errorBody = $response->body();
             Log::error('Qdrant upsert failed', [
                 'collection' => $collection,
-                'error' => $response->body()
+                'status' => $response->status(),
+                'error' => $errorBody,
             ]);
-            return false;
+            throw new \RuntimeException("Erreur Qdrant: {$errorBody}");
         }
+
+        Log::info('Qdrant upsert successful', [
+            'collection' => $collection,
+            'points_count' => count($formattedPoints),
+            'response' => $response->json(),
+        ]);
 
         return true;
     }
