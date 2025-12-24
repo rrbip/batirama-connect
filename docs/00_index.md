@@ -228,7 +228,8 @@ batirama-connect/
 | [06_admin_panel.md](./06_admin_panel.md) | Cahier des charges du panneau d'administration |
 | [08_sessions_feedback_implementation.md](./08_sessions_feedback_implementation.md) | Système de feedback et apprentissage continu |
 | [09_ai_status_page.md](./09_ai_status_page.md) | Page de monitoring des services IA |
-| [10_documents_rag.md](./10_documents_rag.md) | **[NEW]** Gestion des documents RAG (upload, extraction, indexation) |
+| [10_documents_rag.md](./10_documents_rag.md) | Gestion des documents RAG (upload, extraction, indexation) |
+| [11_async_ai_messages.md](./11_async_ai_messages.md) | **[NEW]** Traitement asynchrone des messages IA avec monitoring |
 
 ---
 
