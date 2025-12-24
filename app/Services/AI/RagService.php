@@ -84,7 +84,8 @@ class RagService
             agent: $agent,
             messages: $messages,
             learnedResponses: $learnedResponses,
-            ragResults: $ragResults
+            ragResults: $ragResults,
+            session: $session
         );
 
         // 8. Ajouter les métadonnées à la réponse
@@ -109,15 +110,37 @@ class RagService
         Agent $agent,
         array $messages,
         array $learnedResponses,
-        array $ragResults
+        array $ragResults,
+        ?AiSession $session = null
     ): array {
         // Extraire le system prompt envoyé
         $systemPrompt = collect($messages)
             ->firstWhere('role', 'system')['content'] ?? '';
 
+        // Extraire l'historique de conversation (fenêtre glissante)
+        $conversationHistory = [];
+        if ($session && $agent->context_window_size > 0) {
+            $historyMessages = $session->messages()
+                ->whereIn('role', ['user', 'assistant'])
+                ->where('processing_status', AiMessage::STATUS_COMPLETED)
+                ->orderBy('created_at', 'desc')
+                ->take($agent->context_window_size * 2)
+                ->get()
+                ->reverse();
+
+            $conversationHistory = $historyMessages->map(fn (AiMessage $msg) => [
+                'role' => $msg->role,
+                'content' => $msg->content,
+                'timestamp' => $msg->created_at->format('H:i'),
+            ])->values()->toArray();
+        }
+
         return [
             // Le prompt système complet envoyé au LLM
             'system_prompt_sent' => $systemPrompt,
+
+            // Historique de conversation (fenêtre glissante)
+            'conversation_history' => $conversationHistory,
 
             // Sources: Cas similaires traités (learned responses)
             'learned_sources' => collect($learnedResponses)->map(fn ($r, $i) => [
@@ -141,6 +164,8 @@ class RagService
             'stats' => [
                 'learned_count' => count($learnedResponses),
                 'document_count' => count($ragResults),
+                'history_count' => count($conversationHistory),
+                'context_window_size' => $agent->context_window_size,
                 'agent_slug' => $agent->slug,
                 'agent_model' => $agent->getModel(),
                 'temperature' => $agent->temperature,

@@ -796,12 +796,21 @@ L'interface de test utilise une UI optimiste avec polling :
 
 ### 12.5 Structure du Contexte RAG
 
-Le contexte envoyé à l'IA est structuré en 4 sections dépliables :
+Le contexte envoyé à l'IA est structuré en 5 sections dépliables, affichées dans une **popup modale plein écran** pour une meilleure lisibilité :
 
-1. **Prompt système** : Instructions de l'agent (dépliable)
-2. **Documents indexés** : Documents RAG classés par pertinence (chaque doc dépliable)
-3. **Sources d'apprentissage** : Cas similaires validés (Q/R dépliables)
-4. **Texte brut complet** : Le prompt système complet tel qu'envoyé au LLM
+1. **Prompt système** : Instructions de l'agent avec préservation des sauts de ligne
+2. **Historique de conversation** : Fenêtre glissante des messages précédents (selon `context_window_size` de l'agent)
+3. **Documents indexés (RAG)** : Documents récupérés classés par pertinence
+4. **Sources d'apprentissage** : Cas similaires validés (Q/R dépliables)
+5. **Données brutes (JSON)** : Le contexte complet au format JSON pour debug
+
+**Caractéristiques de la popup modale :**
+- Ouverture via bouton "Voir le contexte envoyé à l'IA"
+- Largeur 100% de l'écran (moins marges)
+- Sections avec couleurs distinctes (émeraude, violet, cyan, ambre, gris)
+- Texte lisible avec bon contraste (pas de gris sur gris)
+- Sauts de ligne préservés dans le contenu
+- Fermeture via bouton X ou clic sur le backdrop
 
 ### 12.6 Polling JavaScript
 
