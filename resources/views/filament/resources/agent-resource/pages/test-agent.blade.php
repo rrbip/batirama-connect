@@ -8,10 +8,13 @@
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6"
          x-data="{
             pendingMessage: null,
-            isProcessing: false,
+            isProcessing: @entangle('isLoading'),
             timeoutId: null,
             elapsedTime: 0,
             timerInterval: null,
+            pollingInterval: null,
+            queuePosition: null,
+            processingStatus: null,
             inputMessage: @entangle('userMessage'),
 
             scrollToBottom() {
@@ -23,18 +26,52 @@
                 });
             },
 
-            resetState() {
-                this.pendingMessage = null;
-                this.isProcessing = false;
-                this.elapsedTime = 0;
-                if (this.timeoutId) {
-                    clearTimeout(this.timeoutId);
-                    this.timeoutId = null;
+            startPolling() {
+                // Arrêter le polling existant
+                if (this.pollingInterval) {
+                    clearInterval(this.pollingInterval);
+                }
+
+                // Polling toutes les 500ms
+                this.pollingInterval = setInterval(async () => {
+                    if (!this.isProcessing) {
+                        this.stopPolling();
+                        return;
+                    }
+
+                    try {
+                        const result = await $wire.checkMessageStatus();
+
+                        if (result.done) {
+                            this.stopPolling();
+                            this.pendingMessage = null;
+                        } else {
+                            this.queuePosition = result.queue_position;
+                            this.processingStatus = result.status;
+                        }
+                    } catch (error) {
+                        console.error('Polling error:', error);
+                    }
+                }, 500);
+            },
+
+            stopPolling() {
+                if (this.pollingInterval) {
+                    clearInterval(this.pollingInterval);
+                    this.pollingInterval = null;
                 }
                 if (this.timerInterval) {
                     clearInterval(this.timerInterval);
                     this.timerInterval = null;
                 }
+                this.queuePosition = null;
+                this.processingStatus = null;
+            },
+
+            resetState() {
+                this.pendingMessage = null;
+                this.elapsedTime = 0;
+                this.stopPolling();
                 this.scrollToBottom();
             },
 
@@ -50,7 +87,6 @@
                     content: messageToSend,
                     timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
                 };
-                this.isProcessing = true;
                 this.elapsedTime = 0;
 
                 // Vider le champ
@@ -58,16 +94,25 @@
 
                 this.scrollToBottom();
 
-                // Timer pour afficher le temps écoulé
+                // Timer pour afficher le temps ecoul
                 this.timerInterval = setInterval(() => {
                     this.elapsedTime++;
                 }, 1000);
 
-                // Soumettre au serveur avec le message en paramètre
+                // Soumettre au serveur avec le message en parametre
                 $wire.sendMessage(messageToSend);
             }
          }"
+         x-on:message-sent.window="startPolling()"
          x-on:message-received.window="resetState()"
+         x-init="
+            // Si un message est en cours au chargement de la page, demarrer le polling
+            if (isProcessing) {
+                startPolling();
+                timerInterval = setInterval(() => { elapsedTime++; }, 1000);
+            }
+            scrollToBottom();
+         "
     >
         {{-- Info Agent --}}
         <div class="lg:col-span-1">
@@ -118,7 +163,7 @@
                     <div class="flex items-center gap-2">
                         @if($ollamaStatus['available'])
                             <span class="w-2 h-2 bg-success-500 rounded-full"></span>
-                            <span class="text-success-600 dark:text-success-400">Connecté</span>
+                            <span class="text-success-600 dark:text-success-400">Connecte</span>
                         @else
                             <span class="w-2 h-2 bg-danger-500 rounded-full animate-pulse"></span>
                             <span class="text-danger-600 dark:text-danger-400">Non disponible</span>
@@ -131,10 +176,10 @@
 
                     @if($ollamaStatus['available'] && !empty($ollamaStatus['models']))
                         <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                            <span class="text-xs text-gray-500">Modèles disponibles:</span>
+                            <span class="text-xs text-gray-500">Modeles disponibles:</span>
                             <ul class="text-xs text-gray-600 dark:text-gray-400 mt-1">
                                 @foreach(array_slice($ollamaStatus['models'], 0, 5) as $model)
-                                    <li>• {{ $model }}</li>
+                                    <li>{{ $model }}</li>
                                 @endforeach
                                 @if(count($ollamaStatus['models']) > 5)
                                     <li class="text-gray-400">... et {{ count($ollamaStatus['models']) - 5 }} autres</li>
@@ -144,7 +189,7 @@
                     @elseif(!$ollamaStatus['available'])
                         <div class="mt-2 p-2 bg-danger-50 dark:bg-danger-950 rounded text-xs text-danger-700 dark:text-danger-300">
                             <p class="font-medium">Ollama n'est pas accessible.</p>
-                            <p class="mt-1">Vérifiez que le serveur est lancé ou configurez un autre provider.</p>
+                            <p class="mt-1">Verifiez que le serveur est lance ou configurez un autre provider.</p>
                         </div>
                     @endif
                 </div>
@@ -163,7 +208,12 @@
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                 </svg>
-                                <span x-text="elapsedTime + 's'"></span>
+                                <span x-text="
+                                    processingStatus === 'queued' ? 'En file #' + queuePosition :
+                                    processingStatus === 'processing' ? 'Generation...' :
+                                    'Traitement...'
+                                "></span>
+                                <span x-show="elapsedTime > 0" x-text="' (' + elapsedTime + 's)'"></span>
                             </span>
                         </template>
                     </div>
@@ -171,35 +221,167 @@
 
                 {{-- Messages --}}
                 <div class="h-96 overflow-y-auto mb-4 space-y-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg" id="chat-messages">
-                    @forelse($messages as $message)
-                        <div class="flex {{ $message['role'] === 'user' ? 'justify-end' : 'justify-start' }}">
-                            <div class="max-w-[80%] {{ $message['role'] === 'user'
-                                ? 'bg-primary-500 text-white'
-                                : ($message['role'] === 'error'
-                                    ? 'bg-danger-100 text-danger-800 dark:bg-danger-900 dark:text-danger-200'
-                                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700')
-                            }} rounded-lg p-3 shadow-sm">
-                                <div class="prose prose-sm dark:prose-invert max-w-none">
-                                    {!! \Illuminate\Support\Str::markdown($message['content']) !!}
-                                </div>
-                                <div class="flex items-center justify-between mt-2 text-xs {{ $message['role'] === 'user' ? 'text-primary-200' : 'text-gray-400' }}">
-                                    <span>{{ $message['timestamp'] }}</span>
-                                    @if(isset($message['tokens']))
-                                        <span>{{ $message['tokens'] }} tokens</span>
+                    @forelse($messages as $index => $message)
+                        {{-- Message utilisateur --}}
+                        @if($message['role'] === 'user')
+                            <div class="flex justify-end">
+                                <div class="max-w-[80%]">
+                                    <div class="bg-primary-500 text-white rounded-lg p-3 shadow-sm">
+                                        <div class="prose prose-sm prose-invert max-w-none">
+                                            {!! \Illuminate\Support\Str::markdown($message['content']) !!}
+                                        </div>
+                                        <div class="flex items-center justify-between mt-2 text-xs text-primary-200">
+                                            <span>{{ $message['timestamp'] }}</span>
+                                        </div>
+                                    </div>
+
+                                    {{-- Contexte RAG envoye (sur le message utilisateur) --}}
+                                    @if(!empty($message['rag_context']))
+                                        <div x-data="{ open: false }" class="mt-1">
+                                            <button
+                                                @click="open = !open"
+                                                class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
+                                            >
+                                                <x-heroicon-o-document-text class="w-3 h-3" />
+                                                Voir le contexte envoye a l'IA
+                                                <x-heroicon-o-chevron-down class="w-3 h-3 transition-transform" x-bind:class="{ 'rotate-180': open }" />
+                                            </button>
+                                            <div
+                                                x-show="open"
+                                                x-transition
+                                                class="mt-2 p-2 bg-gray-100 dark:bg-gray-800 rounded text-xs text-gray-600 dark:text-gray-400 max-h-48 overflow-y-auto"
+                                            >
+                                                @if(!empty($message['rag_context']['chunks']))
+                                                    <div class="font-medium mb-1">{{ count($message['rag_context']['chunks']) }} chunk(s) envoye(s):</div>
+                                                    @foreach($message['rag_context']['chunks'] as $chunkIndex => $chunk)
+                                                        <div class="mb-2 p-2 bg-white dark:bg-gray-700 rounded border-l-2 border-primary-500">
+                                                            <div class="font-medium text-gray-700 dark:text-gray-300">
+                                                                #{{ $chunkIndex + 1 }}
+                                                                @if(isset($chunk['source']))
+                                                                    - {{ basename($chunk['source']) }}
+                                                                @endif
+                                                                @if(isset($chunk['score']))
+                                                                    <span class="text-gray-400">(score: {{ number_format($chunk['score'], 2) }})</span>
+                                                                @endif
+                                                            </div>
+                                                            <div class="mt-1 whitespace-pre-wrap text-gray-600 dark:text-gray-400">{{ Str::limit($chunk['text'] ?? $chunk['content'] ?? '', 300) }}</div>
+                                                        </div>
+                                                    @endforeach
+                                                @elseif(!empty($message['rag_context']['query']))
+                                                    <div class="font-medium">Requete:</div>
+                                                    <div class="italic">{{ $message['rag_context']['query'] }}</div>
+                                                @else
+                                                    <pre class="whitespace-pre-wrap">{{ json_encode($message['rag_context'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                                @endif
+                                            </div>
+                                        </div>
                                     @endif
                                 </div>
-                                @if(!empty($message['sources']))
-                                    <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                        <span class="text-xs text-gray-500">Sources:</span>
-                                        <ul class="text-xs text-gray-500 mt-1">
-                                            @foreach($message['sources'] as $source)
-                                                <li>• {{ $source['title'] ?? $source['id'] ?? 'Document' }}</li>
-                                            @endforeach
-                                        </ul>
-                                    </div>
-                                @endif
                             </div>
-                        </div>
+
+                        {{-- Message assistant --}}
+                        @elseif($message['role'] === 'assistant')
+                            <div class="flex justify-start">
+                                <div class="max-w-[80%]">
+                                    {{-- Statut en cours --}}
+                                    @if(isset($message['processing_status']) && in_array($message['processing_status'], ['pending', 'queued', 'processing']))
+                                        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                            <div class="flex items-center gap-3">
+                                                <div class="flex space-x-1">
+                                                    <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
+                                                    <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
+                                                    <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
+                                                </div>
+                                                <span class="text-sm text-gray-500 dark:text-gray-400">
+                                                    @if($message['processing_status'] === 'queued')
+                                                        En file d'attente...
+                                                    @elseif($message['processing_status'] === 'processing')
+                                                        {{ $agent->name }} reflechit...
+                                                    @else
+                                                        En attente...
+                                                    @endif
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                    {{-- Erreur --}}
+                                    @elseif(isset($message['processing_status']) && $message['processing_status'] === 'failed')
+                                        <div class="bg-danger-50 dark:bg-danger-950 border border-danger-200 dark:border-danger-800 rounded-lg p-3 shadow-sm">
+                                            <div class="flex items-start gap-2">
+                                                <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-danger-500 flex-shrink-0 mt-0.5" />
+                                                <div class="flex-1">
+                                                    <div class="text-sm font-medium text-danger-700 dark:text-danger-300">
+                                                        Erreur de traitement
+                                                    </div>
+                                                    @if(!empty($message['processing_error']))
+                                                        <div class="text-xs text-danger-600 dark:text-danger-400 mt-1">
+                                                            {{ $message['processing_error'] }}
+                                                        </div>
+                                                    @endif
+                                                    @if(isset($message['uuid']))
+                                                        <button
+                                                            wire:click="retryMessage('{{ $message['uuid'] }}')"
+                                                            class="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-danger-100 dark:bg-danger-900 text-danger-700 dark:text-danger-300 hover:bg-danger-200 dark:hover:bg-danger-800 transition-colors"
+                                                        >
+                                                            <x-heroicon-o-arrow-path class="w-3 h-3" />
+                                                            Reessayer
+                                                        </button>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                    {{-- Reponse complete --}}
+                                    @else
+                                        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                            <div class="prose prose-sm dark:prose-invert max-w-none">
+                                                {!! \Illuminate\Support\Str::markdown($message['content'] ?? '') !!}
+                                            </div>
+                                            <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
+                                                <span>{{ $message['timestamp'] }}</span>
+                                                <div class="flex items-center gap-2">
+                                                    @if(isset($message['model_used']))
+                                                        <span class="text-gray-400">{{ $message['model_used'] }}</span>
+                                                    @endif
+                                                    @if(isset($message['tokens']) && $message['tokens'])
+                                                        <span>{{ $message['tokens'] }} tokens</span>
+                                                    @endif
+                                                    @if(isset($message['generation_time_ms']) && $message['generation_time_ms'])
+                                                        <span>{{ number_format($message['generation_time_ms'] / 1000, 1) }}s</span>
+                                                    @endif
+                                                </div>
+                                            </div>
+
+                                            {{-- Sources (simplifiees) --}}
+                                            @if(!empty($message['sources']))
+                                                <div class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                                    <span class="text-xs text-gray-500">Sources utilisees:</span>
+                                                    <ul class="text-xs text-gray-500 mt-1">
+                                                        @foreach($message['sources'] as $source)
+                                                            <li>{{ $source['title'] ?? $source['id'] ?? 'Document' }}</li>
+                                                        @endforeach
+                                                    </ul>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endif
+                                </div>
+                            </div>
+
+                        {{-- Message d'erreur systeme --}}
+                        @elseif($message['role'] === 'error')
+                            <div class="flex justify-start">
+                                <div class="max-w-[80%] bg-danger-100 text-danger-800 dark:bg-danger-900 dark:text-danger-200 rounded-lg p-3 shadow-sm">
+                                    <div class="flex items-center gap-2">
+                                        <x-heroicon-o-exclamation-circle class="w-5 h-5" />
+                                        <span class="text-sm">{{ $message['content'] }}</span>
+                                    </div>
+                                    <div class="text-xs text-danger-600 dark:text-danger-400 mt-1">
+                                        {{ $message['timestamp'] }}
+                                    </div>
+                                </div>
+                            </div>
+                        @endif
                     @empty
                         <template x-if="!pendingMessage">
                             <div class="flex items-center justify-center h-full text-gray-400">
@@ -211,7 +393,7 @@
                         </template>
                     @endforelse
 
-                    {{-- Message optimiste (affiché immédiatement) --}}
+                    {{-- Message optimiste (affiche immediatement) --}}
                     <template x-if="pendingMessage">
                         <div class="flex justify-end">
                             <div class="max-w-[80%] bg-primary-500 text-white rounded-lg p-3 shadow-sm">
@@ -223,8 +405,8 @@
                         </div>
                     </template>
 
-                    {{-- Indicateur de réflexion de l'IA --}}
-                    <template x-if="isProcessing">
+                    {{-- Indicateur de traitement --}}
+                    <template x-if="isProcessing && !pendingMessage">
                         <div class="flex justify-start">
                             <div class="max-w-[80%] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
                                 <div class="flex items-center gap-3">
@@ -234,7 +416,15 @@
                                         <span class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
                                     </div>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">
-                                        {{ $agent->name }} réfléchit...
+                                        <template x-if="processingStatus === 'queued'">
+                                            <span>En file d'attente (position <span x-text="queuePosition"></span>)...</span>
+                                        </template>
+                                        <template x-if="processingStatus === 'processing'">
+                                            <span>{{ $agent->name }} reflechit...</span>
+                                        </template>
+                                        <template x-if="!processingStatus || (processingStatus !== 'queued' && processingStatus !== 'processing')">
+                                            <span>Traitement en cours...</span>
+                                        </template>
                                         <span x-show="elapsedTime > 0" x-text="'(' + elapsedTime + 's)'"></span>
                                     </span>
                                 </div>

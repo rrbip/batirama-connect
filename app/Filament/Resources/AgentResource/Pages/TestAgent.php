@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources\AgentResource\Pages;
 
 use App\Filament\Resources\AgentResource;
+use App\Jobs\ProcessAiMessageJob;
 use App\Models\Agent;
+use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Services\AI\DispatcherService;
 use App\Services\AI\OllamaService;
@@ -15,6 +17,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\Computed;
 
 class TestAgent extends Page implements HasForms
@@ -34,9 +37,119 @@ class TestAgent extends Page implements HasForms
 
     public bool $isLoading = false;
 
+    // ID du message en cours de traitement (pour polling)
+    public ?string $pendingMessageUuid = null;
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
+
+        // Restaurer la dernière session de test pour cet agent
+        $this->restoreLastSession();
+    }
+
+    /**
+     * Restaure la dernière session de test pour cet agent
+     */
+    protected function restoreLastSession(): void
+    {
+        $cacheKey = $this->getSessionCacheKey();
+        $savedSessionId = Cache::get($cacheKey);
+
+        if ($savedSessionId) {
+            $session = AiSession::with('messages')->find($savedSessionId);
+
+            if ($session && $session->agent_id === $this->getRecord()->id) {
+                $this->testSessionId = $session->id;
+                $this->loadMessagesFromSession($session);
+
+                // Vérifier si un message est en cours de traitement
+                $pendingMessage = $session->messages()
+                    ->where('role', 'assistant')
+                    ->whereIn('processing_status', [
+                        AiMessage::STATUS_PENDING,
+                        AiMessage::STATUS_QUEUED,
+                        AiMessage::STATUS_PROCESSING,
+                    ])
+                    ->first();
+
+                if ($pendingMessage) {
+                    $this->pendingMessageUuid = $pendingMessage->uuid;
+                    $this->isLoading = true;
+                }
+            }
+        }
+    }
+
+    /**
+     * Charge les messages depuis une session existante
+     */
+    protected function loadMessagesFromSession(AiSession $session): void
+    {
+        $this->messages = $session->messages()
+            ->orderBy('created_at')
+            ->get()
+            ->map(function ($msg) {
+                $data = [
+                    'role' => $msg->role,
+                    'content' => $msg->content ?: '',
+                    'timestamp' => $msg->created_at->format('H:i'),
+                    'uuid' => $msg->uuid,
+                ];
+
+                // Pour les messages utilisateur : ajouter le contexte RAG envoyé
+                if ($msg->role === 'user') {
+                    // Le contexte RAG est stocké dans le message assistant suivant
+                    $nextAssistant = AiMessage::where('session_id', $msg->session_id)
+                        ->where('role', 'assistant')
+                        ->where('created_at', '>', $msg->created_at)
+                        ->orderBy('created_at')
+                        ->first();
+
+                    if ($nextAssistant && $nextAssistant->rag_context) {
+                        $data['rag_context'] = $nextAssistant->rag_context;
+                    }
+                }
+
+                // Pour les messages assistant
+                if ($msg->role === 'assistant') {
+                    $data['processing_status'] = $msg->processing_status;
+                    $data['tokens'] = $msg->tokens_prompt || $msg->tokens_completion
+                        ? ($msg->tokens_prompt ?? 0) + ($msg->tokens_completion ?? 0)
+                        : null;
+                    $data['generation_time_ms'] = $msg->generation_time_ms;
+                    $data['processing_error'] = $msg->processing_error;
+                    $data['model_used'] = $msg->model_used;
+
+                    // Sources depuis le rag_context
+                    if ($msg->rag_context && isset($msg->rag_context['sources'])) {
+                        $data['sources'] = $msg->rag_context['sources'];
+                    }
+                }
+
+                return $data;
+            })
+            ->toArray();
+    }
+
+    /**
+     * Clé de cache pour stocker l'ID de session
+     */
+    protected function getSessionCacheKey(): string
+    {
+        return 'agent_test_session_' . auth()->id() . '_' . $this->getRecord()->id;
+    }
+
+    /**
+     * Sauvegarde l'ID de session dans le cache
+     */
+    protected function saveSessionToCache(): void
+    {
+        Cache::put(
+            $this->getSessionCacheKey(),
+            $this->testSessionId,
+            now()->addDays(7)
+        );
     }
 
     public function getTitle(): string
@@ -57,19 +170,33 @@ class TestAgent extends Page implements HasForms
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->action(function () {
+                    Cache::forget($this->getSessionCacheKey());
+
                     $this->testSessionId = null;
                     $this->messages = [];
+                    $this->pendingMessageUuid = null;
+                    $this->isLoading = false;
+
                     Notification::make()
                         ->title('Session réinitialisée')
                         ->success()
                         ->send();
                 }),
+
+            Actions\Action::make('viewSession')
+                ->label('Voir la session')
+                ->icon('heroicon-o-eye')
+                ->color('gray')
+                ->visible(fn () => $this->testSessionId !== null)
+                ->url(fn () => route('filament.admin.resources.ai-sessions.view', ['record' => $this->testSessionId])),
         ];
     }
 
+    /**
+     * Envoie un message de manière asynchrone
+     */
     public function sendMessage(string $message = ''): void
     {
-        // Utiliser le paramètre ou la propriété
         $message = trim($message) ?: trim($this->userMessage);
 
         if (empty($message)) {
@@ -87,37 +214,45 @@ class TestAgent extends Page implements HasForms
         ];
 
         try {
-            // Vérifier la disponibilité d'Ollama avant d'envoyer
+            // Vérifier la disponibilité d'Ollama
             $ollama = OllamaService::forAgent($this->getRecord());
             if (!$ollama->isAvailable()) {
                 throw new \RuntimeException(
-                    "Le serveur Ollama n'est pas accessible ({$ollama->getBaseUrl()}). " .
-                    "Vérifiez que Ollama est installé et lancé, ou configurez un autre provider LLM."
+                    "Le serveur Ollama n'est pas accessible ({$ollama->getBaseUrl()})."
                 );
             }
 
             /** @var DispatcherService $dispatcher */
             $dispatcher = app(DispatcherService::class);
 
-            // Créer une session de test si nécessaire
+            // Créer une session si nécessaire
             if (!$this->testSessionId) {
-                $session = $dispatcher->createSession($this->getRecord(), auth()->user());
+                $session = $dispatcher->createSession($this->getRecord(), auth()->user(), 'admin_test');
                 $this->testSessionId = $session->id;
+                $this->saveSessionToCache();
             }
 
-            // Récupérer la session
             $session = AiSession::find($this->testSessionId);
 
-            // Envoyer le message
-            $response = $dispatcher->dispatch($message, $this->getRecord(), auth()->user(), $session);
+            // Dispatcher de manière asynchrone
+            $assistantMessage = $dispatcher->dispatchAsync(
+                $message,
+                $this->getRecord(),
+                auth()->user(),
+                $session,
+                'admin_test'
+            );
 
-            // Ajouter la réponse
+            // Stocker l'UUID pour le polling
+            $this->pendingMessageUuid = $assistantMessage->uuid;
+
+            // Ajouter le message assistant en attente
             $this->messages[] = [
                 'role' => 'assistant',
-                'content' => $response->content ?? 'Erreur: pas de réponse',
+                'content' => '',
                 'timestamp' => now()->format('H:i'),
-                'tokens' => $response->raw['tokens_used'] ?? null,
-                'sources' => $response->raw['sources'] ?? [],
+                'uuid' => $assistantMessage->uuid,
+                'processing_status' => $assistantMessage->processing_status,
             ];
 
         } catch (\Throwable $e) {
@@ -127,6 +262,9 @@ class TestAgent extends Page implements HasForms
                 'timestamp' => now()->format('H:i'),
             ];
 
+            $this->isLoading = false;
+            $this->pendingMessageUuid = null;
+
             Notification::make()
                 ->title('Erreur')
                 ->body($e->getMessage())
@@ -134,10 +272,177 @@ class TestAgent extends Page implements HasForms
                 ->send();
         }
 
-        $this->isLoading = false;
+        $this->js('window.dispatchEvent(new CustomEvent("message-sent"))');
+    }
 
-        // Signaler à Alpine que le traitement est terminé via événement browser
-        $this->js('window.dispatchEvent(new CustomEvent("message-received"))');
+    /**
+     * Polling : vérifie le statut du message en cours
+     */
+    public function checkMessageStatus(): array
+    {
+        if (!$this->pendingMessageUuid) {
+            return ['done' => true, 'status' => null];
+        }
+
+        $message = AiMessage::where('uuid', $this->pendingMessageUuid)->first();
+
+        if (!$message) {
+            $this->pendingMessageUuid = null;
+            $this->isLoading = false;
+            return ['done' => true, 'error' => 'Message non trouvé'];
+        }
+
+        $status = $message->processing_status;
+
+        // Mettre à jour le message dans la liste
+        $this->updateMessageInList($message);
+
+        if ($status === AiMessage::STATUS_COMPLETED) {
+            $this->pendingMessageUuid = null;
+            $this->isLoading = false;
+
+            // Mettre à jour le contexte RAG dans le message utilisateur précédent
+            $this->updateUserMessageContext($message);
+
+            $this->js('window.dispatchEvent(new CustomEvent("message-received"))');
+
+            return [
+                'done' => true,
+                'status' => $status,
+                'content' => $message->content,
+            ];
+        }
+
+        if ($status === AiMessage::STATUS_FAILED) {
+            $this->pendingMessageUuid = null;
+            $this->isLoading = false;
+
+            $this->js('window.dispatchEvent(new CustomEvent("message-received"))');
+
+            return [
+                'done' => true,
+                'status' => $status,
+                'error' => $message->processing_error,
+            ];
+        }
+
+        // Encore en cours
+        return [
+            'done' => false,
+            'status' => $status,
+            'queue_position' => $this->getQueuePosition($message),
+        ];
+    }
+
+    /**
+     * Met à jour le message dans la liste des messages
+     */
+    protected function updateMessageInList(AiMessage $message): void
+    {
+        foreach ($this->messages as $index => $msg) {
+            if (isset($msg['uuid']) && $msg['uuid'] === $message->uuid) {
+                $this->messages[$index] = [
+                    'role' => 'assistant',
+                    'content' => $message->content ?: '',
+                    'timestamp' => $msg['timestamp'],
+                    'uuid' => $message->uuid,
+                    'processing_status' => $message->processing_status,
+                    'processing_error' => $message->processing_error,
+                    'tokens' => $message->tokens_prompt || $message->tokens_completion
+                        ? ($msg->tokens_prompt ?? 0) + ($message->tokens_completion ?? 0)
+                        : null,
+                    'generation_time_ms' => $message->generation_time_ms,
+                    'model_used' => $message->model_used,
+                    'sources' => $message->rag_context['sources'] ?? [],
+                ];
+                break;
+            }
+        }
+    }
+
+    /**
+     * Met à jour le contexte RAG dans le message utilisateur précédent
+     */
+    protected function updateUserMessageContext(AiMessage $assistantMessage): void
+    {
+        if (!$assistantMessage->rag_context) {
+            return;
+        }
+
+        // Trouver le dernier message utilisateur avant ce message assistant
+        for ($i = count($this->messages) - 1; $i >= 0; $i--) {
+            if ($this->messages[$i]['role'] === 'user') {
+                $this->messages[$i]['rag_context'] = $assistantMessage->rag_context;
+                break;
+            }
+        }
+    }
+
+    /**
+     * Calcule la position dans la queue
+     */
+    protected function getQueuePosition(AiMessage $message): int
+    {
+        return AiMessage::where('role', 'assistant')
+            ->whereIn('processing_status', [AiMessage::STATUS_PENDING, AiMessage::STATUS_QUEUED])
+            ->where(function ($query) use ($message) {
+                $query->where('queued_at', '<', $message->queued_at ?? $message->created_at)
+                    ->orWhere(function ($q) use ($message) {
+                        $q->where('queued_at', '=', $message->queued_at ?? $message->created_at)
+                          ->where('id', '<', $message->id);
+                    });
+            })
+            ->count() + 1;
+    }
+
+    /**
+     * Relance un message en échec
+     */
+    public function retryMessage(string $uuid): void
+    {
+        $message = AiMessage::where('uuid', $uuid)
+            ->where('processing_status', AiMessage::STATUS_FAILED)
+            ->first();
+
+        if (!$message) {
+            Notification::make()
+                ->title('Message non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Trouver le message utilisateur correspondant
+        $userMessage = AiMessage::where('session_id', $message->session_id)
+            ->where('role', 'user')
+            ->where('created_at', '<', $message->created_at)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (!$userMessage) {
+            Notification::make()
+                ->title('Message utilisateur non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Réinitialiser et relancer
+        $message->resetForRetry();
+        $message->increment('retry_count');
+
+        dispatch(new ProcessAiMessageJob($message, $userMessage->content));
+        $message->markAsQueued();
+
+        // Mettre à jour l'UI
+        $this->pendingMessageUuid = $message->uuid;
+        $this->isLoading = true;
+        $this->updateMessageInList($message);
+
+        Notification::make()
+            ->title('Message relancé')
+            ->success()
+            ->send();
     }
 
     #[Computed]
