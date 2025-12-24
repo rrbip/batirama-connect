@@ -19,7 +19,8 @@ class RagService
         private QdrantService $qdrantService,
         private OllamaService $ollamaService,
         private HydrationService $hydrationService,
-        private PromptBuilder $promptBuilder
+        private PromptBuilder $promptBuilder,
+        private LearningService $learningService
     ) {}
 
     /**
@@ -30,10 +31,18 @@ class RagService
         string $userMessage,
         ?AiSession $session = null
     ): LLMResponse {
-        // 1. Recherche dans la base vectorielle
+        // 1. Recherche des réponses apprises similaires (priorité haute)
+        $learnedResponses = $this->learningService->findSimilarLearnedResponses(
+            question: $userMessage,
+            agentSlug: $agent->slug,
+            limit: config('ai.rag.max_learned_responses', 3),
+            minScore: config('ai.rag.learned_min_score', 0.75)
+        );
+
+        // 2. Recherche dans la base vectorielle documentaire
         $ragResults = $this->retrieveContext($agent, $userMessage);
 
-        // 2. Hydratation SQL si configurée
+        // 3. Hydratation SQL si configurée
         if ($agent->usesHydration() && !empty($ragResults)) {
             $ragResults = $this->hydrationService->hydrate(
                 $ragResults,
@@ -41,26 +50,27 @@ class RagService
             );
         }
 
-        // 3. Recherche itérative si activée et résultats insuffisants
+        // 4. Recherche itérative si activée et résultats insuffisants
         if ($agent->allow_iterative_search && count($ragResults) < 3) {
             $additionalResults = $this->iterativeSearch($agent, $userMessage, $ragResults);
             $ragResults = array_merge($ragResults, $additionalResults);
         }
 
-        // 4. Tronquer si nécessaire pour respecter le contexte
+        // 5. Tronquer si nécessaire pour respecter le contexte
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
             config('ai.rag.context_size', 4000)
         );
 
-        // 5. Construire le prompt et générer la réponse
+        // 6. Construire le prompt avec TOUT le contexte et générer la réponse
         $ollama = OllamaService::forAgent($agent);
 
         $messages = $this->promptBuilder->buildChatMessages(
-            $agent,
-            $userMessage,
-            $ragResults,
-            $session
+            agent: $agent,
+            userMessage: $userMessage,
+            ragResults: $ragResults,
+            session: $session,
+            learnedResponses: $learnedResponses
         );
 
         $response = $ollama->chat($messages, [
@@ -69,7 +79,16 @@ class RagService
             'fallback_model' => $agent->fallback_model,
         ]);
 
-        // 6. Ajouter les métadonnées RAG à la réponse
+        // 7. Construire le contexte complet pour sauvegarde (validation humaine)
+        $fullContext = $this->buildFullContext(
+            agent: $agent,
+            messages: $messages,
+            learnedResponses: $learnedResponses,
+            ragResults: $ragResults,
+            session: $session
+        );
+
+        // 8. Ajouter les métadonnées à la réponse
         $response = new LLMResponse(
             content: $response->content,
             model: $response->model,
@@ -77,11 +96,81 @@ class RagService
             tokensCompletion: $response->tokensCompletion,
             generationTimeMs: $response->generationTimeMs,
             raw: array_merge($response->raw, [
-                'rag_context' => $this->formatRagMetadata($ragResults),
+                'context' => $fullContext,
             ])
         );
 
         return $response;
+    }
+
+    /**
+     * Construit le contexte complet pour sauvegarde et validation humaine
+     */
+    private function buildFullContext(
+        Agent $agent,
+        array $messages,
+        array $learnedResponses,
+        array $ragResults,
+        ?AiSession $session = null
+    ): array {
+        // Extraire le system prompt envoyé
+        $systemPrompt = collect($messages)
+            ->firstWhere('role', 'system')['content'] ?? '';
+
+        // Extraire l'historique de conversation (fenêtre glissante)
+        $conversationHistory = [];
+        if ($session && $agent->context_window_size > 0) {
+            $historyMessages = $session->messages()
+                ->whereIn('role', ['user', 'assistant'])
+                ->where('processing_status', AiMessage::STATUS_COMPLETED)
+                ->orderBy('created_at', 'desc')
+                ->take($agent->context_window_size * 2)
+                ->get()
+                ->reverse();
+
+            $conversationHistory = $historyMessages->map(fn (AiMessage $msg) => [
+                'role' => $msg->role,
+                'content' => $msg->content,
+                'timestamp' => $msg->created_at->format('H:i'),
+            ])->values()->toArray();
+        }
+
+        return [
+            // Le prompt système complet envoyé au LLM
+            'system_prompt_sent' => $systemPrompt,
+
+            // Historique de conversation (fenêtre glissante)
+            'conversation_history' => $conversationHistory,
+
+            // Sources: Cas similaires traités (learned responses)
+            'learned_sources' => collect($learnedResponses)->map(fn ($r, $i) => [
+                'index' => $i + 1,
+                'score' => round(($r['score'] ?? 0) * 100, 1),
+                'question' => $r['question'] ?? '',
+                'answer' => $r['answer'] ?? '',
+                'message_id' => $r['message_id'] ?? null,
+            ])->values()->toArray(),
+
+            // Sources: Documents RAG
+            'document_sources' => collect($ragResults)->map(fn ($r, $i) => [
+                'index' => $i + 1,
+                'id' => $r['id'] ?? null,
+                'score' => round(($r['score'] ?? 0) * 100, 1),
+                'content' => $r['payload']['content'] ?? $r['content'] ?? '',
+                'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
+            ])->values()->toArray(),
+
+            // Statistiques
+            'stats' => [
+                'learned_count' => count($learnedResponses),
+                'document_count' => count($ragResults),
+                'history_count' => count($conversationHistory),
+                'context_window_size' => $agent->context_window_size,
+                'agent_slug' => $agent->slug,
+                'agent_model' => $agent->getModel(),
+                'temperature' => $agent->temperature,
+            ],
+        ];
     }
 
     /**
@@ -90,16 +179,41 @@ class RagService
     public function retrieveContext(Agent $agent, string $query): array
     {
         try {
+            // Vérifier que l'agent a une collection configurée
+            if (empty($agent->qdrant_collection)) {
+                Log::info('RAG skipped: No Qdrant collection configured', [
+                    'agent' => $agent->slug,
+                ]);
+                return [];
+            }
+
             // Générer l'embedding de la requête
             $queryVector = $this->embeddingService->embed($query);
+
+            $minScore = config('ai.rag.min_score', 0.5);
+            $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
+
+            Log::info('RAG search starting', [
+                'agent' => $agent->slug,
+                'collection' => $agent->qdrant_collection,
+                'query' => $query,
+                'min_score' => $minScore,
+                'limit' => $limit,
+            ]);
 
             // Rechercher dans la collection de l'agent
             $results = $this->qdrantService->search(
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
-                limit: $agent->max_rag_results ?? config('ai.rag.max_results', 5),
-                scoreThreshold: config('ai.rag.min_score', 0.6)
+                limit: $limit,
+                scoreThreshold: $minScore
             );
+
+            Log::info('RAG search completed', [
+                'agent' => $agent->slug,
+                'results_count' => count($results),
+                'results_scores' => collect($results)->pluck('score')->toArray(),
+            ]);
 
             return $results;
 
@@ -212,7 +326,8 @@ class RagService
             $messageData['tokens_prompt'] = $response->tokensPrompt;
             $messageData['tokens_completion'] = $response->tokensCompletion;
             $messageData['generation_time_ms'] = $response->generationTimeMs;
-            $messageData['rag_context'] = $response->raw['rag_context'] ?? null;
+            // Sauvegarder le contexte complet pour validation humaine
+            $messageData['rag_context'] = $response->raw['context'] ?? null;
         }
 
         $message = AiMessage::create($messageData);

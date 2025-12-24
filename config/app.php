@@ -24,9 +24,11 @@ return [
     |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
+    | TEMPORAIREMENT FORCÉ À TRUE POUR LE DÉVELOPPEMENT
+    | Remettre: (bool) env('APP_DEBUG', false) pour la production
     */
 
-    'debug' => (bool) env('APP_DEBUG', false),
+    'debug' => true,
 
     /*
     |--------------------------------------------------------------------------

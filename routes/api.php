@@ -46,6 +46,12 @@ Route::prefix('c')->group(function () {
     Route::post('/{token}/upload', [PublicChatController::class, 'upload']);
 });
 
+// Message status endpoints (polling for async messages)
+Route::prefix('messages')->group(function () {
+    Route::get('/{uuid}/status', [PublicChatController::class, 'messageStatus']);
+    Route::post('/{uuid}/retry', [PublicChatController::class, 'retryMessage']);
+});
+
 // Legacy support (redirect old endpoints)
 Route::prefix('api/partners')->middleware(PartnerApiAuth::class)->group(function () {
     Route::post('/sessions', [PartnerApiController::class, 'createSession']);

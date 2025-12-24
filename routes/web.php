@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\DocumentController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -22,3 +23,11 @@ Route::get('/c/{token}', function (string $token) {
     // TODO: Implement public chat access
     return "Chat public - Token: {$token}";
 })->name('public.chat');
+
+// Admin routes for document management
+Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(function () {
+    Route::get('/documents/{document}/download', [DocumentController::class, 'download'])
+        ->name('documents.download');
+    Route::get('/documents/{document}/view', [DocumentController::class, 'view'])
+        ->name('documents.view');
+});

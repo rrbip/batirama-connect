@@ -31,16 +31,15 @@ class LearningService
             return false;
         }
 
-        // Récupérer la question originale
+        // Récupérer la question originale (utiliser id car created_at peut être identique)
         $questionMessage = $message->session->messages()
             ->where('role', 'user')
-            ->where('created_at', '<', $message->created_at)
-            ->orderBy('created_at', 'desc')
+            ->where('id', '<', $message->id)
+            ->orderBy('id', 'desc')
             ->first();
 
         if (!$questionMessage) {
-            Log::warning('No question found for learning', ['message_id' => $message->id]);
-            return false;
+            throw new \RuntimeException("Aucune question utilisateur trouvée avant ce message assistant (ID: {$message->id})");
         }
 
         // Contenu à apprendre
@@ -77,45 +76,43 @@ class LearningService
         int $messageId,
         int $validatorId
     ): bool {
-        try {
-            // Générer l'embedding de la question
-            $vector = $this->embeddingService->embed($question);
+        // S'assurer que la collection existe
+        $this->ensureCollectionExists();
 
-            $pointId = "learned_{$messageId}";
+        // Générer l'embedding de la question
+        $vector = $this->embeddingService->embed($question);
 
-            $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
-                [
-                    'id' => $pointId,
-                    'vector' => $vector,
-                    'payload' => [
-                        'agent_id' => $agentId,
-                        'agent_slug' => $agentSlug,
-                        'message_id' => $messageId,
-                        'question' => $question,
-                        'answer' => $answer,
-                        'validated_by' => $validatorId,
-                        'validated_at' => now()->toIso8601String(),
-                    ],
-                ]
-            ]);
+        $pointId = Str::uuid()->toString();
 
-            if ($result) {
-                Log::info('Learned response indexed', [
+        $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
+            [
+                'id' => $pointId,
+                'vector' => $vector,
+                'payload' => [
+                    'agent_id' => $agentId,
+                    'agent_slug' => $agentSlug,
                     'message_id' => $messageId,
-                    'agent' => $agentSlug,
-                ]);
-            }
+                    'question' => $question,
+                    'answer' => $answer,
+                    'validated_by' => $validatorId,
+                    'validated_at' => now()->toIso8601String(),
+                ],
+            ]
+        ]);
 
-            return $result;
-
-        } catch (\Exception $e) {
-            Log::error('Failed to index learned response', [
+        if ($result) {
+            Log::info('Learned response indexed', [
                 'message_id' => $messageId,
-                'error' => $e->getMessage()
+                'agent' => $agentSlug,
             ]);
-
-            return false;
+        } else {
+            Log::error('Failed to upsert learned response to Qdrant', [
+                'message_id' => $messageId,
+                'agent' => $agentSlug,
+            ]);
         }
+
+        return $result;
     }
 
     /**
@@ -159,27 +156,40 @@ class LearningService
     }
 
     /**
-     * Rejette un message (pas d'apprentissage)
+     * Valide un message sans apprentissage
      */
-    public function reject(AiMessage $message, User $validator): bool
+    public function validate(AiMessage $message, int $validatorId): bool
     {
         return $message->update([
-            'validation_status' => 'rejected',
-            'validated_by' => $validator->id,
+            'validation_status' => 'validated',
+            'validated_by' => $validatorId,
             'validated_at' => now(),
         ]);
     }
 
     /**
-     * Valide un message sans apprentissage
+     * Rejette un message (pas d'apprentissage)
      */
-    public function validate(AiMessage $message, User $validator): bool
+    public function reject(AiMessage $message, int $validatorId, ?string $reason = null): bool
     {
         return $message->update([
-            'validation_status' => 'validated',
-            'validated_by' => $validator->id,
+            'validation_status' => 'rejected',
+            'validated_by' => $validatorId,
             'validated_at' => now(),
         ]);
+    }
+
+    /**
+     * Apprend d'un message corrigé
+     */
+    public function learn(AiMessage $message, string $correctedContent, int $validatorId): bool
+    {
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return false;
+        }
+
+        return $this->validateAndLearn($message, $validator, $correctedContent);
     }
 
     /**
@@ -204,5 +214,34 @@ class LearningService
             'total_learned' => $total,
             'collection' => $collection,
         ];
+    }
+
+    /**
+     * S'assure que la collection learned_responses existe
+     */
+    private function ensureCollectionExists(): void
+    {
+        if ($this->qdrantService->collectionExists(self::LEARNED_RESPONSES_COLLECTION)) {
+            return;
+        }
+
+        $config = config('qdrant.collections.' . self::LEARNED_RESPONSES_COLLECTION, [
+            'vector_size' => config('ai.qdrant.vector_size', 768),
+            'distance' => 'Cosine',
+        ]);
+
+        $created = $this->qdrantService->createCollection(self::LEARNED_RESPONSES_COLLECTION, $config);
+
+        if ($created) {
+            Log::info('Collection learned_responses créée automatiquement');
+
+            // Créer les index sur les champs payload
+            $indexes = $config['payload_indexes'] ?? [];
+            foreach ($indexes as $field => $type) {
+                $this->qdrantService->createPayloadIndex(self::LEARNED_RESPONSES_COLLECTION, $field, $type);
+            }
+        } else {
+            Log::error('Impossible de créer la collection learned_responses');
+        }
     }
 }

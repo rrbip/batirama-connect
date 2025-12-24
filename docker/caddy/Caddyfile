@@ -61,11 +61,31 @@
     }
     header @static Cache-Control "public, max-age=31536000, immutable"
 
-    # PHP-FPM - connexion au conteneur app
+    # Routes nécessitant un timeout étendu (Livewire, API IA)
+    @longrunning {
+        path /livewire/*
+        path /admin/*
+        path /api/chat/*
+    }
+
+    # PHP-FPM pour requêtes longues (timeout 10 minutes)
+    handle @longrunning {
+        php_fastcgi app:9000 {
+            resolve_root_symlink
+            trusted_proxies private_ranges
+            dial_timeout 10s
+            read_timeout 600s
+            write_timeout 600s
+        }
+    }
+
+    # PHP-FPM standard (timeout 2 minutes)
     php_fastcgi app:9000 {
         resolve_root_symlink
-        # Faire confiance aux headers des proxies locaux
         trusted_proxies private_ranges
+        dial_timeout 5s
+        read_timeout 120s
+        write_timeout 120s
     }
 
     # Fichiers statiques
