@@ -88,6 +88,7 @@ class TestAgent extends Page implements HasForms
     {
         $this->messages = $session->messages()
             ->orderBy('created_at')
+            ->orderBy('id') // Secondaire pour garantir l'ordre
             ->get()
             ->map(function ($msg) {
                 $data = [
@@ -95,15 +96,17 @@ class TestAgent extends Page implements HasForms
                     'content' => $msg->content ?: '',
                     'timestamp' => $msg->created_at->format('H:i'),
                     'uuid' => $msg->uuid,
+                    'id' => $msg->id, // Garder l'ID pour le tri
                 ];
 
                 // Pour les messages utilisateur : ajouter le contexte RAG envoyé
                 if ($msg->role === 'user') {
                     // Le contexte RAG est stocké dans le message assistant suivant
+                    // Utiliser id au lieu de created_at car ils peuvent être identiques
                     $nextAssistant = AiMessage::where('session_id', $msg->session_id)
                         ->where('role', 'assistant')
-                        ->where('created_at', '>', $msg->created_at)
-                        ->orderBy('created_at')
+                        ->where('id', '>', $msg->id)
+                        ->orderBy('id')
                         ->first();
 
                     if ($nextAssistant && $nextAssistant->rag_context) {
