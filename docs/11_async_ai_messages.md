@@ -754,12 +754,11 @@ Le contexte RAG (chunks, scores, sources) est maintenant affiché sous le messag
 ```php
 // Lors du chargement des messages
 if ($msg->role === 'user') {
-    // Trouver le message assistant suivant
+    // Trouver le message assistant suivant (par ID pour ordre exact)
     $nextAssistant = AiMessage::where('session_id', $msg->session_id)
         ->where('role', 'assistant')
-        ->where('created_at', '>', $msg->created_at)
-        ->orderBy('created_at')
-        ->orderBy('id') // Tri secondaire pour ordre stable
+        ->where('id', '>', $msg->id) // ID garantit l'ordre de création
+        ->orderBy('id')
         ->first();
 
     // Attacher le contexte RAG au message utilisateur

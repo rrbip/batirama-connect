@@ -960,16 +960,16 @@ class PromptBuilder
 
     /**
      * Récupère l'historique de la session avec fenêtre glissante
+     * Note: On utilise l'ID (auto-incrémenté) pour garantir l'ordre de création
      */
     private function getSessionHistory(AiSession $session, int $windowSize): Collection
     {
         return AiMessage::where('session_id', $session->id)
             ->whereIn('role', ['user', 'assistant'])
-            ->orderBy('created_at', 'desc')
-            ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
+            ->orderBy('id', 'desc') // Récupérer les plus récents par ID
             ->limit($windowSize * 2) // user + assistant = 2 messages par échange
             ->get()
-            ->reverse()
+            ->sortBy('id') // Trier par ID croissant pour ordre chronologique
             ->values();
     }
 
@@ -3541,7 +3541,7 @@ class PdfGeneratorService
         $data = [
             'session' => $session,
             'agent' => $session->agent,
-            'messages' => $session->messages()->orderBy('created_at')->orderBy('id')->get(),
+            'messages' => $session->messages()->orderBy('id')->get(), // ID garantit l'ordre de création
             'client_info' => $session->publicToken?->client_info,
             'external_ref' => $session->publicToken?->external_ref,
             'generated_at' => now(),
