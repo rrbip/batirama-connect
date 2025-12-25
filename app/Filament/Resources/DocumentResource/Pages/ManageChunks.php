@@ -34,9 +34,13 @@ class ManageChunks extends Page
 
     public string $editingContent = '';
 
-    public function mount(int|string $record): void
+    public function mount(int|string|Document $record): void
     {
-        $this->record = Document::with('chunks')->findOrFail($record);
+        if ($record instanceof Document) {
+            $this->record = $record->load('chunks');
+        } else {
+            $this->record = Document::with('chunks')->findOrFail($record);
+        }
     }
 
     public function getTitle(): string
