@@ -123,11 +123,11 @@ class RagService
             $historyMessages = $session->messages()
                 ->whereIn('role', ['user', 'assistant'])
                 ->where('processing_status', AiMessage::STATUS_COMPLETED)
-                ->orderBy('created_at', 'desc')
-                ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
+                ->orderBy('id', 'desc') // Récupérer les plus récents par ID (ordre de création)
                 ->take($agent->context_window_size * 2)
                 ->get()
-                ->reverse();
+                ->sortBy('id') // Trier par ID croissant pour ordre chronologique
+                ->values();
 
             $conversationHistory = $historyMessages->map(fn (AiMessage $msg) => [
                 'role' => $msg->role,
