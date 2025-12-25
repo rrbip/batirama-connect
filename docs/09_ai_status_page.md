@@ -113,7 +113,51 @@ Cette section permet de vérifier :
 
 ### 1.7 Modèles Ollama
 
-Section dépliable listant les modèles LLM disponibles sur le serveur Ollama.
+Section dépliable permettant de **gérer les modèles LLM** sur le serveur Ollama.
+
+#### Modèles installés
+
+Affiche la liste des modèles actuellement installés avec :
+- **Nom** du modèle
+- **Taille** sur le disque
+- **Bouton supprimer** pour libérer de l'espace disque
+
+> **Attention** : La suppression d'un modèle est définitive. Le modèle devra être retéléchargé si nécessaire.
+
+#### Installation de nouveaux modèles
+
+Deux méthodes disponibles :
+
+1. **Modèles recommandés** : Liste pré-configurée de modèles testés et compatibles
+   - Modèles de chat (Llama, Mistral, Gemma, Phi, Qwen...)
+   - Modèles d'embedding (Nomic, MXBai, All-MiniLM)
+   - Modèles de code (Code Llama, DeepSeek Coder)
+
+2. **Installation personnalisée** : Entrer manuellement le nom d'un modèle depuis [ollama.com/library](https://ollama.com/library)
+
+#### Synchronisation de la liste
+
+Le bouton **"Synchroniser"** met à jour la liste des modèles disponibles depuis :
+
+1. **URL personnalisée** (si configurée) - Format JSON
+2. **API Ollama** - Interroge le serveur pour les modèles populaires
+3. **Configuration** - Utilise la liste dans `config/ai.php` (fallback)
+
+Les modèles synchronisés sont **cachés 24h**. L'interface affiche :
+- Date de dernière synchronisation
+- Source utilisée (url, ollama, config)
+
+### 1.8 Messages IA (Async)
+
+Statistiques des messages IA traités de manière asynchrone :
+
+| Métrique | Description |
+|----------|-------------|
+| En file | Messages en attente de traitement |
+| En cours | Messages actuellement traités |
+| Complétés (j) | Messages complétés aujourd'hui |
+| Échoués (j) | Messages en échec aujourd'hui |
+| Temps moyen | Temps de génération moyen |
 
 ---
 
@@ -149,12 +193,24 @@ class AiStatusPage extends Page
     public array $failedDocuments = [];
     public array $failedJobs = [];
 
+    // Modèles Ollama
+    public array $ollamaModels = [];
+    public array $availableModels = [];
+    public array $lastSyncInfo = [];
+
     // Vérification des services
     protected function checkServices(): array;
     protected function getQueueStats(): array;
     protected function getDocumentStats(): array;
     protected function getFailedDocuments(): array;
     protected function getFailedJobs(): array;
+
+    // Gestion des modèles Ollama
+    protected function loadOllamaModels(): void;
+    protected function getAvailableModels(): array;
+    public function syncAvailableModels(): void;
+    public function deleteOllamaModel(string $modelName): void;
+    public function installOllamaModel(?string $modelName = null): void;
 
     // Actions
     public function refreshStatus(): void;
@@ -243,10 +299,51 @@ QUEUE_CONNECTION=database  # ou sync, redis
 # Ollama
 OLLAMA_HOST=ollama
 OLLAMA_PORT=11434
+OLLAMA_MODELS_LIST_URL=  # URL optionnelle pour synchroniser la liste des modèles
 
 # Qdrant
 QDRANT_HOST=qdrant
 QDRANT_PORT=6333
+```
+
+### Liste des modèles Ollama
+
+La liste des modèles recommandés est configurée dans `config/ai.php` :
+
+```php
+'ollama' => [
+    'available_models' => [
+        'mistral:7b' => [
+            'name' => 'Mistral 7B',
+            'size' => '~4.1 GB',
+            'type' => 'chat',          // chat, embedding, code
+            'description' => 'Excellent pour le français',
+        ],
+        // ...
+    ],
+],
+```
+
+### URL de synchronisation personnalisée
+
+Si `OLLAMA_MODELS_LIST_URL` est configurée, le bouton "Synchroniser" récupérera la liste depuis cette URL.
+
+Format JSON attendu :
+```json
+{
+  "llama3.1:8b": {
+    "name": "Llama 3.1 8B",
+    "size": "~4.7 GB",
+    "type": "chat",
+    "description": "Recommandé pour production"
+  },
+  "nomic-embed-text": {
+    "name": "Nomic Embed",
+    "size": "~274 MB",
+    "type": "embedding",
+    "description": "Embeddings, recommandé"
+  }
+}
 ```
 
 ---
@@ -313,6 +410,31 @@ docker compose build app queue --no-cache
 docker compose up -d
 ```
 
+### L'installation d'un modèle échoue
+
+1. Vérifier que le nom du modèle est correct sur [ollama.com/library](https://ollama.com/library)
+2. Vérifier l'espace disque disponible :
+   ```bash
+   docker exec ollama df -h /root/.ollama
+   ```
+3. Vérifier les logs Ollama :
+   ```bash
+   docker compose logs ollama
+   ```
+
+### La suppression d'un modèle ne libère pas d'espace
+
+L'espace est libéré immédiatement sur le serveur Ollama. Si l'espace ne semble pas libéré, vérifier les modèles restants :
+```bash
+docker exec ollama ollama list
+```
+
+### La synchronisation ne trouve pas de nouveaux modèles
+
+1. Si `OLLAMA_MODELS_LIST_URL` est configurée, vérifier que l'URL est accessible et retourne un JSON valide
+2. Sinon, la synchronisation utilise l'API Ollama qui vérifie seulement les modèles populaires pré-définis
+3. Pour ajouter de nouveaux modèles à la liste, modifier `config/ai.php` → `ollama.available_models`
+
 ---
 
 ## 7. Évolutions futures
@@ -322,3 +444,4 @@ docker compose up -d
 - [ ] Historique des temps de réponse
 - [ ] Graphiques de performance
 - [ ] Alertes email/Slack
+- [ ] Progression en temps réel du téléchargement des modèles
