@@ -60,6 +60,13 @@ class DocumentResource extends Resource
                                                 'text/markdown',
                                                 'application/msword',
                                                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                                // Images (OCR)
+                                                'image/png',
+                                                'image/jpeg',
+                                                'image/gif',
+                                                'image/bmp',
+                                                'image/tiff',
+                                                'image/webp',
                                             ])
                                             ->maxSize(50 * 1024) // 50MB
                                             ->columnSpanFull()
@@ -167,6 +174,13 @@ class DocumentResource extends Resource
                                                 'text/markdown',
                                                 'application/msword',
                                                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                                // Images (OCR)
+                                                'image/png',
+                                                'image/jpeg',
+                                                'image/gif',
+                                                'image/bmp',
+                                                'image/tiff',
+                                                'image/webp',
                                             ])
                                             ->maxSize(50 * 1024) // 50MB
                                             ->helperText('Uploadez un nouveau fichier pour remplacer l\'actuel. Le document sera automatiquement retraité.')
@@ -332,6 +346,7 @@ class DocumentResource extends Resource
                         'pdf' => 'danger',
                         'docx', 'doc' => 'info',
                         'txt', 'md' => 'gray',
+                        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => 'success',
                         default => 'gray',
                     }),
 
@@ -447,6 +462,13 @@ class DocumentResource extends Resource
                             ->send();
                     }),
 
+                Tables\Actions\Action::make('chunks')
+                    ->label('Chunks')
+                    ->icon('heroicon-o-squares-2x2')
+                    ->color('info')
+                    ->visible(fn ($record) => $record->chunk_count > 0)
+                    ->url(fn ($record) => static::getUrl('chunks', ['record' => $record])),
+
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])
@@ -515,6 +537,7 @@ class DocumentResource extends Resource
             'index' => Pages\ListDocuments::route('/'),
             'create' => Pages\CreateDocument::route('/create'),
             'edit' => Pages\EditDocument::route('/{record}/edit'),
+            'chunks' => Pages\ManageChunks::route('/{record}/chunks'),
         ];
     }
 }

@@ -18,6 +18,13 @@ class EditDocument extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('chunks')
+                ->label('Gérer les chunks')
+                ->icon('heroicon-o-squares-2x2')
+                ->color('info')
+                ->visible(fn () => $this->record->chunk_count > 0)
+                ->url(fn () => DocumentResource::getUrl('chunks', ['record' => $this->record])),
+
             Actions\Action::make('reprocess')
                 ->label('Retraiter')
                 ->icon('heroicon-o-arrow-path')

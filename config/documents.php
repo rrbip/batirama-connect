@@ -41,9 +41,13 @@ return [
         'video/webm' => ['extensions' => ['webm'], 'extractor' => 'whisper'],
         'video/x-msvideo' => ['extensions' => ['avi'], 'extractor' => 'whisper'],
 
-        // Images (OCR optionnel)
+        // Images (OCR avec Tesseract)
         'image/png' => ['extensions' => ['png'], 'extractor' => 'ocr'],
         'image/jpeg' => ['extensions' => ['jpg', 'jpeg'], 'extractor' => 'ocr'],
+        'image/gif' => ['extensions' => ['gif'], 'extractor' => 'ocr'],
+        'image/bmp' => ['extensions' => ['bmp'], 'extractor' => 'ocr'],
+        'image/tiff' => ['extensions' => ['tiff', 'tif'], 'extractor' => 'ocr'],
+        'image/webp' => ['extensions' => ['webp'], 'extractor' => 'ocr'],
     ],
 
     /*
