@@ -199,8 +199,8 @@ class DocumentExtractorService
     private function extractFromPdfWithOcr(string $path): string
     {
         // Vérifier si pdftoppm est disponible pour convertir PDF en images
-        $checkResult = Process::run('which pdftoppm');
-        if (!$checkResult->successful()) {
+        $checkResult = Process::run('pdftoppm -v 2>&1');
+        if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftoppm')) {
             throw new \RuntimeException('pdftoppm (poppler-utils) is required for PDF OCR');
         }
 
@@ -306,10 +306,15 @@ class DocumentExtractorService
         static $available = null;
 
         if ($available === null) {
-            $result = Process::run('which tesseract');
+            // Utiliser 'command -v' (POSIX) ou tester directement tesseract --version
+            $result = Process::run('tesseract --version 2>/dev/null');
             $available = $result->successful();
 
-            if (!$available) {
+            if ($available) {
+                Log::info('Tesseract OCR available', [
+                    'version' => explode("\n", $result->output())[0] ?? 'unknown',
+                ]);
+            } else {
                 Log::info('Tesseract OCR not available on this system');
             }
         }
@@ -406,8 +411,8 @@ class DocumentExtractorService
     private function extractWithPdfToText(string $path): string
     {
         // Vérifier si pdftotext est disponible
-        $checkResult = Process::run('which pdftotext');
-        if (!$checkResult->successful()) {
+        $checkResult = Process::run('pdftotext -v 2>&1');
+        if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftotext')) {
             Log::info('pdftotext not available on this system');
             return '';
         }
