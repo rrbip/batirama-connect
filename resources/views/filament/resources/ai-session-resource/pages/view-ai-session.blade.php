@@ -230,17 +230,146 @@
                                             <span>{{ $message->created_at?->format('H:i') }}</span>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
 
-                                    {{-- Bouton pour voir le contexte envoye a l'IA (sur le message utilisateur qui precede) --}}
-                                    @php
-                                        // Trouver le message assistant suivant pour afficher son contexte
-                                        $nextMessage = $messages->get($index + 1);
-                                        $hasContext = $nextMessage && $nextMessage->role === 'assistant' && !empty($nextMessage->rag_context);
-                                    @endphp
+                        {{-- Message assistant --}}
+                        @elseif($isAssistant)
+                            <div class="flex justify-start"
+                                 x-data="{ showCorrection: false, correctedContent: @js($message->content) }">
+                                <div class="max-w-[80%]">
+                                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                        {{-- Header avec badge de validation --}}
+                                        <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
+                                            <span class="text-xs text-gray-500">{{ $session->agent?->name }}</span>
 
-                                    @if($hasContext)
+                                            @if($isPending)
+                                                <x-filament::badge color="warning" size="sm">En attente</x-filament::badge>
+                                            @elseif($isValidated)
+                                                <x-filament::badge color="success" size="sm">Validee</x-filament::badge>
+                                            @elseif($isLearned)
+                                                <x-filament::badge color="primary" size="sm">Apprise</x-filament::badge>
+                                            @elseif($isRejected)
+                                                <x-filament::badge color="danger" size="sm">Rejetee</x-filament::badge>
+                                            @endif
+                                        </div>
+
+                                        {{-- Contenu --}}
+                                        <div class="prose prose-sm dark:prose-invert max-w-none">
+                                            @if($isLearned && $message->corrected_content)
+                                                <div class="mb-2 p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs">
+                                                    <strong>Contenu corrige :</strong>
+                                                </div>
+                                                {!! \Illuminate\Support\Str::markdown($message->corrected_content) !!}
+                                                <details class="mt-2">
+                                                    <summary class="text-xs text-gray-500 cursor-pointer">Voir l'original</summary>
+                                                    <div class="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded text-sm opacity-75">
+                                                        {!! \Illuminate\Support\Str::markdown($message->content) !!}
+                                                    </div>
+                                                </details>
+                                            @else
+                                                {!! \Illuminate\Support\Str::markdown($message->content ?? '') !!}
+                                            @endif
+                                        </div>
+
+                                        {{-- Metadonnees --}}
+                                        <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
+                                            <span>{{ $message->created_at?->format('H:i') }}</span>
+                                            <div class="flex items-center gap-2">
+                                                @if($message->model_used)
+                                                    <span class="text-gray-400 flex items-center gap-1">
+                                                        {{ $message->model_used }}
+                                                        @if($message->used_fallback_model)
+                                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300" title="Modele de fallback utilise">
+                                                                fallback
+                                                            </span>
+                                                        @endif
+                                                    </span>
+                                                @endif
+                                                @if($message->tokens_completion)
+                                                    <span>{{ $message->tokens_prompt + $message->tokens_completion }} tokens</span>
+                                                @endif
+                                                @if($message->generation_time_ms)
+                                                    <span>{{ number_format($message->generation_time_ms / 1000, 1) }}s</span>
+                                                @endif
+                                            </div>
+                                        </div>
+
+                                        {{-- Boutons d'action pour reponses en attente --}}
+                                        @if($isPending)
+                                            <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                                                <div class="flex flex-wrap gap-2">
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="success"
+                                                        icon="heroicon-o-check"
+                                                        wire:click="validateMessage({{ $message->id }})"
+                                                    >
+                                                        Valider
+                                                    </x-filament::button>
+
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="primary"
+                                                        icon="heroicon-o-pencil"
+                                                        x-on:click="showCorrection = !showCorrection"
+                                                    >
+                                                        Corriger
+                                                    </x-filament::button>
+
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="danger"
+                                                        icon="heroicon-o-x-mark"
+                                                        wire:click="rejectMessage({{ $message->id }})"
+                                                    >
+                                                        Rejeter
+                                                    </x-filament::button>
+                                                </div>
+
+                                                {{-- Formulaire de correction --}}
+                                                <div x-show="showCorrection" x-cloak class="mt-3 space-y-2">
+                                                    <textarea
+                                                        x-model="correctedContent"
+                                                        rows="6"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                        placeholder="Entrez la reponse corrigee..."
+                                                    ></textarea>
+                                                    <div class="flex gap-2">
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="primary"
+                                                            x-on:click="$wire.learnFromMessage({{ $message->id }}, correctedContent); showCorrection = false"
+                                                        >
+                                                            Enregistrer et apprendre
+                                                        </x-filament::button>
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="gray"
+                                                            x-on:click="showCorrection = false"
+                                                        >
+                                                            Annuler
+                                                        </x-filament::button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
+
+                                        {{-- Info validation --}}
+                                        @if(($isValidated || $isLearned || $isRejected) && $message->validated_at)
+                                            <div class="mt-2 text-xs text-gray-400">
+                                                {{ $isValidated ? 'Validee' : ($isLearned ? 'Corrigee' : 'Rejetee') }}
+                                                par {{ $message->validator?->name ?? 'Systeme' }}
+                                                le {{ $message->validated_at->format('d/m/Y a H:i') }}
+                                            </div>
+                                        @endif
+                                    </div>
+
+                                    {{-- Bouton pour voir le contexte envoye a l'IA --}}
+                                    @if(!empty($message->rag_context))
                                         @php
-                                            $context = $nextMessage->rag_context;
+                                            $context = $message->rag_context;
                                             $learnedSources = $context['learned_sources'] ?? [];
                                             $documentSources = $context['document_sources'] ?? [];
                                             $conversationHistory = $context['conversation_history'] ?? [];
@@ -248,9 +377,68 @@
                                             $contextStats = $context['stats'] ?? [];
                                             $totalSources = count($learnedSources) + count($documentSources);
                                             $modalId = 'context-modal-' . ($message->uuid ?? $index);
+
+                                            // Trouver la question utilisateur precedente
+                                            $userQuestion = '';
+                                            for ($i = $index - 1; $i >= 0; $i--) {
+                                                $prevMsg = $messages->get($i);
+                                                if ($prevMsg && $prevMsg->role === 'user') {
+                                                    $userQuestion = $prevMsg->content;
+                                                    break;
+                                                }
+                                            }
+                                            $aiResponse = $message->content ?? '';
                                         @endphp
 
-                                        <div x-data="{ open: false }">
+                                        <div x-data="{
+                                            open: false,
+                                            copied: false,
+                                            copyReport() {
+                                                const report = this.generateReport();
+                                                navigator.clipboard.writeText(report).then(() => {
+                                                    this.copied = true;
+                                                    setTimeout(() => this.copied = false, 2000);
+                                                });
+                                            },
+                                            generateReport() {
+                                                return `# Rapport d'analyse IA
+
+## Question utilisateur
+{{ addslashes($userQuestion) }}
+
+## Reponse de l'IA
+{{ addslashes($aiResponse) }}
+
+## Contexte fourni a l'IA
+
+### Prompt systeme
+{{ addslashes($systemPrompt) }}
+
+### Historique de conversation ({{ count($conversationHistory) }} messages)
+@foreach($conversationHistory as $historyMsg)
+[{{ $historyMsg['role'] }}] {{ addslashes($historyMsg['content']) }}
+@endforeach
+
+### Documents RAG ({{ count($documentSources) }} sources)
+@foreach($documentSources as $doc)
+--- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
+{{ addslashes($doc['content'] ?? '') }}
+@endforeach
+
+### Sources d'apprentissage ({{ count($learnedSources) }} cas)
+@foreach($learnedSources as $learned)
+--- Cas #{{ $learned['index'] ?? $loop->iteration }} ({{ $learned['score'] ?? 0 }}% similaire) ---
+Q: {{ addslashes($learned['question'] ?? '') }}
+R: {{ addslashes($learned['answer'] ?? '') }}
+@endforeach
+
+## Informations techniques
+- Modele: {{ $message->model_used ?? 'Non specifie' }}
+- Tokens: {{ $message->tokens_completion ? ($message->tokens_prompt + $message->tokens_completion) : 'N/A' }}
+- Temps de generation: {{ $message->generation_time_ms ? number_format($message->generation_time_ms / 1000, 1) . 's' : 'N/A' }}
+- Fallback: {{ $message->used_fallback_model ? 'Oui' : 'Non' }}`;
+                                            }
+                                        }">
                                             {{-- Bouton d'ouverture --}}
                                             <button
                                                 @click="open = true"
@@ -302,6 +490,34 @@
 
                                                         {{-- Corps scrollable --}}
                                                         <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                                                            {{-- 0. Question et Reponse --}}
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                <details open>
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-rose-50 dark:bg-rose-950 border-b border-gray-200 dark:border-gray-600 hover:bg-rose-100 dark:hover:bg-rose-900 transition-colors">
+                                                                        <span class="font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-chat-bubble-left-right class="w-5 h-5" />
+                                                                            0. Question et Reponse
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div class="p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                                                                        <div>
+                                                                            <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Question utilisateur</p>
+                                                                            <div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+                                                                                <p class="text-sm text-gray-800 dark:text-gray-100">{{ $userQuestion }}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Reponse de l'IA</p>
+                                                                            <div class="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                <div class="prose prose-sm dark:prose-invert max-w-none">
+                                                                                    {!! \Illuminate\Support\Str::markdown($aiResponse) !!}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </details>
+                                                            </div>
+
                                                             {{-- 1. Prompt systeme --}}
                                                             @if(!empty($systemPrompt))
                                                                 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
@@ -447,6 +663,41 @@
                                                                     </div>
                                                                 </details>
                                                             </div>
+
+                                                            {{-- 6. Rapport pour analyse --}}
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border-2 border-indigo-300 dark:border-indigo-600 overflow-hidden">
+                                                                <details>
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-indigo-50 dark:bg-indigo-950 border-b border-gray-200 dark:border-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors">
+                                                                        <span class="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-clipboard-document class="w-5 h-5" />
+                                                                            6. Rapport pour analyse (copier pour Claude)
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                                                            Cliquez sur le bouton ci-dessous pour copier un rapport complet que vous pouvez envoyer a Claude ou un autre LLM pour analyser pourquoi l'IA n'a pas bien repondu.
+                                                                        </p>
+                                                                        <button
+                                                                            @click="copyReport()"
+                                                                            type="button"
+                                                                            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                                                                        >
+                                                                            <template x-if="!copied">
+                                                                                <span class="flex items-center gap-2">
+                                                                                    <x-heroicon-o-clipboard-document class="w-4 h-4" />
+                                                                                    Copier le rapport complet
+                                                                                </span>
+                                                                            </template>
+                                                                            <template x-if="copied">
+                                                                                <span class="flex items-center gap-2">
+                                                                                    <x-heroicon-o-check class="w-4 h-4" />
+                                                                                    Copie !
+                                                                                </span>
+                                                                            </template>
+                                                                        </button>
+                                                                    </div>
+                                                                </details>
+                                                            </div>
                                                         </div>
 
                                                         {{-- Footer --}}
@@ -460,141 +711,6 @@
                                             </template>
                                         </div>
                                     @endif
-                                </div>
-                            </div>
-
-                        {{-- Message assistant --}}
-                        @elseif($isAssistant)
-                            <div class="flex justify-start"
-                                 x-data="{ showCorrection: false, correctedContent: @js($message->content) }">
-                                <div class="max-w-[80%]">
-                                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
-                                        {{-- Header avec badge de validation --}}
-                                        <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
-                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
-                                            <span class="text-xs text-gray-500">{{ $session->agent?->name }}</span>
-
-                                            @if($isPending)
-                                                <x-filament::badge color="warning" size="sm">En attente</x-filament::badge>
-                                            @elseif($isValidated)
-                                                <x-filament::badge color="success" size="sm">Validee</x-filament::badge>
-                                            @elseif($isLearned)
-                                                <x-filament::badge color="primary" size="sm">Apprise</x-filament::badge>
-                                            @elseif($isRejected)
-                                                <x-filament::badge color="danger" size="sm">Rejetee</x-filament::badge>
-                                            @endif
-                                        </div>
-
-                                        {{-- Contenu --}}
-                                        <div class="prose prose-sm dark:prose-invert max-w-none">
-                                            @if($isLearned && $message->corrected_content)
-                                                <div class="mb-2 p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs">
-                                                    <strong>Contenu corrige :</strong>
-                                                </div>
-                                                {!! \Illuminate\Support\Str::markdown($message->corrected_content) !!}
-                                                <details class="mt-2">
-                                                    <summary class="text-xs text-gray-500 cursor-pointer">Voir l'original</summary>
-                                                    <div class="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded text-sm opacity-75">
-                                                        {!! \Illuminate\Support\Str::markdown($message->content) !!}
-                                                    </div>
-                                                </details>
-                                            @else
-                                                {!! \Illuminate\Support\Str::markdown($message->content ?? '') !!}
-                                            @endif
-                                        </div>
-
-                                        {{-- Metadonnees --}}
-                                        <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
-                                            <span>{{ $message->created_at?->format('H:i') }}</span>
-                                            <div class="flex items-center gap-2">
-                                                @if($message->model_used)
-                                                    <span class="text-gray-400 flex items-center gap-1">
-                                                        {{ $message->model_used }}
-                                                        @if($message->used_fallback_model)
-                                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300" title="Modele de fallback utilise">
-                                                                fallback
-                                                            </span>
-                                                        @endif
-                                                    </span>
-                                                @endif
-                                                @if($message->tokens_completion)
-                                                    <span>{{ $message->tokens_prompt + $message->tokens_completion }} tokens</span>
-                                                @endif
-                                                @if($message->generation_time_ms)
-                                                    <span>{{ number_format($message->generation_time_ms / 1000, 1) }}s</span>
-                                                @endif
-                                            </div>
-                                        </div>
-
-                                        {{-- Boutons d'action pour reponses en attente --}}
-                                        @if($isPending)
-                                            <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                                                <div class="flex flex-wrap gap-2">
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="success"
-                                                        icon="heroicon-o-check"
-                                                        wire:click="validateMessage({{ $message->id }})"
-                                                    >
-                                                        Valider
-                                                    </x-filament::button>
-
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="primary"
-                                                        icon="heroicon-o-pencil"
-                                                        x-on:click="showCorrection = !showCorrection"
-                                                    >
-                                                        Corriger
-                                                    </x-filament::button>
-
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="danger"
-                                                        icon="heroicon-o-x-mark"
-                                                        wire:click="rejectMessage({{ $message->id }})"
-                                                    >
-                                                        Rejeter
-                                                    </x-filament::button>
-                                                </div>
-
-                                                {{-- Formulaire de correction --}}
-                                                <div x-show="showCorrection" x-cloak class="mt-3 space-y-2">
-                                                    <textarea
-                                                        x-model="correctedContent"
-                                                        rows="6"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                        placeholder="Entrez la reponse corrigee..."
-                                                    ></textarea>
-                                                    <div class="flex gap-2">
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="primary"
-                                                            x-on:click="$wire.learnFromMessage({{ $message->id }}, correctedContent); showCorrection = false"
-                                                        >
-                                                            Enregistrer et apprendre
-                                                        </x-filament::button>
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="gray"
-                                                            x-on:click="showCorrection = false"
-                                                        >
-                                                            Annuler
-                                                        </x-filament::button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        @endif
-
-                                        {{-- Info validation --}}
-                                        @if(($isValidated || $isLearned || $isRejected) && $message->validated_at)
-                                            <div class="mt-2 text-xs text-gray-400">
-                                                {{ $isValidated ? 'Validee' : ($isLearned ? 'Corrigee' : 'Rejetee') }}
-                                                par {{ $message->validator?->name ?? 'Systeme' }}
-                                                le {{ $message->validated_at->format('d/m/Y a H:i') }}
-                                            </div>
-                                        @endif
-                                    </div>
                                 </div>
                             </div>
                         @endif
