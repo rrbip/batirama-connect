@@ -265,14 +265,19 @@ class DocumentExtractorService
         // Normaliser les retours à la ligne
         $text = str_replace(["\r\n", "\r"], "\n", $text);
 
-        // Supprimer les espaces multiples
+        // Supprimer les espaces multiples (mais pas les sauts de ligne)
         $text = preg_replace('/[^\S\n]+/', ' ', $text);
-
-        // Supprimer les lignes vides multiples
-        $text = preg_replace('/\n{3,}/', "\n\n", $text);
 
         // Supprimer les espaces en début/fin de ligne
         $text = preg_replace('/^[ \t]+|[ \t]+$/m', '', $text);
+
+        // Normaliser les sauts de paragraphe pour les PDF
+        // Détecte les lignes qui se terminent par une ponctuation de fin de phrase
+        // suivies d'une ligne qui commence par une majuscule = nouveau paragraphe
+        $text = preg_replace('/([.!?])\n([A-ZÀÂÄÉÈÊËÏÎÔÙÛÜÇ])/', "$1\n\n$2", $text);
+
+        // Supprimer les lignes vides multiples (max 2 newlines)
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
 
         // Trim global
         return trim($text);

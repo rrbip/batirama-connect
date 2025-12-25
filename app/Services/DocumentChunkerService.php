@@ -122,10 +122,25 @@ class DocumentChunkerService
      */
     private function chunkBySentence(string $text): array
     {
-        // Découper en phrases
-        $sentences = preg_split('/(?<=[.!?])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+        // Découper en phrases (plusieurs patterns pour plus de robustesse)
+        $sentences = preg_split('/(?<=[.!?;:])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
 
-        return $this->groupIntoChunks($sentences);
+        // Si on n'a qu'une seule phrase mais le texte est conséquent,
+        // essayer de découper par lignes
+        if (count($sentences) <= 1 && $this->estimateTokens($text) > $this->maxChunkSize * 0.5) {
+            $sentences = preg_split('/\n+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+            $sentences = array_map('trim', $sentences);
+            $sentences = array_filter($sentences);
+        }
+
+        $chunks = $this->groupIntoChunks($sentences);
+
+        // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
+        if (count($chunks) === 1 && $this->estimateTokens($text) > $this->maxChunkSize) {
+            return $this->chunkByFixedSize($text);
+        }
+
+        return $chunks;
     }
 
     /**
@@ -133,12 +148,27 @@ class DocumentChunkerService
      */
     private function chunkByParagraph(string $text): array
     {
-        // Découper en paragraphes
+        // Découper en paragraphes (double saut de ligne)
         $paragraphs = preg_split('/\n\s*\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
         $paragraphs = array_map('trim', $paragraphs);
-        $paragraphs = array_filter($paragraphs); // Supprimer les vides
+        $paragraphs = array_filter($paragraphs);
 
-        return $this->groupIntoChunks($paragraphs);
+        // Si on n'a qu'un seul paragraphe mais le texte est conséquent,
+        // essayer de découper par lignes simples (typique des PDF)
+        if (count($paragraphs) <= 1 && $this->estimateTokens($text) > $this->maxChunkSize * 0.5) {
+            $paragraphs = preg_split('/\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
+            $paragraphs = array_map('trim', $paragraphs);
+            $paragraphs = array_filter($paragraphs);
+        }
+
+        $chunks = $this->groupIntoChunks($paragraphs);
+
+        // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
+        if (count($chunks) === 1 && $this->estimateTokens($text) > $this->maxChunkSize) {
+            return $this->chunkByFixedSize($text);
+        }
+
+        return $chunks;
     }
 
     /**
