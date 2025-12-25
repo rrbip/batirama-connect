@@ -138,13 +138,27 @@ Ce job exécute automatiquement toutes les étapes. En cas d'erreur, il retry 3 
 
 ### Extraction PDF
 
-1. **Méthode prioritaire** : `pdftotext` (poppler-utils)
-   - Meilleure qualité pour PDFs textuels
+Le système essaie **deux méthodes en parallèle** et choisit le meilleur résultat :
+
+1. **pdftotext** (poppler-utils)
+   - Essaie 3 modes : `-raw`, `-layout`, et défaut
+   - Le mode `-raw` gère souvent mieux les ligatures typographiques
    - Requiert le package `poppler-utils` dans le container
 
-2. **Fallback** : `smalot/pdfparser`
-   - Utilisé si pdftotext échoue
-   - Consomme plus de mémoire
+2. **smalot/pdfparser**
+   - Parser PHP natif
+   - Consomme plus de mémoire mais peut mieux gérer certains encodages
+
+**Comparaison automatique** :
+- Les deux méthodes sont exécutées
+- Le système compte les caractères problématiques (U+FFFD, ligatures non décodées)
+- Le résultat avec le moins de caractères problématiques est utilisé
+- En cas d'égalité, le texte le plus long est préféré
+
+**Gestion des ligatures** :
+Les polices PDF utilisent parfois des ligatures typographiques (ff, fi, fl, ffi, ffl, st) qui peuvent causer des caractères manquants. Le système :
+- Remplace automatiquement les ligatures Unicode par leurs caractères composants
+- Supprime les caractères de remplacement (U+FFFD) résiduels
 
 ---
 
@@ -226,6 +240,17 @@ docker compose up -d
 1. Vérifier le texte extrait dans l'onglet "Extraction"
 2. Si vide ou très court : le PDF est probablement un scan (image)
 3. Solution : convertir en PDF textuel ou utiliser OCR
+
+### Caractères manquants dans le texte extrait
+
+Si certains mots ont des lettres manquantes (ex: "mé�er" au lieu de "métier") :
+
+1. **Cause probable** : le PDF utilise des ligatures typographiques (ti, fi, fl, etc.)
+2. **Vérifier les logs** : `docker compose logs queue | grep "PDF extraction comparison"`
+3. **Solutions** :
+   - Réexporter le PDF source avec une police sans ligatures
+   - Utiliser un outil de conversion PDF qui décompose les ligatures
+   - Essayer de convertir le PDF en texte avec Adobe Acrobat ou un outil similaire
 
 ### Indexation échoue
 
