@@ -291,42 +291,67 @@ class DocumentExtractorService
      */
     private function ensureUtf8(string $text): string
     {
-        // 1. D'abord, vérifier s'il y a du double encodage UTF-8
-        // Ex: "Ã©" au lieu de "é" (UTF-8 interprété comme ISO-8859-1 puis ré-encodé)
-        if (mb_check_encoding($text, 'UTF-8')) {
-            // Patterns typiques de double encodage UTF-8
-            if (preg_match('/Ã[©¨ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿À-ÿ]/', $text)) {
-                $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
-                if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
-                    Log::debug('Fixed double UTF-8 encoding');
+        if (empty($text)) {
+            return $text;
+        }
+
+        // 1. Détecter le double encodage UTF-8 (UTF-8 lu comme ISO-8859-1/Windows-1252 puis ré-encodé)
+        // Patterns typiques: "Ã©" pour "é", "â€™" pour "'", "Ã " pour "à", "Ã§" pour "ç"
+        $doubleEncodingPatterns = [
+            '/Ã[©¨ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]/',  // Ã© Ã¨ etc.
+            '/Ã[€‚ƒ„…†‡ˆ‰Š‹ŒŽ''""]/',         // Caractères spéciaux
+            '/â€[™˜œ¢£¤¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]/', // â€™ â€œ etc.
+            '/Ã\s/',                            // Ã suivi d'espace (souvent "à ")
+            '/Ã[À-ÿ]/',                         // Autres combinaisons Ã + lettre accentuée
+        ];
+
+        $hasDoubleEncoding = false;
+        foreach ($doubleEncodingPatterns as $pattern) {
+            if (@preg_match($pattern, $text)) {
+                $hasDoubleEncoding = true;
+                break;
+            }
+        }
+
+        if ($hasDoubleEncoding) {
+            // Tenter de corriger le double encodage
+            $decoded = @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8');
+            if ($decoded !== false) {
+                // Vérifier si le résultat est du UTF-8 valide
+                if (mb_check_encoding($decoded, 'UTF-8')) {
+                    Log::debug('Fixed double UTF-8 encoding (method 1)');
                     return $decoded;
                 }
             }
 
-            // Pas de caractères de remplacement, c'est bon
+            // Méthode alternative avec iconv
+            $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
+            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                Log::debug('Fixed double UTF-8 encoding (method 2)');
+                return $decoded;
+            }
+        }
+
+        // 2. Si le texte est déjà en UTF-8 valide sans caractères de remplacement, c'est OK
+        if (mb_check_encoding($text, 'UTF-8')) {
             if (!str_contains($text, "\u{FFFD}") && !str_contains($text, '�')) {
                 return $text;
             }
         }
 
-        // 2. Essayer de détecter l'encodage
-        $encodings = ['UTF-8', 'Windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'CP1252'];
-        $detectedEncoding = mb_detect_encoding($text, $encodings, true);
-
-        if ($detectedEncoding && $detectedEncoding !== 'UTF-8') {
-            $converted = mb_convert_encoding($text, 'UTF-8', $detectedEncoding);
-            if ($converted !== false) {
-                return $converted;
+        // 3. Essayer de détecter et convertir depuis d'autres encodages
+        $encodings = ['Windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'CP1252'];
+        foreach ($encodings as $encoding) {
+            $converted = @mb_convert_encoding($text, 'UTF-8', $encoding);
+            if ($converted !== false && mb_check_encoding($converted, 'UTF-8')) {
+                if (!str_contains($converted, "\u{FFFD}") && !str_contains($converted, '�')) {
+                    Log::debug("Converted from {$encoding} to UTF-8");
+                    return $converted;
+                }
             }
         }
 
-        // 3. Fallback: essayer Windows-1252 (très courant pour les PDFs français)
-        $converted = @iconv('Windows-1252', 'UTF-8//IGNORE', $text);
-        if ($converted !== false && !empty($converted)) {
-            return $converted;
-        }
-
-        // 4. Dernier recours: supprimer les caractères non-UTF8
+        // 4. Dernier recours: nettoyer les caractères invalides
         return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 

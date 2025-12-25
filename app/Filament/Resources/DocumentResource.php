@@ -7,7 +7,6 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\DocumentResource\Pages;
 use App\Jobs\ProcessDocumentJob;
 use App\Models\Document;
-use App\Support\TextHelper;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
@@ -293,7 +292,7 @@ class DocumentResource extends Resource
                                                         $tokens,
                                                         $statusColor,
                                                         $status,
-                                                        e(\Illuminate\Support\Str::limit(TextHelper::fixUtf8Encoding($chunk->content), 500))
+                                                        e(\Illuminate\Support\Str::limit($chunk->content, 500))
                                                     );
                                                 }
                                                 $html .= '</div>';

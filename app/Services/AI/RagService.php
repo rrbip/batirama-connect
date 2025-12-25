@@ -9,7 +9,6 @@ use App\DTOs\AI\RagResult;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
-use App\Support\TextHelper;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -158,7 +157,7 @@ class RagService
                 'index' => $i + 1,
                 'id' => $r['id'] ?? null,
                 'score' => round(($r['score'] ?? 0) * 100, 1),
-                'content' => TextHelper::fixUtf8Encoding($r['payload']['content'] ?? $r['content'] ?? ''),
+                'content' => $r['payload']['content'] ?? $r['content'] ?? '',
                 'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
             ])->values()->toArray(),
 
@@ -298,7 +297,7 @@ class RagService
             'sources' => collect($ragResults)->map(fn ($r) => [
                 'id' => $r['id'] ?? null,
                 'score' => $r['score'] ?? 0,
-                'content' => Str::limit(TextHelper::fixUtf8Encoding($r['payload']['content'] ?? ''), 200),
+                'content' => Str::limit($r['payload']['content'] ?? '', 200),
             ])->toArray(),
             'retrieval_count' => count($ragResults),
         ];
