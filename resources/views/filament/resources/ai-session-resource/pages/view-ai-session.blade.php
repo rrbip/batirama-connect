@@ -49,10 +49,18 @@
                         </x-filament::badge>
                     </div>
                     <div class="flex justify-between">
-                        <span class="text-gray-500 dark:text-gray-400">Créé le</span>
+                        <span class="text-gray-500 dark:text-gray-400">Cree le</span>
                         <span class="font-medium">{{ $session->created_at->format('d/m/Y H:i') }}</span>
                     </div>
                 </div>
+
+                @if($session->uuid)
+                    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <div class="text-xs text-gray-500">
+                            Session: {{ Str::limit($session->uuid, 8) }}
+                        </div>
+                    </div>
+                @endif
             </x-filament::section>
 
             {{-- Stats --}}
@@ -70,7 +78,7 @@
                         <span class="font-medium">{{ $stats['total_messages'] }}</span>
                     </div>
                     <div class="flex justify-between">
-                        <span class="text-gray-500 dark:text-gray-400">Tokens utilisés</span>
+                        <span class="text-gray-500 dark:text-gray-400">Tokens utilises</span>
                         <span class="font-medium">{{ number_format($stats['total_tokens']) }}</span>
                     </div>
                     <div class="flex justify-between">
@@ -98,7 +106,7 @@
                     @endif
                     @if($stats['validated'] > 0)
                         <div class="flex justify-between items-center">
-                            <span class="text-success-600 dark:text-success-400">Validées</span>
+                            <span class="text-success-600 dark:text-success-400">Validees</span>
                             <x-filament::badge color="success">{{ $stats['validated'] }}</x-filament::badge>
                         </div>
                     @endif
@@ -110,20 +118,84 @@
                     @endif
                     @if($stats['rejected'] > 0)
                         <div class="flex justify-between items-center">
-                            <span class="text-danger-600 dark:text-danger-400">Rejetées</span>
+                            <span class="text-danger-600 dark:text-danger-400">Rejetees</span>
                             <x-filament::badge color="danger">{{ $stats['rejected'] }}</x-filament::badge>
                         </div>
                     @endif
                     @if($stats['pending_validation'] == 0 && $stats['validated'] == 0 && $stats['learned'] == 0 && $stats['rejected'] == 0)
-                        <p class="text-gray-500 text-center">Aucune réponse IA</p>
+                        <p class="text-gray-500 text-center">Aucune reponse IA</p>
                     @endif
+                </div>
+            </x-filament::section>
+
+            {{-- Guide des actions --}}
+            <x-filament::section collapsible collapsed>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-question-mark-circle class="w-5 h-5" />
+                        Guide des actions
+                    </div>
+                </x-slot>
+
+                <div class="space-y-4 text-xs">
+                    {{-- Valider --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-success-100 dark:bg-success-900">
+                                <x-heroicon-o-check class="w-4 h-4 text-success-600 dark:text-success-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-success-600 dark:text-success-400">Valider</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Marque la reponse comme correcte. Utile pour le suivi qualite mais n'impacte pas les futures reponses.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Corriger --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-primary-100 dark:bg-primary-900">
+                                <x-heroicon-o-pencil class="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-primary-600 dark:text-primary-400">Corriger</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Modifie la reponse et l'indexe pour l'apprentissage. Les futures questions similaires beneficieront de cette correction via le RAG.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Rejeter --}}
+                    <div class="flex gap-3">
+                        <div class="flex-shrink-0">
+                            <span class="inline-flex items-center justify-center w-6 h-6 rounded bg-danger-100 dark:bg-danger-900">
+                                <x-heroicon-o-x-mark class="w-4 h-4 text-danger-600 dark:text-danger-400" />
+                            </span>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-danger-600 dark:text-danger-400">Rejeter</p>
+                            <p class="text-gray-500 dark:text-gray-400">
+                                Marque la reponse comme incorrecte. Utile pour identifier les problemes mais n'indexe rien.
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- Info supplementaire --}}
+                    <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                        <p class="text-gray-400 dark:text-gray-500 italic">
+                            Seul "Corriger" ameliore les futures reponses de l'agent en indexant la correction dans la base vectorielle.
+                        </p>
+                    </div>
                 </div>
             </x-filament::section>
         </div>
 
         {{-- Main: Conversation --}}
         <div class="lg:col-span-3">
-            <x-filament::section>
+            <x-filament::section class="h-full">
                 <x-slot name="heading">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-2">
@@ -134,8 +206,9 @@
                     </div>
                 </x-slot>
 
-                <div class="space-y-4 max-h-[600px] overflow-y-auto p-2">
-                    @forelse($messages as $message)
+                {{-- Zone de messages avec style test-agent --}}
+                <div class="h-[600px] overflow-y-auto space-y-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg" id="chat-messages">
+                    @forelse($messages as $index => $message)
                         @php
                             $isUser = $message->role === 'user';
                             $isAssistant = $message->role === 'assistant';
@@ -145,305 +218,504 @@
                             $isRejected = $message->validation_status === 'rejected';
                         @endphp
 
-                        <div class="flex {{ $isUser ? 'justify-end' : 'justify-start' }}"
-                             x-data="{ showCorrection: false, correctedContent: @js($message->content) }">
-                            <div class="max-w-[85%] {{ $isUser
-                                ? 'bg-primary-500 text-white'
-                                : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                            }} rounded-lg p-4 shadow-sm">
+                        {{-- Message utilisateur --}}
+                        @if($isUser)
+                            <div class="flex justify-end">
+                                <div class="max-w-[80%]">
+                                    <div class="bg-primary-500 text-white rounded-lg p-3 shadow-sm">
+                                        <div class="prose prose-sm prose-invert max-w-none">
+                                            {!! \Illuminate\Support\Str::markdown($message->content) !!}
+                                        </div>
+                                        <div class="flex items-center justify-between mt-2 text-xs text-primary-200">
+                                            <span>{{ $message->created_at?->format('H:i') }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
 
-                                {{-- Header avec badge de validation --}}
-                                @if($isAssistant)
-                                    <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
-                                        <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
-                                        <span class="text-xs text-gray-500">{{ $session->agent?->name }}</span>
+                        {{-- Message assistant --}}
+                        @elseif($isAssistant)
+                            <div class="flex justify-start"
+                                 x-data="{ showCorrection: false, correctedContent: @js($message->content) }">
+                                <div class="max-w-[80%]">
+                                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                        {{-- Header avec badge de validation --}}
+                                        <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
+                                            <span class="text-xs text-gray-500">{{ $session->agent?->name }}</span>
 
+                                            @if($isPending)
+                                                <x-filament::badge color="warning" size="sm">En attente</x-filament::badge>
+                                            @elseif($isValidated)
+                                                <x-filament::badge color="success" size="sm">Validee</x-filament::badge>
+                                            @elseif($isLearned)
+                                                <x-filament::badge color="primary" size="sm">Apprise</x-filament::badge>
+                                            @elseif($isRejected)
+                                                <x-filament::badge color="danger" size="sm">Rejetee</x-filament::badge>
+                                            @endif
+                                        </div>
+
+                                        {{-- Contenu --}}
+                                        <div class="prose prose-sm dark:prose-invert max-w-none">
+                                            @if($isLearned && $message->corrected_content)
+                                                <div class="mb-2 p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs">
+                                                    <strong>Contenu corrige :</strong>
+                                                </div>
+                                                {!! \Illuminate\Support\Str::markdown($message->corrected_content) !!}
+                                                <details class="mt-2">
+                                                    <summary class="text-xs text-gray-500 cursor-pointer">Voir l'original</summary>
+                                                    <div class="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded text-sm opacity-75">
+                                                        {!! \Illuminate\Support\Str::markdown($message->content) !!}
+                                                    </div>
+                                                </details>
+                                            @else
+                                                {!! \Illuminate\Support\Str::markdown($message->content ?? '') !!}
+                                            @endif
+                                        </div>
+
+                                        {{-- Metadonnees --}}
+                                        <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
+                                            <span>{{ $message->created_at?->format('H:i') }}</span>
+                                            <div class="flex items-center gap-2">
+                                                @if($message->model_used)
+                                                    <span class="text-gray-400 flex items-center gap-1">
+                                                        {{ $message->model_used }}
+                                                        @if($message->used_fallback_model)
+                                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300" title="Modele de fallback utilise">
+                                                                fallback
+                                                            </span>
+                                                        @endif
+                                                    </span>
+                                                @endif
+                                                @if($message->tokens_completion)
+                                                    <span>{{ $message->tokens_prompt + $message->tokens_completion }} tokens</span>
+                                                @endif
+                                                @if($message->generation_time_ms)
+                                                    <span>{{ number_format($message->generation_time_ms / 1000, 1) }}s</span>
+                                                @endif
+                                            </div>
+                                        </div>
+
+                                        {{-- Boutons d'action pour reponses en attente --}}
                                         @if($isPending)
-                                            <x-filament::badge color="warning" size="sm">En attente</x-filament::badge>
-                                        @elseif($isValidated)
-                                            <x-filament::badge color="success" size="sm">Validée</x-filament::badge>
-                                        @elseif($isLearned)
-                                            <x-filament::badge color="primary" size="sm">Apprise</x-filament::badge>
-                                        @elseif($isRejected)
-                                            <x-filament::badge color="danger" size="sm">Rejetée</x-filament::badge>
+                                            <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                                                <div class="flex flex-wrap gap-2">
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="success"
+                                                        icon="heroicon-o-check"
+                                                        wire:click="validateMessage({{ $message->id }})"
+                                                    >
+                                                        Valider
+                                                    </x-filament::button>
+
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="primary"
+                                                        icon="heroicon-o-pencil"
+                                                        x-on:click="showCorrection = !showCorrection"
+                                                    >
+                                                        Corriger
+                                                    </x-filament::button>
+
+                                                    <x-filament::button
+                                                        size="xs"
+                                                        color="danger"
+                                                        icon="heroicon-o-x-mark"
+                                                        wire:click="rejectMessage({{ $message->id }})"
+                                                    >
+                                                        Rejeter
+                                                    </x-filament::button>
+                                                </div>
+
+                                                {{-- Formulaire de correction --}}
+                                                <div x-show="showCorrection" x-cloak class="mt-3 space-y-2">
+                                                    <textarea
+                                                        x-model="correctedContent"
+                                                        rows="6"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                        placeholder="Entrez la reponse corrigee..."
+                                                    ></textarea>
+                                                    <div class="flex gap-2">
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="primary"
+                                                            x-on:click="$wire.learnFromMessage({{ $message->id }}, correctedContent); showCorrection = false"
+                                                        >
+                                                            Enregistrer et apprendre
+                                                        </x-filament::button>
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="gray"
+                                                            x-on:click="showCorrection = false"
+                                                        >
+                                                            Annuler
+                                                        </x-filament::button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
+
+                                        {{-- Info validation --}}
+                                        @if(($isValidated || $isLearned || $isRejected) && $message->validated_at)
+                                            <div class="mt-2 text-xs text-gray-400">
+                                                {{ $isValidated ? 'Validee' : ($isLearned ? 'Corrigee' : 'Rejetee') }}
+                                                par {{ $message->validator?->name ?? 'Systeme' }}
+                                                le {{ $message->validated_at->format('d/m/Y a H:i') }}
+                                            </div>
                                         @endif
                                     </div>
-                                @endif
 
-                                {{-- Contenu --}}
-                                <div class="prose prose-sm dark:prose-invert max-w-none {{ $isUser ? 'prose-invert' : '' }}">
-                                    @if($isLearned && $message->corrected_content)
-                                        <div class="mb-2 p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs">
-                                            <strong>Contenu corrigé :</strong>
-                                        </div>
-                                        {!! \Illuminate\Support\Str::markdown($message->corrected_content) !!}
-                                        <details class="mt-2">
-                                            <summary class="text-xs text-gray-500 cursor-pointer">Voir l'original</summary>
-                                            <div class="mt-2 p-2 bg-gray-100 dark:bg-gray-900 rounded text-sm opacity-75">
-                                                {!! \Illuminate\Support\Str::markdown($message->content) !!}
-                                            </div>
-                                        </details>
-                                    @else
-                                        {!! \Illuminate\Support\Str::markdown($message->content) !!}
-                                    @endif
-                                </div>
+                                    {{-- Bouton pour voir le contexte envoye a l'IA --}}
+                                    @if(!empty($message->rag_context))
+                                        @php
+                                            $context = $message->rag_context;
+                                            $learnedSources = $context['learned_sources'] ?? [];
+                                            $documentSources = $context['document_sources'] ?? [];
+                                            $conversationHistory = $context['conversation_history'] ?? [];
+                                            $systemPrompt = $context['system_prompt_sent'] ?? '';
+                                            $contextStats = $context['stats'] ?? [];
+                                            $totalSources = count($learnedSources) + count($documentSources);
+                                            $modalId = 'context-modal-' . ($message->uuid ?? $index);
 
-                                {{-- Métadonnées --}}
-                                <div class="flex items-center justify-between mt-3 pt-2 border-t {{ $isUser ? 'border-primary-400' : 'border-gray-100 dark:border-gray-700' }}">
-                                    <span class="text-xs {{ $isUser ? 'text-primary-200' : 'text-gray-400' }}">
-                                        {{ $message->created_at?->format('H:i') }}
-                                    </span>
+                                            // Trouver la question utilisateur precedente
+                                            $userQuestion = '';
+                                            for ($i = $index - 1; $i >= 0; $i--) {
+                                                $prevMsg = $messages->get($i);
+                                                if ($prevMsg && $prevMsg->role === 'user') {
+                                                    $userQuestion = $prevMsg->content;
+                                                    break;
+                                                }
+                                            }
+                                            $aiResponse = $message->content ?? '';
+                                        @endphp
 
-                                    @if($isAssistant && $message->tokens_completion)
-                                        <span class="text-xs text-gray-400">
-                                            {{ $message->tokens_prompt + $message->tokens_completion }} tokens
-                                            · {{ $message->generation_time_ms }}ms
-                                        </span>
-                                    @endif
-                                </div>
+                                        <div x-data="{
+                                            open: false,
+                                            copied: false,
+                                            copyReport() {
+                                                const report = this.generateReport();
+                                                navigator.clipboard.writeText(report).then(() => {
+                                                    this.copied = true;
+                                                    setTimeout(() => this.copied = false, 2000);
+                                                });
+                                            },
+                                            generateReport() {
+                                                return `# Rapport d'analyse IA
 
-                                {{-- Contexte utilisé par l'IA --}}
-                                @if($isAssistant && !empty($message->rag_context))
-                                    @php
-                                        $context = $message->rag_context;
-                                        $learnedSources = $context['learned_sources'] ?? [];
-                                        $documentSources = $context['document_sources'] ?? [];
-                                        $stats = $context['stats'] ?? [];
-                                        $totalSources = count($learnedSources) + count($documentSources);
-                                        $hasSystemPrompt = !empty($context['system_prompt_sent']);
-                                    @endphp
+## Question utilisateur
+{{ addslashes($userQuestion) }}
 
-                                    @if($totalSources > 0 || $hasSystemPrompt)
-                                        <details class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg">
-                                            <summary class="p-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg flex items-center gap-2">
+## Reponse de l'IA
+{{ addslashes($aiResponse) }}
+
+## Contexte fourni a l'IA
+
+### Prompt systeme
+{{ addslashes($systemPrompt) }}
+
+### Historique de conversation ({{ count($conversationHistory) }} messages)
+@foreach($conversationHistory as $historyMsg)
+[{{ $historyMsg['role'] }}] {{ addslashes($historyMsg['content']) }}
+@endforeach
+
+### Documents RAG ({{ count($documentSources) }} sources)
+@foreach($documentSources as $doc)
+--- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
+{{ addslashes($doc['content'] ?? '') }}
+@endforeach
+
+### Sources d'apprentissage ({{ count($learnedSources) }} cas)
+@foreach($learnedSources as $learned)
+--- Cas #{{ $learned['index'] ?? $loop->iteration }} ({{ $learned['score'] ?? 0 }}% similaire) ---
+Q: {{ addslashes($learned['question'] ?? '') }}
+R: {{ addslashes($learned['answer'] ?? '') }}
+@endforeach
+
+## Informations techniques
+- Modele: {{ $message->model_used ?? 'Non specifie' }}
+- Tokens: {{ $message->tokens_completion ? ($message->tokens_prompt + $message->tokens_completion) : 'N/A' }}
+- Temps de generation: {{ $message->generation_time_ms ? number_format($message->generation_time_ms / 1000, 1) . 's' : 'N/A' }}
+- Fallback: {{ $message->used_fallback_model ? 'Oui' : 'Non' }}`;
+                                            }
+                                        }">
+                                            {{-- Bouton d'ouverture --}}
+                                            <button
+                                                @click="open = true"
+                                                type="button"
+                                                class="mt-2 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                            >
                                                 <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
-                                                @if($totalSources > 0)
-                                                    <span>{{ $totalSources }} source(s) utilisée(s) par l'IA</span>
-                                                    @if(!empty($stats))
-                                                        <span class="text-gray-400">
-                                                            ({{ $stats['learned_count'] ?? 0 }} apprises, {{ $stats['document_count'] ?? 0 }} docs)
-                                                        </span>
-                                                    @endif
-                                                @else
-                                                    <span>Voir le contexte envoyé à l'IA</span>
+                                                <span>Voir le contexte envoye a l'IA</span>
+                                                @if($totalSources > 0 || count($conversationHistory) > 0)
+                                                    <span class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400">
+                                                        {{ $totalSources + count($conversationHistory) }}
+                                                    </span>
                                                 @endif
-                                            </summary>
+                                            </button>
 
-                                            <div class="p-3 space-y-4 text-xs border-t border-gray-200 dark:border-gray-700">
-                                                {{-- Cas similaires appris --}}
-                                                @if(!empty($learnedSources))
-                                                    <div>
-                                                        <h5 class="font-semibold text-primary-600 dark:text-primary-400 mb-2 flex items-center gap-1">
-                                                            <x-heroicon-o-academic-cap class="w-4 h-4" />
-                                                            Cas similaires traités ({{ count($learnedSources) }})
-                                                        </h5>
-                                                        <div class="space-y-2">
-                                                            @foreach($learnedSources as $learned)
-                                                                <div class="p-2 bg-primary-50 dark:bg-primary-950 rounded border-l-2 border-primary-500">
-                                                                    <div class="flex items-center justify-between mb-1">
-                                                                        <span class="font-medium">Cas #{{ $learned['index'] }}</span>
-                                                                        <x-filament::badge size="sm" color="primary">
-                                                                            {{ $learned['score'] }}% similaire
-                                                                        </x-filament::badge>
-                                                                    </div>
-                                                                    <div class="text-gray-600 dark:text-gray-400">
-                                                                        <strong>Q:</strong> {{ \Illuminate\Support\Str::limit($learned['question'], 150) }}
-                                                                    </div>
-                                                                    <details class="mt-1">
-                                                                        <summary class="cursor-pointer text-primary-600 hover:underline">Voir la réponse validée</summary>
-                                                                        <div class="mt-1 p-2 bg-white dark:bg-gray-900 rounded text-gray-700 dark:text-gray-300">
-                                                                            {{ $learned['answer'] }}
-                                                                        </div>
-                                                                    </details>
-                                                                </div>
-                                                            @endforeach
-                                                        </div>
-                                                    </div>
-                                                @endif
+                                            {{-- Modale plein ecran --}}
+                                            <template x-teleport="body">
+                                                <div
+                                                    x-show="open"
+                                                    x-transition:enter="transition ease-out duration-200"
+                                                    x-transition:enter-start="opacity-0"
+                                                    x-transition:enter-end="opacity-100"
+                                                    x-transition:leave="transition ease-in duration-150"
+                                                    x-transition:leave-start="opacity-100"
+                                                    x-transition:leave-end="opacity-0"
+                                                    class="fixed inset-0 z-50 overflow-hidden"
+                                                    style="display: none;"
+                                                >
+                                                    {{-- Backdrop --}}
+                                                    <div class="absolute inset-0 bg-black/50" @click="open = false"></div>
 
-                                                {{-- Documents RAG --}}
-                                                @if(!empty($documentSources))
-                                                    <div>
-                                                        <h5 class="font-semibold text-info-600 dark:text-info-400 mb-2 flex items-center gap-1">
-                                                            <x-heroicon-o-document-text class="w-4 h-4" />
-                                                            Documents indexés ({{ count($documentSources) }})
-                                                        </h5>
-                                                        <div class="space-y-2">
-                                                            @foreach($documentSources as $doc)
-                                                                <div class="p-2 bg-gray-50 dark:bg-gray-900 rounded border-l-2 border-info-500">
-                                                                    <div class="flex items-center justify-between mb-1">
-                                                                        <span class="font-medium">Document #{{ $doc['index'] }}</span>
-                                                                        <x-filament::badge size="sm" color="info">
-                                                                            {{ $doc['score'] }}% pertinent
-                                                                        </x-filament::badge>
-                                                                    </div>
-                                                                    <details>
-                                                                        <summary class="cursor-pointer text-info-600 hover:underline">Voir le contenu</summary>
-                                                                        <div class="mt-1 p-2 bg-white dark:bg-gray-800 rounded text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ $doc['content'] }}</div>
-                                                                    </details>
-                                                                </div>
-                                                            @endforeach
-                                                        </div>
-                                                    </div>
-                                                @endif
-
-                                                {{-- Prompt système complet --}}
-                                                @if(!empty($context['system_prompt_sent']))
-                                                    @php
-                                                        $promptSections = preg_split('/(?=## )/', $context['system_prompt_sent']);
-                                                        $promptSections = array_filter($promptSections, fn($s) => trim($s) !== '');
-                                                        $promptSections = array_values($promptSections);
-                                                    @endphp
-                                                    <div>
-                                                        <details>
-                                                            <summary class="cursor-pointer text-gray-500 hover:text-gray-700 flex items-center gap-1">
-                                                                <x-heroicon-o-command-line class="w-4 h-4" />
-                                                                Voir le prompt système complet envoyé ({{ count($promptSections) }} sections)
-                                                            </summary>
-                                                            <div class="mt-2 space-y-3">
-                                                                @foreach($promptSections as $index => $section)
-                                                                    @php
-                                                                        $section = trim($section);
-                                                                        $isSystemPrompt = $index === 0 && !str_starts_with($section, '## ');
-                                                                        $sectionTitle = '';
-                                                                        $sectionContent = $section;
-
-                                                                        if (preg_match('/^## (.+?)[\r\n]/', $section, $matches)) {
-                                                                            $sectionTitle = trim($matches[1]);
-                                                                            $sectionContent = trim(substr($section, strlen($matches[0])));
-                                                                        } elseif ($isSystemPrompt) {
-                                                                            $sectionTitle = 'Instructions Agent';
-                                                                        }
-
-                                                                        $isSimilaires = str_contains($sectionTitle, 'SIMILAIRES');
-                                                                        $isDocumentaire = str_contains($sectionTitle, 'DOCUMENTAIRE');
-                                                                        $isHistorique = str_contains($sectionTitle, 'HISTORIQUE');
-                                                                        $isInstructions = str_contains($sectionTitle, 'Instructions');
-                                                                    @endphp
-
-                                                                    @if($isSimilaires)
-                                                                        <div class="border border-primary-200 dark:border-primary-800 rounded-lg overflow-hidden">
-                                                                            <div class="bg-primary-50 dark:bg-primary-950 px-3 py-2 flex items-center gap-2 border-b border-primary-200 dark:border-primary-800">
-                                                                                <x-heroicon-o-academic-cap class="w-4 h-4 text-primary-600 dark:text-primary-400" />
-                                                                                <span class="font-semibold text-primary-700 dark:text-primary-300">{{ $sectionTitle }}</span>
-                                                                            </div>
-                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
-                                                                        </div>
-                                                                    @elseif($isDocumentaire)
-                                                                        <div class="border border-info-200 dark:border-info-800 rounded-lg overflow-hidden">
-                                                                            <div class="bg-info-50 dark:bg-info-950 px-3 py-2 flex items-center gap-2 border-b border-info-200 dark:border-info-800">
-                                                                                <x-heroicon-o-document-text class="w-4 h-4 text-info-600 dark:text-info-400" />
-                                                                                <span class="font-semibold text-info-700 dark:text-info-300">{{ $sectionTitle }}</span>
-                                                                            </div>
-                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
-                                                                        </div>
-                                                                    @elseif($isHistorique)
-                                                                        <div class="border border-warning-200 dark:border-warning-800 rounded-lg overflow-hidden">
-                                                                            <div class="bg-warning-50 dark:bg-warning-950 px-3 py-2 flex items-center gap-2 border-b border-warning-200 dark:border-warning-800">
-                                                                                <x-heroicon-o-chat-bubble-left-right class="w-4 h-4 text-warning-600 dark:text-warning-400" />
-                                                                                <span class="font-semibold text-warning-700 dark:text-warning-300">{{ $sectionTitle }}</span>
-                                                                            </div>
-                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
-                                                                        </div>
-                                                                    @elseif($isInstructions)
-                                                                        <div class="border border-success-200 dark:border-success-800 rounded-lg overflow-hidden">
-                                                                            <div class="bg-success-50 dark:bg-success-950 px-3 py-2 flex items-center gap-2 border-b border-success-200 dark:border-success-800">
-                                                                                <x-heroicon-o-cog-6-tooth class="w-4 h-4 text-success-600 dark:text-success-400" />
-                                                                                <span class="font-semibold text-success-700 dark:text-success-300">{{ $sectionTitle }}</span>
-                                                                            </div>
-                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
-                                                                        </div>
-                                                                    @else
-                                                                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                                                                            <div class="bg-gray-50 dark:bg-gray-800 px-3 py-2 flex items-center gap-2 border-b border-gray-200 dark:border-gray-700">
-                                                                                <x-heroicon-o-document class="w-4 h-4 text-gray-600 dark:text-gray-400" />
-                                                                                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ $sectionTitle ?: 'Section ' . ($index + 1) }}</span>
-                                                                            </div>
-                                                                            <div class="p-3 bg-white dark:bg-gray-900 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $sectionContent }}</div>
-                                                                        </div>
+                                                    {{-- Contenu de la modale --}}
+                                                    <div class="absolute inset-4 md:inset-8 lg:inset-12 bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                                                        {{-- Header --}}
+                                                        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                                                            <div>
+                                                                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Contexte envoye a l'IA</h2>
+                                                                <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                                                                    {{ $totalSources }} source(s) documentaire(s)
+                                                                    @if(count($conversationHistory) > 0)
+                                                                        &bull; {{ count($conversationHistory) }} message(s) d'historique
                                                                     @endif
-                                                                @endforeach
+                                                                </p>
                                                             </div>
-                                                        </details>
+                                                            <button @click="open = false" class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                                <x-heroicon-o-x-mark class="w-6 h-6" />
+                                                            </button>
+                                                        </div>
+
+                                                        {{-- Corps scrollable --}}
+                                                        <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                                                            {{-- 0. Question et Reponse --}}
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                <details open>
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-rose-50 dark:bg-rose-950 border-b border-gray-200 dark:border-gray-600 hover:bg-rose-100 dark:hover:bg-rose-900 transition-colors">
+                                                                        <span class="font-semibold text-rose-700 dark:text-rose-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-chat-bubble-left-right class="w-5 h-5" />
+                                                                            0. Question et Reponse
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div class="p-4 space-y-4 bg-gray-50 dark:bg-gray-900">
+                                                                        <div>
+                                                                            <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Question utilisateur</p>
+                                                                            <div class="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg border border-blue-200 dark:border-blue-700">
+                                                                                <p class="text-sm text-gray-800 dark:text-gray-100">{{ $userQuestion }}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Reponse de l'IA</p>
+                                                                            <div class="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                <div class="prose prose-sm dark:prose-invert max-w-none">
+                                                                                    {!! \Illuminate\Support\Str::markdown($aiResponse) !!}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </details>
+                                                            </div>
+
+                                                            {{-- 1. Prompt systeme --}}
+                                                            @if(!empty($systemPrompt))
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details open>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-emerald-50 dark:bg-emerald-950 border-b border-gray-200 dark:border-gray-600 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors">
+                                                                            <span class="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-cog-6-tooth class="w-5 h-5" />
+                                                                                1. Prompt systeme
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $systemPrompt }}</pre>
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endif
+
+                                                            {{-- 2. Historique de conversation --}}
+                                                            @if(!empty($conversationHistory))
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details open>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-violet-50 dark:bg-violet-950 border-b border-gray-200 dark:border-gray-600 hover:bg-violet-100 dark:hover:bg-violet-900 transition-colors">
+                                                                            <span class="font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-clock class="w-5 h-5" />
+                                                                                2. Historique de conversation ({{ count($conversationHistory) }} messages)
+                                                                                @if(isset($contextStats['context_window_size']))
+                                                                                    <span class="text-xs font-normal text-violet-500 dark:text-violet-400">(fenetre: {{ $contextStats['context_window_size'] }} echanges max)</span>
+                                                                                @endif
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                            @foreach($conversationHistory as $historyMsg)
+                                                                                <div class="flex gap-3 {{ $historyMsg['role'] === 'user' ? 'flex-row-reverse' : '' }}">
+                                                                                    <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-800' : 'bg-gray-200 dark:bg-gray-700' }}">
+                                                                                        @if($historyMsg['role'] === 'user')
+                                                                                            <x-heroicon-o-user class="w-4 h-4 text-blue-600 dark:text-blue-300" />
+                                                                                        @else
+                                                                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                                                                        @endif
+                                                                                    </div>
+                                                                                    <div class="flex-1 {{ $historyMsg['role'] === 'user' ? 'text-right' : '' }}">
+                                                                                        <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-left' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' }}">
+                                                                                            <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{!! nl2br(e(\Illuminate\Support\Str::limit($historyMsg['content'], 300))) !!}</p>
+                                                                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endif
+
+                                                            {{-- 3. Documents indexes (RAG) --}}
+                                                            @if(!empty($documentSources))
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details open>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-950 border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
+                                                                            <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-document-text class="w-5 h-5" />
+                                                                                3. Documents indexes - RAG ({{ count($documentSources) }})
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                            @foreach($documentSources as $doc)
+                                                                                <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                                                                                    <details>
+                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
+                                                                                                Document #{{ $doc['index'] ?? $loop->iteration }}
+                                                                                                @if(isset($doc['metadata']['title']))
+                                                                                                    - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
+                                                                                                @elseif(isset($doc['metadata']['filename']))
+                                                                                                    - {{ $doc['metadata']['filename'] }}
+                                                                                                @endif
+                                                                                            </span>
+                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
+                                                                                                {{ $doc['score'] ?? 0 }}% pertinent
+                                                                                            </span>
+                                                                                        </summary>
+                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
+                                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
+                                                                                        </div>
+                                                                                    </details>
+                                                                                </div>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endif
+
+                                                            {{-- 4. Sources d'apprentissage --}}
+                                                            @if(!empty($learnedSources))
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details open>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-amber-50 dark:bg-amber-950 border-b border-gray-200 dark:border-gray-600 hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors">
+                                                                            <span class="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-academic-cap class="w-5 h-5" />
+                                                                                4. Sources d'apprentissage ({{ count($learnedSources) }})
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                            @foreach($learnedSources as $learned)
+                                                                                <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                                                                                    <details>
+                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
+                                                                                                Cas #{{ $learned['index'] ?? $loop->iteration }}
+                                                                                            </span>
+                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
+                                                                                                {{ $learned['score'] ?? 0 }}% similaire
+                                                                                            </span>
+                                                                                        </summary>
+                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                                                                                            <div>
+                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Question</p>
+                                                                                                <p class="text-sm text-gray-800 dark:text-gray-100">{{ $learned['question'] ?? '' }}</p>
+                                                                                            </div>
+                                                                                            <div>
+                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Reponse validee</p>
+                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-amber-50 dark:bg-amber-900/50 p-3 rounded border border-amber-200 dark:border-amber-700">{{ $learned['answer'] ?? '' }}</pre>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </details>
+                                                                                </div>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+                                                            @endif
+
+                                                            {{-- 5. Donnees brutes JSON --}}
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                <details>
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                                                                        <span class="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                                                                            <x-heroicon-o-code-bracket class="w-5 h-5" />
+                                                                            5. Donnees brutes (JSON)
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div class="p-4 bg-gray-950">
+                                                                        <pre class="text-xs text-green-400 font-mono whitespace-pre-wrap overflow-x-auto">{{ json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                                                    </div>
+                                                                </details>
+                                                            </div>
+
+                                                            {{-- 6. Rapport pour analyse --}}
+                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border-2 border-indigo-300 dark:border-indigo-600 overflow-hidden">
+                                                                <details>
+                                                                    <summary class="px-4 py-3 cursor-pointer bg-indigo-50 dark:bg-indigo-950 border-b border-gray-200 dark:border-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors">
+                                                                        <span class="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-clipboard-document class="w-5 h-5" />
+                                                                            6. Rapport pour analyse (copier pour Claude)
+                                                                        </span>
+                                                                    </summary>
+                                                                    <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                                                            Cliquez sur le bouton ci-dessous pour copier un rapport complet que vous pouvez envoyer a Claude ou un autre LLM pour analyser pourquoi l'IA n'a pas bien repondu.
+                                                                        </p>
+                                                                        <button
+                                                                            @click="copyReport()"
+                                                                            type="button"
+                                                                            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                                                                        >
+                                                                            <template x-if="!copied">
+                                                                                <span class="flex items-center gap-2">
+                                                                                    <x-heroicon-o-clipboard-document class="w-4 h-4" />
+                                                                                    Copier le rapport complet
+                                                                                </span>
+                                                                            </template>
+                                                                            <template x-if="copied">
+                                                                                <span class="flex items-center gap-2">
+                                                                                    <x-heroicon-o-check class="w-4 h-4" />
+                                                                                    Copie !
+                                                                                </span>
+                                                                            </template>
+                                                                        </button>
+                                                                    </div>
+                                                                </details>
+                                                            </div>
+                                                        </div>
+
+                                                        {{-- Footer --}}
+                                                        <div class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-end">
+                                                            <button @click="open = false" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+                                                                Fermer
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                @endif
-                                            </div>
-                                        </details>
+                                                </div>
+                                            </template>
+                                        </div>
                                     @endif
-                                @endif
-
-                                {{-- Boutons d'action pour réponses en attente --}}
-                                @if($isAssistant && $isPending)
-                                    <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                                        <div class="flex flex-wrap gap-2">
-                                            <x-filament::button
-                                                size="xs"
-                                                color="success"
-                                                icon="heroicon-o-check"
-                                                wire:click="validateMessage({{ $message->id }})"
-                                            >
-                                                Valider
-                                            </x-filament::button>
-
-                                            <x-filament::button
-                                                size="xs"
-                                                color="primary"
-                                                icon="heroicon-o-pencil"
-                                                x-on:click="showCorrection = !showCorrection"
-                                            >
-                                                Corriger
-                                            </x-filament::button>
-
-                                            <x-filament::button
-                                                size="xs"
-                                                color="danger"
-                                                icon="heroicon-o-x-mark"
-                                                wire:click="rejectMessage({{ $message->id }})"
-                                            >
-                                                Rejeter
-                                            </x-filament::button>
-                                        </div>
-
-                                        {{-- Formulaire de correction --}}
-                                        <div x-show="showCorrection" x-cloak class="mt-3 space-y-2">
-                                            <textarea
-                                                x-model="correctedContent"
-                                                rows="6"
-                                                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                placeholder="Entrez la réponse corrigée..."
-                                            ></textarea>
-                                            <div class="flex gap-2">
-                                                <x-filament::button
-                                                    size="xs"
-                                                    color="primary"
-                                                    x-on:click="$wire.learnFromMessage({{ $message->id }}, correctedContent); showCorrection = false"
-                                                >
-                                                    Enregistrer et apprendre
-                                                </x-filament::button>
-                                                <x-filament::button
-                                                    size="xs"
-                                                    color="gray"
-                                                    x-on:click="showCorrection = false"
-                                                >
-                                                    Annuler
-                                                </x-filament::button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                @endif
-
-                                {{-- Info validation --}}
-                                @if($isAssistant && ($isValidated || $isLearned || $isRejected) && $message->validated_at)
-                                    <div class="mt-2 text-xs text-gray-400">
-                                        {{ $isValidated ? 'Validée' : ($isLearned ? 'Corrigée' : 'Rejetée') }}
-                                        par {{ $message->validator?->name ?? 'Système' }}
-                                        le {{ $message->validated_at->format('d/m/Y à H:i') }}
-                                    </div>
-                                @endif
+                                </div>
                             </div>
-                        </div>
+                        @endif
                     @empty
-                        <div class="flex items-center justify-center h-32 text-gray-400">
+                        <div class="flex items-center justify-center h-full text-gray-400">
                             <div class="text-center">
                                 <x-heroicon-o-chat-bubble-left-ellipsis class="w-12 h-12 mx-auto mb-2" />
                                 <p>Aucun message dans cette session</p>

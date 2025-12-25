@@ -6,8 +6,10 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\AgentResource\Pages;
 use App\Models\Agent;
+use App\Services\AgentResetService;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -273,6 +275,57 @@ class AgentResource extends Resource
                         $newAgent->name = $record->name . ' (copie)';
                         $newAgent->slug = $record->slug . '-copy-' . time();
                         $newAgent->save();
+                    }),
+
+                Tables\Actions\Action::make('reset')
+                    ->label('Reinitialiser')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalIcon('heroicon-o-exclamation-triangle')
+                    ->modalHeading('Reinitialiser l\'agent')
+                    ->modalDescription(fn (Agent $record) =>
+                        "Attention ! Cette action va supprimer definitivement :\n" .
+                        "- Toutes les sessions IA ({$record->sessions()->count()} sessions)\n" .
+                        "- Tous les messages et contextes RAG envoyes a l'IA\n" .
+                        "- Tous les documents de l'agent ({$record->documents()->count()} documents)\n" .
+                        "- Tous les chunks et embeddings dans Qdrant\n" .
+                        "- Toutes les reponses apprises (learned responses)\n\n" .
+                        "Cette action est irreversible. Continuer ?"
+                    )
+                    ->modalSubmitActionLabel('Oui, reinitialiser')
+                    ->visible(fn () => auth()->user()?->isSuperAdmin() ?? false)
+                    ->action(function (Agent $record) {
+                        try {
+                            $resetService = app(AgentResetService::class);
+                            $stats = $resetService->reset($record);
+
+                            Notification::make()
+                                ->title('Agent reinitialise')
+                                ->body(sprintf(
+                                    "Sessions: %d supprimees (%d messages)\n" .
+                                    "Documents: %d supprimes (%d chunks, %d fichiers)\n" .
+                                    "Collection Qdrant: %s\n" .
+                                    "Reponses apprises: %d supprimees",
+                                    $stats['sessions_deleted'],
+                                    $stats['messages_deleted'],
+                                    $stats['documents_deleted'],
+                                    $stats['chunks_deleted'],
+                                    $stats['files_deleted'],
+                                    $stats['collection_reset'] ? 'recreee' : 'non modifiee',
+                                    $stats['learned_responses_deleted']
+                                ))
+                                ->success()
+                                ->duration(10000)
+                                ->send();
+
+                        } catch (\Exception $e) {
+                            Notification::make()
+                                ->title('Erreur lors de la reinitialisation')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
                     }),
             ])
             ->bulkActions([

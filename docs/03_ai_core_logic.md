@@ -157,6 +157,8 @@ class OllamaService implements LLMServiceInterface
         $startTime = microtime(true);
 
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;  // Modèle initialement demandé
+        $usedFallback = $options['_used_fallback'] ?? false;       // Flag fallback
 
         try {
             $response = Http::timeout($this->timeout)
@@ -187,7 +189,9 @@ class OllamaService implements LLMServiceInterface
                 tokensPrompt: $data['prompt_eval_count'] ?? null,
                 tokensCompletion: $data['eval_count'] ?? null,
                 generationTimeMs: $generationTime,
-                raw: $data
+                raw: $data,
+                usedFallback: $usedFallback,           // Indique si fallback utilisé
+                requestedModel: $requestedModel        // Modèle original demandé
             );
 
         } catch (ConnectionException $e) {
@@ -202,7 +206,9 @@ class OllamaService implements LLMServiceInterface
                 return $this->generate($prompt, [
                     ...$options,
                     'model' => $options['fallback_model'],
-                    'fallback_model' => null // Évite la récursion infinie
+                    'fallback_model' => null,           // Évite la récursion infinie
+                    '_requested_model' => $requestedModel,
+                    '_used_fallback' => true,           // Marque l'utilisation du fallback
                 ]);
             }
 
@@ -285,7 +291,9 @@ readonly class LLMResponse
         public ?int $tokensPrompt = null,
         public ?int $tokensCompletion = null,
         public ?int $generationTimeMs = null,
-        public array $raw = []
+        public array $raw = [],
+        public bool $usedFallback = false,          // Indique si le modèle fallback a été utilisé
+        public ?string $requestedModel = null       // Modèle initialement demandé
     ) {}
 
     public function toArray(): array
@@ -296,6 +304,8 @@ readonly class LLMResponse
             'tokens_prompt' => $this->tokensPrompt,
             'tokens_completion' => $this->tokensCompletion,
             'generation_time_ms' => $this->generationTimeMs,
+            'used_fallback' => $this->usedFallback,
+            'requested_model' => $this->requestedModel,
         ];
     }
 }
@@ -950,15 +960,16 @@ class PromptBuilder
 
     /**
      * Récupère l'historique de la session avec fenêtre glissante
+     * Note: On utilise l'ID (auto-incrémenté) pour garantir l'ordre de création
      */
     private function getSessionHistory(AiSession $session, int $windowSize): Collection
     {
         return AiMessage::where('session_id', $session->id)
             ->whereIn('role', ['user', 'assistant'])
-            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Récupérer les plus récents par ID
             ->limit($windowSize * 2) // user + assistant = 2 messages par échange
             ->get()
-            ->reverse()
+            ->sortBy('id') // Trier par ID croissant pour ordre chronologique
             ->values();
     }
 
@@ -1081,7 +1092,7 @@ class RagService
                 'sources' => collect($ragResults)->map(fn($r) => [
                     'id' => $r['id'],
                     'score' => $r['score'],
-                    'content' => $r['payload']['content'] ?? null,
+                    'content' => $this->fixUtf8Encoding($r['payload']['content'] ?? ''),
                     'hydrated' => $r['payload']['hydrated'] ?? false,
                 ])->toArray(),
                 'learned_matches' => collect($learnedResponses)->map(fn($r) => [
@@ -1091,6 +1102,36 @@ class RagService
                 'retrieval_mode' => $agent->retrieval_mode,
             ]
         );
+    }
+
+    /**
+     * Corrige les problèmes d'encodage UTF-8 (double encodage ou mauvaise détection)
+     * Gère les cas où le texte UTF-8 a été interprété comme ISO-8859-1 puis ré-encodé
+     * Ex: "Ã©" au lieu de "é", "garanï¿½e" au lieu de "garantie"
+     */
+    private function fixUtf8Encoding(string $text): string
+    {
+        if (empty($text)) {
+            return $text;
+        }
+
+        // Vérifie s'il y a des séquences de double encodage UTF-8
+        if (mb_check_encoding($text, 'UTF-8')) {
+            $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
+            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                return $decoded; // C'était du double encodage
+            }
+        }
+
+        // Conversion ISO-8859-1 vers UTF-8 si nécessaire
+        if (!mb_check_encoding($text, 'UTF-8')) {
+            $converted = mb_convert_encoding($text, 'UTF-8', 'ISO-8859-1');
+            if ($converted !== false) {
+                return $converted;
+            }
+        }
+
+        return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 }
 ```
@@ -3530,7 +3571,7 @@ class PdfGeneratorService
         $data = [
             'session' => $session,
             'agent' => $session->agent,
-            'messages' => $session->messages()->orderBy('created_at')->get(),
+            'messages' => $session->messages()->orderBy('id')->get(), // ID garantit l'ordre de création
             'client_info' => $session->publicToken?->client_info,
             'external_ref' => $session->publicToken?->external_ref,
             'generated_at' => now(),

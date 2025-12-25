@@ -134,7 +134,7 @@ Les réponses corrigées et validées (`learned_responses`) sont utilisées comm
 │  │ "Pour poser du carrelage..." │   │  - Nom: Jean Dupont      │
 │  │                              │   │  - Email: jean@...       │
 │  │ Sources: 3 documents         │   │                          │
-│  │ Tokens: 245 | 1.2s           │   │  Métriques               │
+│  │ mistral:7b | 245 tok | 1.2s  │   │  Métriques               │
 │  │                              │   │  - Tokens totaux: 1,234  │
 │  │ [✓ Valider] [✏️ Corriger]    │   │  - Temps moyen: 1.8s     │
 │  │ [✗ Rejeter]                  │   │  - Satisfaction: 4.2/5   │
@@ -156,10 +156,10 @@ Pour chaque message utilisateur :
 Pour chaque réponse IA :
 - Contenu de la réponse (Markdown rendu)
 - Badge de statut de validation (`pending`, `validated`, `learned`, `rejected`)
-- Sources RAG utilisées (expandable)
-- Métriques : tokens, temps de génération, modèle
+- Métriques : tokens, temps de génération, modèle + badge "fallback" si modèle de secours utilisé
 - Boutons d'action (si statut = `pending`)
 - Feedback utilisateur s'il existe (rating, commentaire)
+- **Bouton "Voir le contexte envoyé à l'IA"** : ouvre une modale avec la question, la réponse, les sources RAG, l'historique, et un rapport copiable pour analyse
 
 ---
 
@@ -320,33 +320,51 @@ Chaque réponse IA sauvegarde le **contexte complet** utilisé pour générer la
 
 **Affichage dans la vue validation :**
 
+Le bouton "Voir le contexte envoyé à l'IA" se trouve **sous chaque réponse de l'assistant** (pas sur le message utilisateur). Cela permet d'inclure la réponse de l'IA dans le contexte affiché.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🔍 2 source(s) utilisée(s) par l'IA (1 apprises, 1 docs)  [▼] │
+│  📋 Contexte envoyé à l'IA                                 [X]  │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  🎓 Cas similaires traités (1)                                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Cas #1                                    87.5% similaire│   │
-│  │ Q: Comment envoyer une facture par email ?              │   │
-│  │ [Voir la réponse validée ▼]                             │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  0. 💬 Question et Réponse                               [▼]   │
+│     Question utilisateur: "Comment envoyer une facture..."      │
+│     Réponse de l'IA: "Pour envoyer une facture..."              │
 │                                                                 │
-│  📄 Documents indexés (1)                                       │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │ Document #1                               85.2% pertinent│   │
-│  │ [Voir le contenu ▼]                                     │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  1. ⚙️ Prompt système                                    [▼]   │
 │                                                                 │
-│  💻 Voir le prompt système complet envoyé [▼]                   │
+│  2. 🕒 Historique de conversation (3 messages)           [▼]   │
+│                                                                 │
+│  3. 📄 Documents indexés - RAG (2)                       [▼]   │
+│                                                                 │
+│  4. 🎓 Sources d'apprentissage (1)                       [▼]   │
+│                                                                 │
+│  5. 💻 Données brutes (JSON)                             [▼]   │
+│                                                                 │
+│  6. 📋 Rapport pour analyse (copier pour Claude)         [▼]   │
+│     [Copier le rapport complet]                                 │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Fonctionnalité de rapport d'analyse :**
+
+La section "6. Rapport pour analyse" permet de copier un rapport complet formaté en Markdown contenant :
+- La question utilisateur
+- La réponse de l'IA
+- Le prompt système complet
+- L'historique de conversation
+- Les documents RAG utilisés
+- Les sources d'apprentissage
+- Les informations techniques (modèle, tokens, temps, fallback)
+
+Ce rapport peut être envoyé directement à Claude ou un autre LLM pour analyser pourquoi l'IA n'a pas bien répondu à une question.
 
 Cette transparence permet au validateur de :
 - Comprendre pourquoi l'IA a répondu d'une certaine manière
 - Identifier si les sources étaient pertinentes
 - Décider si une correction est nécessaire
+- Analyser les problèmes en copiant le rapport complet vers un LLM d'analyse
 
 ---
 

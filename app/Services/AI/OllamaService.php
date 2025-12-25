@@ -47,6 +47,8 @@ class OllamaService implements LLMServiceInterface
     {
         $startTime = microtime(true);
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;
+        $usedFallback = $options['_used_fallback'] ?? false;
 
         try {
             $response = Http::timeout($this->timeout)
@@ -77,7 +79,9 @@ class OllamaService implements LLMServiceInterface
                 tokensPrompt: $data['prompt_eval_count'] ?? null,
                 tokensCompletion: $data['eval_count'] ?? null,
                 generationTimeMs: $generationTime,
-                raw: $data
+                raw: $data,
+                usedFallback: $usedFallback,
+                requestedModel: $requestedModel
             );
 
         } catch (ConnectionException $e) {
@@ -92,7 +96,9 @@ class OllamaService implements LLMServiceInterface
                 return $this->generate($prompt, [
                     ...$options,
                     'model' => $options['fallback_model'],
-                    'fallback_model' => null
+                    'fallback_model' => null,
+                    '_requested_model' => $requestedModel,
+                    '_used_fallback' => true,
                 ]);
             }
 
@@ -139,6 +145,8 @@ class OllamaService implements LLMServiceInterface
     {
         $startTime = microtime(true);
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;
+        $usedFallback = $options['_used_fallback'] ?? false;
 
         $response = Http::timeout($this->timeout)
             ->post("{$this->baseUrl}/api/chat", [
@@ -164,7 +172,9 @@ class OllamaService implements LLMServiceInterface
             tokensPrompt: $data['prompt_eval_count'] ?? null,
             tokensCompletion: $data['eval_count'] ?? null,
             generationTimeMs: $generationTime,
-            raw: $data
+            raw: $data,
+            usedFallback: $usedFallback,
+            requestedModel: $requestedModel
         );
     }
 
@@ -195,10 +205,71 @@ class OllamaService implements LLMServiceInterface
         }
     }
 
+    /**
+     * Liste les modèles avec leurs détails (taille, etc.)
+     */
+    public function listModelsWithDetails(): array
+    {
+        try {
+            $response = Http::timeout(10)->get("{$this->baseUrl}/api/tags");
+
+            if (!$response->successful()) {
+                return [];
+            }
+
+            return collect($response->json('models', []))
+                ->map(function ($model) {
+                    return [
+                        'name' => $model['name'] ?? '',
+                        'size' => $model['size'] ?? 0,
+                        'size_human' => $this->formatBytes($model['size'] ?? 0),
+                        'modified_at' => $model['modified_at'] ?? null,
+                        'digest' => $model['digest'] ?? null,
+                        'details' => $model['details'] ?? [],
+                    ];
+                })
+                ->toArray();
+        } catch (\Exception $e) {
+            Log::error('Failed to list models with details', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Supprime un modèle d'Ollama
+     */
+    public function deleteModel(string $model): bool
+    {
+        try {
+            $response = Http::timeout(60)
+                ->delete("{$this->baseUrl}/api/delete", [
+                    'name' => $model,
+                ]);
+
+            if ($response->successful()) {
+                Log::info('Model deleted successfully', ['model' => $model]);
+                return true;
+            }
+
+            Log::error('Failed to delete model', [
+                'model' => $model,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error('Exception while deleting model', ['model' => $model, 'error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Télécharge un modèle (avec timeout long pour les gros modèles)
+     */
     public function pullModel(string $model): bool
     {
         try {
-            $response = Http::timeout(600)
+            $response = Http::timeout(1800) // 30 minutes pour les gros modèles
                 ->post("{$this->baseUrl}/api/pull", [
                     'name' => $model,
                     'stream' => false,
@@ -209,6 +280,115 @@ class OllamaService implements LLMServiceInterface
             Log::error('Failed to pull model', ['model' => $model, 'error' => $e->getMessage()]);
             return false;
         }
+    }
+
+    /**
+     * Vérifie si un modèle existe localement
+     */
+    public function modelExists(string $model): bool
+    {
+        $models = $this->listModels();
+        return in_array($model, $models, true);
+    }
+
+    /**
+     * Formate les bytes en taille lisible
+     */
+    private function formatBytes(int $bytes, int $precision = 2): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= pow(1024, $pow);
+
+        return round($bytes, $precision) . ' ' . $units[$pow];
+    }
+
+    /**
+     * Récupère une liste de modèles depuis une URL externe
+     */
+    public function fetchModelsFromUrl(string $url): ?array
+    {
+        try {
+            $response = Http::timeout(30)->get($url);
+
+            if (!$response->successful()) {
+                Log::warning('Failed to fetch models list from URL', [
+                    'url' => $url,
+                    'status' => $response->status(),
+                ]);
+                return null;
+            }
+
+            $data = $response->json();
+
+            // Valider le format
+            if (!is_array($data)) {
+                Log::warning('Invalid models list format from URL', ['url' => $url]);
+                return null;
+            }
+
+            // S'assurer que chaque entrée a les champs requis
+            $validatedModels = [];
+            foreach ($data as $key => $model) {
+                if (is_array($model) && isset($model['name'])) {
+                    $validatedModels[$key] = [
+                        'name' => $model['name'],
+                        'size' => $model['size'] ?? 'Taille inconnue',
+                        'type' => $model['type'] ?? 'chat',
+                        'description' => $model['description'] ?? '',
+                    ];
+                }
+            }
+
+            return $validatedModels;
+        } catch (\Exception $e) {
+            Log::error('Exception fetching models from URL', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Récupère les modèles populaires depuis l'API Ollama (si disponible)
+     * Note: L'API Ollama ne fournit pas de liste des modèles disponibles,
+     * cette méthode essaie de récupérer des infos sur des modèles connus
+     */
+    public function fetchPopularModelsInfo(): array
+    {
+        $popularModels = [
+            'llama3.2:1b', 'llama3.2:3b', 'llama3.1:8b', 'mistral:7b',
+            'gemma2:2b', 'gemma2:9b', 'phi3:mini', 'qwen2.5:7b',
+            'nomic-embed-text', 'codellama:7b',
+        ];
+
+        $modelsInfo = [];
+        foreach ($popularModels as $modelName) {
+            try {
+                $response = Http::timeout(5)->post("{$this->baseUrl}/api/show", [
+                    'name' => $modelName,
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    $modelsInfo[$modelName] = [
+                        'name' => $modelName,
+                        'size' => isset($data['size']) ? $this->formatBytes($data['size']) : 'Taille variable',
+                        'type' => str_contains($modelName, 'embed') ? 'embedding' :
+                                 (str_contains($modelName, 'code') ? 'code' : 'chat'),
+                        'description' => $data['modelfile'] ?? '',
+                        'available' => true,
+                    ];
+                }
+            } catch (\Exception $e) {
+                // Modèle non disponible ou erreur, on continue
+            }
+        }
+
+        return $modelsInfo;
     }
 
     public function getBaseUrl(): string

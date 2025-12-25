@@ -101,6 +101,10 @@ ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS
 ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS
     retry_count INTEGER DEFAULT 0;
 
+ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS
+    used_fallback_model BOOLEAN DEFAULT FALSE;
+-- Indique si le modèle de secours (fallback) a été utilisé au lieu du modèle principal
+
 -- Index pour les requêtes de monitoring
 CREATE INDEX idx_ai_messages_processing_status
     ON ai_messages(processing_status)
@@ -186,6 +190,7 @@ class ProcessAiMessageJob implements ShouldQueue
                 'processing_status' => 'completed',
                 'processing_completed_at' => now(),
                 'model_used' => $response->model,
+                'used_fallback_model' => $response->usedFallback,  // Indique si fallback utilisé
                 'tokens_prompt' => $response->tokensPrompt,
                 'tokens_completion' => $response->tokensCompletion,
                 'generation_time_ms' => $response->generationTimeMs,
@@ -194,6 +199,7 @@ class ProcessAiMessageJob implements ShouldQueue
 
             Log::info('AI message processed successfully', [
                 'message_id' => $this->message->id,
+                'used_fallback' => $response->usedFallback,
                 'generation_time_ms' => $response->generationTimeMs,
             ]);
 
@@ -748,11 +754,11 @@ Le contexte RAG (chunks, scores, sources) est maintenant affiché sous le messag
 ```php
 // Lors du chargement des messages
 if ($msg->role === 'user') {
-    // Trouver le message assistant suivant
+    // Trouver le message assistant suivant (par ID pour ordre exact)
     $nextAssistant = AiMessage::where('session_id', $msg->session_id)
         ->where('role', 'assistant')
-        ->where('created_at', '>', $msg->created_at)
-        ->orderBy('created_at')
+        ->where('id', '>', $msg->id) // ID garantit l'ordre de création
+        ->orderBy('id')
         ->first();
 
     // Attacher le contexte RAG au message utilisateur
@@ -877,7 +883,7 @@ public function checkMessageStatus(): array
 
 | Composant | Modification |
 |-----------|--------------|
-| **Table ai_messages** | +7 colonnes (processing_status, queued_at, etc.) |
+| **Table ai_messages** | +8 colonnes (processing_status, queued_at, used_fallback_model, etc.) |
 | **ProcessAiMessageJob** | Nouveau job pour traitement async |
 | **DispatcherService** | Nouvelle méthode `dispatchAsync()` |
 | **PublicChatController** | Utiliser `dispatchAsync()` au lieu de `dispatch()` |

@@ -123,15 +123,16 @@ class RagService
             $historyMessages = $session->messages()
                 ->whereIn('role', ['user', 'assistant'])
                 ->where('processing_status', AiMessage::STATUS_COMPLETED)
-                ->orderBy('created_at', 'desc')
+                ->orderBy('id', 'desc') // Récupérer les plus récents par ID (ordre de création)
                 ->take($agent->context_window_size * 2)
                 ->get()
-                ->reverse();
+                ->sortBy('id') // Trier par ID croissant pour ordre chronologique
+                ->values();
 
             $conversationHistory = $historyMessages->map(fn (AiMessage $msg) => [
                 'role' => $msg->role,
                 'content' => $msg->content,
-                'timestamp' => $msg->created_at->format('H:i'),
+                'timestamp' => $msg->created_at->format('H:i:s'),
             ])->values()->toArray();
         }
 
@@ -323,6 +324,7 @@ class RagService
 
         if ($role === 'assistant' && $response) {
             $messageData['model_used'] = $response->model;
+            $messageData['used_fallback_model'] = $response->usedFallback;
             $messageData['tokens_prompt'] = $response->tokensPrompt;
             $messageData['tokens_completion'] = $response->tokensCompletion;
             $messageData['generation_time_ms'] = $response->generationTimeMs;

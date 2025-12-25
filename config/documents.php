@@ -62,8 +62,8 @@ return [
 
     'chunk_settings' => [
         'default_strategy' => 'paragraph',
-        'max_chunk_size' => 1000,    // Tokens approximatifs
-        'chunk_overlap' => 100,       // Chevauchement entre chunks
+        'max_chunk_size' => 500,      // Tokens max par chunk (pour fixed_size/recursive, ou si phrase/paragraphe trop long)
+        'chunk_overlap' => 50,        // Chevauchement entre chunks (fixed_size uniquement)
     ],
 
 ];

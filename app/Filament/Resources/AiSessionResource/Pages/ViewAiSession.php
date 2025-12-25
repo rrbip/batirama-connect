@@ -143,7 +143,7 @@ class ViewAiSession extends ViewRecord
 
     public function getMessages(): \Illuminate\Database\Eloquent\Collection
     {
-        return $this->record->messages()->orderBy('created_at', 'asc')->get();
+        return $this->record->messages()->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get();
     }
 
     public function getSessionStats(): array

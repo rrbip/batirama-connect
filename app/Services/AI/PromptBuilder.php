@@ -153,10 +153,11 @@ class PromptBuilder
     {
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
-            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Récupérer les plus récents par ID
             ->take($windowSize * 2)
             ->get()
-            ->reverse();
+            ->sortBy('id') // Trier par ID croissant pour ordre chronologique
+            ->values();
 
         if ($messages->isEmpty()) {
             return '';
@@ -177,10 +178,11 @@ class PromptBuilder
     {
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
-            ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Récupérer les plus récents par ID
             ->take($windowSize * 2)
             ->get()
-            ->reverse();
+            ->sortBy('id') // Trier par ID croissant pour ordre chronologique
+            ->values();
 
         return $messages->map(fn (AiMessage $msg) => [
             'role' => $msg->role,
