@@ -62,8 +62,8 @@ return [
 
     'chunk_settings' => [
         'default_strategy' => 'paragraph',
-        'max_chunk_size' => 1000,    // Tokens approximatifs
-        'chunk_overlap' => 100,       // Chevauchement entre chunks
+        'max_chunk_size' => 300,      // Tokens approximatifs (~200 mots) - plus petit = RAG plus précis
+        'chunk_overlap' => 50,        // Chevauchement entre chunks
     ],
 
 ];

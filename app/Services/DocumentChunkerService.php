@@ -7,7 +7,6 @@ namespace App\Services;
 use App\Models\Document;
 use App\Models\DocumentChunk;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class DocumentChunkerService
 {
@@ -16,8 +15,8 @@ class DocumentChunkerService
 
     public function __construct()
     {
-        $this->maxChunkSize = config('documents.chunk_settings.max_chunk_size', 1000);
-        $this->chunkOverlap = config('documents.chunk_settings.chunk_overlap', 100);
+        $this->maxChunkSize = config('documents.chunk_settings.max_chunk_size', 300);
+        $this->chunkOverlap = config('documents.chunk_settings.chunk_overlap', 50);
     }
 
     /**
@@ -35,17 +34,6 @@ class DocumentChunkerService
 
         $strategy = $document->chunk_strategy ?? config('documents.chunk_settings.default_strategy', 'paragraph');
 
-        Log::info('DocumentChunker: starting', [
-            'document_id' => $document->id,
-            'strategy' => $strategy,
-            'text_length' => mb_strlen($text),
-            'text_tokens' => $this->estimateTokens($text),
-            'max_chunk_size' => $this->maxChunkSize,
-            'first_100_chars' => mb_substr($text, 0, 100),
-            'has_newlines' => str_contains($text, "\n"),
-            'newline_count' => substr_count($text, "\n"),
-        ]);
-
         $rawChunks = match ($strategy) {
             'fixed_size' => $this->chunkByFixedSize($text),
             'sentence' => $this->chunkBySentence($text),
@@ -54,10 +42,10 @@ class DocumentChunkerService
             default => $this->chunkByParagraph($text),
         };
 
-        Log::info('DocumentChunker: raw chunks created', [
+        Log::info('Document chunked', [
             'document_id' => $document->id,
             'strategy' => $strategy,
-            'raw_chunk_count' => count($rawChunks),
+            'chunk_count' => count($rawChunks),
         ]);
 
         // Supprimer les anciens chunks
@@ -141,44 +129,22 @@ class DocumentChunkerService
     private function chunkBySentence(string $text): array
     {
         $textTokens = $this->estimateTokens($text);
-        $hasNewlines = str_contains($text, "\n");
-
-        Log::info('chunkBySentence: starting', [
-            'text_length' => mb_strlen($text),
-            'text_tokens' => $textTokens,
-            'has_newlines' => $hasNewlines,
-            'max_chunk_size' => $this->maxChunkSize,
-        ]);
 
         // Découper en phrases (plusieurs patterns pour plus de robustesse)
         $sentences = preg_split('/(?<=[.!?;:])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
 
-        Log::info('chunkBySentence: after sentence split', [
-            'sentence_count' => count($sentences),
-        ]);
-
         // Si on n'a qu'une seule phrase mais le texte est conséquent,
         // essayer de découper par lignes
         if (count($sentences) <= 1 && $textTokens > $this->maxChunkSize * 0.5) {
-            Log::info('chunkBySentence: falling back to line split');
             $sentences = preg_split('/\n+/', $text, -1, PREG_SPLIT_NO_EMPTY);
             $sentences = array_map('trim', $sentences);
             $sentences = array_filter($sentences);
-
-            Log::info('chunkBySentence: after line split', [
-                'line_count' => count($sentences),
-            ]);
         }
 
         $chunks = $this->groupIntoChunks($sentences);
 
-        Log::info('chunkBySentence: after grouping', [
-            'chunk_count' => count($chunks),
-        ]);
-
         // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
         if (count($chunks) === 1 && $textTokens > $this->maxChunkSize) {
-            Log::info('chunkBySentence: falling back to fixed_size');
             return $this->chunkByFixedSize($text);
         }
 
@@ -191,48 +157,24 @@ class DocumentChunkerService
     private function chunkByParagraph(string $text): array
     {
         $textTokens = $this->estimateTokens($text);
-        $hasNewlines = str_contains($text, "\n");
-        $hasDoubleNewlines = str_contains($text, "\n\n");
-
-        Log::info('chunkByParagraph: starting', [
-            'text_length' => mb_strlen($text),
-            'text_tokens' => $textTokens,
-            'has_newlines' => $hasNewlines,
-            'has_double_newlines' => $hasDoubleNewlines,
-            'max_chunk_size' => $this->maxChunkSize,
-        ]);
 
         // Découper en paragraphes (double saut de ligne)
         $paragraphs = preg_split('/\n\s*\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
         $paragraphs = array_map('trim', $paragraphs);
         $paragraphs = array_filter($paragraphs);
 
-        Log::info('chunkByParagraph: after paragraph split', [
-            'paragraph_count' => count($paragraphs),
-        ]);
-
         // Si on n'a qu'un seul paragraphe mais le texte est conséquent,
         // essayer de découper par lignes simples (typique des PDF)
         if (count($paragraphs) <= 1 && $textTokens > $this->maxChunkSize * 0.5) {
-            Log::info('chunkByParagraph: falling back to line split');
             $paragraphs = preg_split('/\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
             $paragraphs = array_map('trim', $paragraphs);
             $paragraphs = array_filter($paragraphs);
-
-            Log::info('chunkByParagraph: after line split', [
-                'line_count' => count($paragraphs),
-            ]);
         }
 
         $chunks = $this->groupIntoChunks($paragraphs);
 
-        Log::info('chunkByParagraph: after grouping', [
-            'chunk_count' => count($chunks),
-        ]);
-
         // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
         if (count($chunks) === 1 && $textTokens > $this->maxChunkSize) {
-            Log::info('chunkByParagraph: falling back to fixed_size');
             return $this->chunkByFixedSize($text);
         }
 
@@ -326,11 +268,6 @@ class DocumentChunkerService
      */
     private function groupIntoChunks(array $items): array
     {
-        Log::info('groupIntoChunks: starting', [
-            'item_count' => count($items),
-            'max_chunk_size' => $this->maxChunkSize,
-        ]);
-
         $chunks = [];
         $currentChunk = '';
         $currentOffset = 0;
@@ -381,11 +318,6 @@ class DocumentChunkerService
                 'end_offset' => $currentOffset + mb_strlen($currentChunk),
             ];
         }
-
-        Log::info('groupIntoChunks: finished', [
-            'chunk_count' => count($chunks),
-            'chunks_tokens' => array_map(fn($c) => $this->estimateTokens($c['content']), $chunks),
-        ]);
 
         return $chunks;
     }
