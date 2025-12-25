@@ -296,13 +296,19 @@ class DocumentExtractorService
         }
 
         // 1. Détecter le double encodage UTF-8 (UTF-8 lu comme ISO-8859-1/Windows-1252 puis ré-encodé)
-        // Patterns typiques: "Ã©" pour "é", "â€™" pour "'", "Ã " pour "à", "Ã§" pour "ç"
+        // Patterns typiques: "Ã©" pour "é", "Ã " pour "à", "Ã§" pour "ç"
         $doubleEncodingPatterns = [
-            '/Ã[©¨ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]/',  // Ã© Ã¨ etc.
-            '/Ã[€‚ƒ„…†‡ˆ‰Š‹ŒŽ''""]/',         // Caractères spéciaux
-            '/â€[™˜œ¢£¤¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿]/', // â€™ â€œ etc.
-            '/Ã\s/',                            // Ã suivi d'espace (souvent "à ")
-            '/Ã[À-ÿ]/',                         // Autres combinaisons Ã + lettre accentuée
+            '/Ã©/',      // é double-encodé
+            '/Ã¨/',      // è double-encodé
+            '/Ã /',      // à double-encodé (Ã suivi d'espace)
+            '/Ã§/',      // ç double-encodé
+            '/Ã®/',      // î double-encodé
+            '/Ã¢/',      // â double-encodé
+            '/Ã´/',      // ô double-encodé
+            '/Ã»/',      // û double-encodé
+            '/Ã¹/',      // ù double-encodé
+            '/Ãª/',      // ê double-encodé
+            '/Ã‰/',      // É double-encodé
         ];
 
         $hasDoubleEncoding = false;
