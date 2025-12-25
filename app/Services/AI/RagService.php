@@ -32,11 +32,12 @@ class RagService
         ?AiSession $session = null
     ): LLMResponse {
         // 1. Recherche des réponses apprises similaires (priorité haute)
+        // Utilise les config par agent si définies, sinon les valeurs globales
         $learnedResponses = $this->learningService->findSimilarLearnedResponses(
             question: $userMessage,
             agentSlug: $agent->slug,
-            limit: config('ai.rag.max_learned_responses', 3),
-            minScore: config('ai.rag.learned_min_score', 0.75)
+            limit: $agent->getMaxLearnedResponses(),
+            minScore: $agent->getLearnedMinScore()
         );
 
         // 2. Recherche dans la base vectorielle documentaire
@@ -57,9 +58,10 @@ class RagService
         }
 
         // 5. Tronquer si nécessaire pour respecter le contexte
+        // Utilise la limite de tokens configurée par agent
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
-            config('ai.rag.context_size', 4000)
+            $agent->getContextTokenLimit()
         );
 
         // 6. Construire le prompt avec TOUT le contexte et générer la réponse
@@ -190,8 +192,19 @@ class RagService
             // Générer l'embedding de la requête
             $queryVector = $this->embeddingService->embed($query);
 
-            $minScore = config('ai.rag.min_score', 0.5);
+            // Utilise les config par agent si définies, sinon les valeurs globales
+            $minScore = $agent->getMinRagScore();
             $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
+
+            // Construire le filtre tenant_id pour isolation des données
+            $filter = [];
+            if ($agent->tenant_id) {
+                $filter = [
+                    'must' => [
+                        ['key' => 'tenant_id', 'match' => ['value' => $agent->tenant_id]]
+                    ]
+                ];
+            }
 
             Log::info('RAG search starting', [
                 'agent' => $agent->slug,
@@ -199,13 +212,15 @@ class RagService
                 'query' => $query,
                 'min_score' => $minScore,
                 'limit' => $limit,
+                'tenant_id' => $agent->tenant_id,
             ]);
 
-            // Rechercher dans la collection de l'agent
+            // Rechercher dans la collection de l'agent avec filtre tenant
             $results = $this->qdrantService->search(
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
                 limit: $limit,
+                filter: $filter,
                 scoreThreshold: $minScore
             );
 

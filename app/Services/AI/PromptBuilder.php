@@ -65,6 +65,9 @@ class PromptBuilder
         // System message avec contexte intégré
         $systemContent = $agent->system_prompt;
 
+        // Ajouter les garde-fous si strict_mode est activé
+        $systemContent .= $agent->getStrictModeGuardrails();
+
         // Ajouter les réponses apprises similaires (priorité haute)
         if (!empty($learnedResponses)) {
             $learnedContent = $this->formatLearnedResponses($learnedResponses);
@@ -153,8 +156,9 @@ class PromptBuilder
     {
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
+            ->where('processing_status', AiMessage::STATUS_COMPLETED)
             ->orderBy('created_at', 'desc')
-            ->take($windowSize * 2)
+            ->take($windowSize)
             ->get()
             ->reverse();
 
@@ -177,8 +181,9 @@ class PromptBuilder
     {
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
+            ->where('processing_status', AiMessage::STATUS_COMPLETED)
             ->orderBy('created_at', 'desc')
-            ->take($windowSize * 2)
+            ->take($windowSize)
             ->get()
             ->reverse();
 

@@ -400,6 +400,11 @@ CREATE TABLE agents (
 
     -- Configuration RAG avancée
     max_rag_results     INTEGER DEFAULT 5,          -- Nb résultats RAG (BTP: 50, Support: 5)
+    min_rag_score       DECIMAL(3,2) DEFAULT 0.5,   -- Score minimum similarité RAG (0.0-1.0)
+    max_learned_responses INTEGER DEFAULT 3,        -- Nb réponses apprises à inclure
+    learned_min_score   DECIMAL(3,2) DEFAULT 0.75,  -- Score minimum réponses apprises
+    context_token_limit INTEGER DEFAULT 4000,       -- Limite tokens contexte documentaire
+    strict_mode         BOOLEAN DEFAULT FALSE,      -- Garde-fous anti-hallucination automatiques
     allow_iterative_search BOOLEAN DEFAULT FALSE,   -- Permet recherches multiples
     response_format     VARCHAR(20) DEFAULT 'text', -- 'text', 'json', 'markdown'
     allow_attachments   BOOLEAN DEFAULT TRUE,       -- Photos/docs dans le chat

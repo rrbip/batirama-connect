@@ -3721,15 +3721,58 @@ Réponds en texte simple, avec des étapes numérotées si nécessaire.
     "relations": ["fournitures", "main_oeuvres"]
   },
   "max_rag_results": 50,
+  "min_rag_score": 0.65,
+  "max_learned_responses": 3,
+  "learned_min_score": 0.75,
+  "context_token_limit": 4000,
+  "strict_mode": true,
   "allow_iterative_search": true,
   "response_format": "json",
   "allow_attachments": true,
   "allow_public_access": true,
   "default_token_expiry_hours": 168,
   "model": "llama3.1:70b",
-  "temperature": 0.7
+  "temperature": 0.5
 }
 ```
+
+### Configuration RAG par Agent (Nouveaux Champs)
+
+Les paramètres RAG suivants peuvent être personnalisés **par agent** au lieu d'utiliser les valeurs globales de `config/ai.php` :
+
+| Champ | Type | Défaut | Description |
+|-------|------|--------|-------------|
+| `min_rag_score` | float | 0.5 | Score minimum de similarité pour les résultats RAG (0.0-1.0). Une valeur plus haute = contexte plus pertinent mais moins de résultats. |
+| `max_learned_responses` | int | 3 | Nombre maximum de réponses apprises (cas similaires validés) à inclure dans le contexte. |
+| `learned_min_score` | float | 0.75 | Score minimum pour inclure une réponse apprise. Généralement plus haut que `min_rag_score` car les réponses apprises doivent être très pertinentes. |
+| `context_token_limit` | int | 4000 | Limite de tokens pour le contexte documentaire injecté dans le prompt. |
+| `strict_mode` | bool | false | Active automatiquement des garde-fous anti-hallucination dans le prompt. Recommandé pour agents factuels (BTP, support, médical). |
+
+**Méthodes helpers dans le modèle Agent :**
+
+```php
+$agent->getMinRagScore();        // Retourne la valeur agent ou config globale
+$agent->getMaxLearnedResponses(); // Retourne la valeur agent ou config globale
+$agent->getLearnedMinScore();    // Retourne la valeur agent ou config globale
+$agent->getContextTokenLimit();  // Retourne la valeur agent ou config globale
+$agent->getStrictModeGuardrails(); // Retourne le texte des garde-fous si strict_mode=true
+```
+
+**Mode Strict :**
+
+Quand `strict_mode` est activé, le texte suivant est automatiquement ajouté au prompt système :
+
+```
+## CONTRAINTES DE RÉPONSE (Mode Strict)
+
+- Ne réponds QU'avec les informations présentes dans le contexte fourni
+- Si l'information demandée n'est pas dans le contexte, indique clairement : "Je n'ai pas cette information dans ma base de connaissances"
+- Ne fais JAMAIS d'hypothèses ou d'inventions sur des données chiffrées (prix, quantités, dimensions)
+- Cite toujours la source de tes affirmations quand c'est pertinent
+- Si plusieurs sources se contredisent, signale cette incohérence
+```
+
+Cette approche permet à l'admin de définir lui-même les garde-fous dans le `system_prompt` pour les agents créatifs, tout en offrant une option pratique pour les agents factuels.
 
 ---
 

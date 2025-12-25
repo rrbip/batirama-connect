@@ -172,11 +172,54 @@ class AgentResource extends Resource
                                             ->numeric()
                                             ->default(5),
 
+                                        Forms\Components\TextInput::make('min_rag_score')
+                                            ->label('Score minimum RAG')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->default(0.5)
+                                            ->helperText('0.5 = permissif, 0.8 = strict'),
+
                                         Forms\Components\Toggle::make('allow_iterative_search')
                                             ->label('Recherche itérative')
                                             ->helperText('Permet plusieurs requêtes de recherche'),
                                     ])
                                     ->columns(2),
+
+                                Forms\Components\Section::make('Réponses apprises')
+                                    ->description('Configuration du système d\'apprentissage continu')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('max_learned_responses')
+                                            ->label('Max réponses apprises')
+                                            ->numeric()
+                                            ->default(3)
+                                            ->helperText('Nombre de cas similaires à inclure'),
+
+                                        Forms\Components\TextInput::make('learned_min_score')
+                                            ->label('Score minimum')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->default(0.75)
+                                            ->helperText('Score minimum pour les réponses apprises'),
+
+                                        Forms\Components\TextInput::make('context_token_limit')
+                                            ->label('Limite tokens contexte')
+                                            ->numeric()
+                                            ->default(4000)
+                                            ->helperText('Limite de tokens pour le contexte documentaire'),
+                                    ])
+                                    ->columns(3),
+
+                                Forms\Components\Section::make('Mode de fonctionnement')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('strict_mode')
+                                            ->label('Mode strict')
+                                            ->helperText('Ajoute automatiquement des garde-fous contre les hallucinations. Recommandé pour les agents factuels (support, BTP, médical).')
+                                            ->columnSpanFull(),
+                                    ]),
 
                                 Forms\Components\Section::make('Configuration Hydratation')
                                     ->schema([
