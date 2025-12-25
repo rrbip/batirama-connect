@@ -287,7 +287,7 @@ class DocumentExtractorService
     }
 
     /**
-     * S'assure que le texte est en UTF-8 et corrige le double encodage
+     * S'assure que le texte est en UTF-8 valide
      */
     private function ensureUtf8(string $text): string
     {
@@ -295,69 +295,18 @@ class DocumentExtractorService
             return $text;
         }
 
-        // 1. Détecter le double encodage UTF-8 (UTF-8 lu comme ISO-8859-1/Windows-1252 puis ré-encodé)
-        // Patterns typiques: "Ã©" pour "é", "Ã " pour "à", "Ã§" pour "ç"
-        $doubleEncodingPatterns = [
-            '/Ã©/',      // é double-encodé
-            '/Ã¨/',      // è double-encodé
-            '/Ã /',      // à double-encodé (Ã suivi d'espace)
-            '/Ã§/',      // ç double-encodé
-            '/Ã®/',      // î double-encodé
-            '/Ã¢/',      // â double-encodé
-            '/Ã´/',      // ô double-encodé
-            '/Ã»/',      // û double-encodé
-            '/Ã¹/',      // ù double-encodé
-            '/Ãª/',      // ê double-encodé
-            '/Ã‰/',      // É double-encodé
-        ];
-
-        $hasDoubleEncoding = false;
-        foreach ($doubleEncodingPatterns as $pattern) {
-            if (@preg_match($pattern, $text)) {
-                $hasDoubleEncoding = true;
-                break;
-            }
-        }
-
-        if ($hasDoubleEncoding) {
-            // Tenter de corriger le double encodage
-            $decoded = @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8');
-            if ($decoded !== false) {
-                // Vérifier si le résultat est du UTF-8 valide
-                if (mb_check_encoding($decoded, 'UTF-8')) {
-                    Log::debug('Fixed double UTF-8 encoding (method 1)');
-                    return $decoded;
-                }
-            }
-
-            // Méthode alternative avec iconv
-            $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
-            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
-                Log::debug('Fixed double UTF-8 encoding (method 2)');
-                return $decoded;
-            }
-        }
-
-        // 2. Si le texte est déjà en UTF-8 valide sans caractères de remplacement, c'est OK
+        // Si déjà UTF-8 valide, ne rien faire
         if (mb_check_encoding($text, 'UTF-8')) {
-            if (!str_contains($text, "\u{FFFD}") && !str_contains($text, '�')) {
-                return $text;
-            }
+            return $text;
         }
 
-        // 3. Essayer de détecter et convertir depuis d'autres encodages
-        $encodings = ['Windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'CP1252'];
-        foreach ($encodings as $encoding) {
-            $converted = @mb_convert_encoding($text, 'UTF-8', $encoding);
-            if ($converted !== false && mb_check_encoding($converted, 'UTF-8')) {
-                if (!str_contains($converted, "\u{FFFD}") && !str_contains($converted, '�')) {
-                    Log::debug("Converted from {$encoding} to UTF-8");
-                    return $converted;
-                }
-            }
+        // Sinon, tenter conversion depuis Windows-1252 (encodage courant des PDFs français)
+        $converted = @mb_convert_encoding($text, 'UTF-8', 'Windows-1252');
+        if ($converted !== false && mb_check_encoding($converted, 'UTF-8')) {
+            return $converted;
         }
 
-        // 4. Dernier recours: nettoyer les caractères invalides
+        // Dernier recours: forcer UTF-8
         return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 
