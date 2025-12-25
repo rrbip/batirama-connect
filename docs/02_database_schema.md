@@ -558,6 +558,7 @@ CREATE TABLE ai_messages (
 
     -- Métadonnées de génération
     model_used      VARCHAR(100) NULL,
+    used_fallback_model BOOLEAN DEFAULT FALSE,  -- Indique si le modèle de fallback a été utilisé
     tokens_prompt   INTEGER NULL,
     tokens_completion INTEGER NULL,
     generation_time_ms INTEGER NULL,

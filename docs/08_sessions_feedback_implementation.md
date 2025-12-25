@@ -134,7 +134,7 @@ Les réponses corrigées et validées (`learned_responses`) sont utilisées comm
 │  │ "Pour poser du carrelage..." │   │  - Nom: Jean Dupont      │
 │  │                              │   │  - Email: jean@...       │
 │  │ Sources: 3 documents         │   │                          │
-│  │ Tokens: 245 | 1.2s           │   │  Métriques               │
+│  │ mistral:7b | 245 tok | 1.2s  │   │  Métriques               │
 │  │                              │   │  - Tokens totaux: 1,234  │
 │  │ [✓ Valider] [✏️ Corriger]    │   │  - Temps moyen: 1.8s     │
 │  │ [✗ Rejeter]                  │   │  - Satisfaction: 4.2/5   │
@@ -157,7 +157,7 @@ Pour chaque réponse IA :
 - Contenu de la réponse (Markdown rendu)
 - Badge de statut de validation (`pending`, `validated`, `learned`, `rejected`)
 - Sources RAG utilisées (expandable)
-- Métriques : tokens, temps de génération, modèle
+- Métriques : tokens, temps de génération, modèle + badge "fallback" si modèle de secours utilisé
 - Boutons d'action (si statut = `pending`)
 - Feedback utilisateur s'il existe (rating, commentaire)
 

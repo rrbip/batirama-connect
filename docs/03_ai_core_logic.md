@@ -157,6 +157,8 @@ class OllamaService implements LLMServiceInterface
         $startTime = microtime(true);
 
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;  // Modèle initialement demandé
+        $usedFallback = $options['_used_fallback'] ?? false;       // Flag fallback
 
         try {
             $response = Http::timeout($this->timeout)
@@ -187,7 +189,9 @@ class OllamaService implements LLMServiceInterface
                 tokensPrompt: $data['prompt_eval_count'] ?? null,
                 tokensCompletion: $data['eval_count'] ?? null,
                 generationTimeMs: $generationTime,
-                raw: $data
+                raw: $data,
+                usedFallback: $usedFallback,           // Indique si fallback utilisé
+                requestedModel: $requestedModel        // Modèle original demandé
             );
 
         } catch (ConnectionException $e) {
@@ -202,7 +206,9 @@ class OllamaService implements LLMServiceInterface
                 return $this->generate($prompt, [
                     ...$options,
                     'model' => $options['fallback_model'],
-                    'fallback_model' => null // Évite la récursion infinie
+                    'fallback_model' => null,           // Évite la récursion infinie
+                    '_requested_model' => $requestedModel,
+                    '_used_fallback' => true,           // Marque l'utilisation du fallback
                 ]);
             }
 
@@ -285,7 +291,9 @@ readonly class LLMResponse
         public ?int $tokensPrompt = null,
         public ?int $tokensCompletion = null,
         public ?int $generationTimeMs = null,
-        public array $raw = []
+        public array $raw = [],
+        public bool $usedFallback = false,          // Indique si le modèle fallback a été utilisé
+        public ?string $requestedModel = null       // Modèle initialement demandé
     ) {}
 
     public function toArray(): array
@@ -296,6 +304,8 @@ readonly class LLMResponse
             'tokens_prompt' => $this->tokensPrompt,
             'tokens_completion' => $this->tokensCompletion,
             'generation_time_ms' => $this->generationTimeMs,
+            'used_fallback' => $this->usedFallback,
+            'requested_model' => $this->requestedModel,
         ];
     }
 }
