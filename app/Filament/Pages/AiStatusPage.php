@@ -43,6 +43,13 @@ class AiStatusPage extends Page
     public array $aiMessageQueue = [];
     public array $failedAiMessages = [];
 
+    // Modèles Ollama
+    public array $ollamaModels = [];
+    public array $availableModels = [];
+    public ?string $modelToInstall = null;
+    public ?string $customModelName = null;
+    public bool $isInstallingModel = false;
+
     public function mount(): void
     {
         $this->refreshStatus();
@@ -60,6 +67,37 @@ class AiStatusPage extends Page
         $this->aiMessageStats = $this->getAiMessageStats();
         $this->aiMessageQueue = $this->getAiMessageQueue();
         $this->failedAiMessages = $this->getFailedAiMessages();
+
+        // Modèles Ollama
+        $this->loadOllamaModels();
+        $this->availableModels = $this->getAvailableModels();
+    }
+
+    /**
+     * Charge les modèles Ollama installés avec leurs détails
+     */
+    protected function loadOllamaModels(): void
+    {
+        try {
+            $ollama = app(OllamaService::class);
+            $this->ollamaModels = $ollama->listModelsWithDetails();
+        } catch (\Exception $e) {
+            $this->ollamaModels = [];
+        }
+    }
+
+    /**
+     * Retourne la liste des modèles disponibles à l'installation
+     * (en filtrant ceux déjà installés)
+     */
+    protected function getAvailableModels(): array
+    {
+        $configModels = config('ai.ollama.available_models', []);
+        $installedNames = collect($this->ollamaModels)->pluck('name')->toArray();
+
+        return collect($configModels)
+            ->filter(fn ($details, $modelKey) => !in_array($modelKey, $installedNames))
+            ->toArray();
     }
 
     protected function checkServices(): array
@@ -568,6 +606,99 @@ class AiStatusPage extends Page
                 ->success()
                 ->send();
         } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Supprime un modèle Ollama
+     */
+    public function deleteOllamaModel(string $modelName): void
+    {
+        try {
+            $ollama = app(OllamaService::class);
+
+            if ($ollama->deleteModel($modelName)) {
+                $this->refreshStatus();
+
+                Notification::make()
+                    ->title('Modèle supprimé')
+                    ->body("Le modèle {$modelName} a été supprimé avec succès.")
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Échec de la suppression')
+                    ->body("Impossible de supprimer le modèle {$modelName}.")
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Installe un modèle Ollama
+     */
+    public function installOllamaModel(?string $modelName = null): void
+    {
+        // Utiliser le nom personnalisé si fourni, sinon le modèle sélectionné
+        $model = $modelName ?? $this->customModelName ?? $this->modelToInstall;
+
+        if (empty($model)) {
+            Notification::make()
+                ->title('Aucun modèle sélectionné')
+                ->body('Veuillez sélectionner un modèle ou entrer un nom de modèle.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        $this->isInstallingModel = true;
+
+        Notification::make()
+            ->title('Installation en cours')
+            ->body("Téléchargement du modèle {$model}... Cela peut prendre plusieurs minutes.")
+            ->info()
+            ->persistent()
+            ->send();
+
+        try {
+            $ollama = app(OllamaService::class);
+
+            if ($ollama->pullModel($model)) {
+                $this->isInstallingModel = false;
+                $this->modelToInstall = null;
+                $this->customModelName = null;
+
+                $this->refreshStatus();
+
+                Notification::make()
+                    ->title('Modèle installé')
+                    ->body("Le modèle {$model} a été installé avec succès.")
+                    ->success()
+                    ->send();
+            } else {
+                $this->isInstallingModel = false;
+
+                Notification::make()
+                    ->title('Échec de l\'installation')
+                    ->body("Impossible d'installer le modèle {$model}. Vérifiez que le nom est correct.")
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Exception $e) {
+            $this->isInstallingModel = false;
+
             Notification::make()
                 ->title('Erreur')
                 ->body($e->getMessage())

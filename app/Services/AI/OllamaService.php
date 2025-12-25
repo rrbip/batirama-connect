@@ -195,10 +195,71 @@ class OllamaService implements LLMServiceInterface
         }
     }
 
+    /**
+     * Liste les modèles avec leurs détails (taille, etc.)
+     */
+    public function listModelsWithDetails(): array
+    {
+        try {
+            $response = Http::timeout(10)->get("{$this->baseUrl}/api/tags");
+
+            if (!$response->successful()) {
+                return [];
+            }
+
+            return collect($response->json('models', []))
+                ->map(function ($model) {
+                    return [
+                        'name' => $model['name'] ?? '',
+                        'size' => $model['size'] ?? 0,
+                        'size_human' => $this->formatBytes($model['size'] ?? 0),
+                        'modified_at' => $model['modified_at'] ?? null,
+                        'digest' => $model['digest'] ?? null,
+                        'details' => $model['details'] ?? [],
+                    ];
+                })
+                ->toArray();
+        } catch (\Exception $e) {
+            Log::error('Failed to list models with details', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Supprime un modèle d'Ollama
+     */
+    public function deleteModel(string $model): bool
+    {
+        try {
+            $response = Http::timeout(60)
+                ->delete("{$this->baseUrl}/api/delete", [
+                    'name' => $model,
+                ]);
+
+            if ($response->successful()) {
+                Log::info('Model deleted successfully', ['model' => $model]);
+                return true;
+            }
+
+            Log::error('Failed to delete model', [
+                'model' => $model,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error('Exception while deleting model', ['model' => $model, 'error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /**
+     * Télécharge un modèle (avec timeout long pour les gros modèles)
+     */
     public function pullModel(string $model): bool
     {
         try {
-            $response = Http::timeout(600)
+            $response = Http::timeout(1800) // 30 minutes pour les gros modèles
                 ->post("{$this->baseUrl}/api/pull", [
                     'name' => $model,
                     'stream' => false,
@@ -209,6 +270,29 @@ class OllamaService implements LLMServiceInterface
             Log::error('Failed to pull model', ['model' => $model, 'error' => $e->getMessage()]);
             return false;
         }
+    }
+
+    /**
+     * Vérifie si un modèle existe localement
+     */
+    public function modelExists(string $model): bool
+    {
+        $models = $this->listModels();
+        return in_array($model, $models, true);
+    }
+
+    /**
+     * Formate les bytes en taille lisible
+     */
+    private function formatBytes(int $bytes, int $precision = 2): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= pow(1024, $pow);
+
+        return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
     public function getBaseUrl(): string

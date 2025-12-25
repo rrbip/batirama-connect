@@ -569,8 +569,8 @@
         @endif
 
         {{-- Models Ollama Details --}}
-        @if(isset($services['ollama']) && $services['ollama']['status'] === 'online' && !empty($services['ollama']['models']))
-            <x-filament::section collapsible collapsed>
+        @if(isset($services['ollama']) && $services['ollama']['status'] === 'online')
+            <x-filament::section collapsible>
                 <x-slot name="heading">
                     <div class="flex items-center gap-2">
                         <x-heroicon-o-cube class="w-5 h-5" />
@@ -578,13 +578,145 @@
                     </div>
                 </x-slot>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    @foreach($services['ollama']['models'] as $model)
-                        <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-center">
-                            <x-heroicon-o-cube class="w-6 h-6 mx-auto mb-1 text-primary-500" />
-                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $model }}</span>
+                {{-- Modèles installés --}}
+                <div class="mb-6">
+                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Modèles installés ({{ count($ollamaModels) }})
+                    </h4>
+
+                    @if(count($ollamaModels) > 0)
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            @foreach($ollamaModels as $model)
+                                <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex items-center gap-2">
+                                            <x-heroicon-o-cube class="w-5 h-5 text-primary-500 flex-shrink-0" />
+                                            <div>
+                                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ $model['name'] }}</span>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ $model['size_human'] }}</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            wire:click="deleteOllamaModel('{{ $model['name'] }}')"
+                                            wire:loading.attr="disabled"
+                                            wire:target="deleteOllamaModel('{{ $model['name'] }}')"
+                                            wire:confirm="Êtes-vous sûr de vouloir supprimer le modèle {{ $model['name'] }} ? Cette action libérera de l'espace disque."
+                                            class="p-1.5 text-gray-400 hover:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-900/20 rounded transition"
+                                            title="Supprimer ce modèle"
+                                        >
+                                            <x-heroicon-o-trash class="w-4 h-4" wire:loading.class="animate-pulse" wire:target="deleteOllamaModel('{{ $model['name'] }}')" />
+                                        </button>
+                                    </div>
+                                </div>
+                            @endforeach
                         </div>
-                    @endforeach
+                    @else
+                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg text-center text-gray-500 dark:text-gray-400">
+                            Aucun modèle installé
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Installer un nouveau modèle --}}
+                <div class="border-t border-gray-200 dark:border-gray-700 pt-6">
+                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Installer un nouveau modèle
+                    </h4>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {{-- Liste des modèles recommandés --}}
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                Modèles recommandés
+                            </label>
+
+                            @if(count($availableModels) > 0)
+                                <div class="space-y-2 max-h-64 overflow-y-auto pr-2">
+                                    @foreach($availableModels as $modelKey => $modelInfo)
+                                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-600 transition">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ $modelInfo['name'] }}</span>
+                                                    <span class="px-1.5 py-0.5 text-xs rounded {{
+                                                        $modelInfo['type'] === 'chat' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                                        ($modelInfo['type'] === 'embedding' ? 'bg-success-100 text-success-700 dark:bg-success-800 dark:text-success-300' :
+                                                        'bg-warning-100 text-warning-700 dark:bg-warning-800 dark:text-warning-300')
+                                                    }}">
+                                                        {{ $modelInfo['type'] }}
+                                                    </span>
+                                                </div>
+                                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                    {{ $modelInfo['size'] }} - {{ $modelInfo['description'] }}
+                                                </p>
+                                            </div>
+                                            <button
+                                                wire:click="installOllamaModel('{{ $modelKey }}')"
+                                                wire:loading.attr="disabled"
+                                                wire:target="installOllamaModel"
+                                                @if($isInstallingModel) disabled @endif
+                                                class="ml-3 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-1"
+                                            >
+                                                <x-heroicon-o-arrow-down-tray class="w-3.5 h-3.5" />
+                                                Installer
+                                            </button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="p-3 bg-success-50 dark:bg-success-900/20 border border-success-200 dark:border-success-700 rounded-lg text-sm text-success-700 dark:text-success-300">
+                                    <x-heroicon-o-check-circle class="w-4 h-4 inline mr-1" />
+                                    Tous les modèles recommandés sont déjà installés !
+                                </div>
+                            @endif
+                        </div>
+
+                        {{-- Installation personnalisée --}}
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">
+                                Ou entrez un nom de modèle personnalisé
+                            </label>
+                            <div class="flex gap-2">
+                                <input
+                                    type="text"
+                                    wire:model="customModelName"
+                                    placeholder="ex: llama3.1:70b, codellama:13b..."
+                                    class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    @if($isInstallingModel) disabled @endif
+                                />
+                                <button
+                                    wire:click="installOllamaModel"
+                                    wire:loading.attr="disabled"
+                                    wire:target="installOllamaModel"
+                                    @if($isInstallingModel) disabled @endif
+                                    class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+                                >
+                                    <span wire:loading.remove wire:target="installOllamaModel">
+                                        <x-heroicon-o-arrow-down-tray class="w-4 h-4" />
+                                    </span>
+                                    <span wire:loading wire:target="installOllamaModel">
+                                        <x-heroicon-o-arrow-path class="w-4 h-4 animate-spin" />
+                                    </span>
+                                    <span wire:loading.remove wire:target="installOllamaModel">Installer</span>
+                                    <span wire:loading wire:target="installOllamaModel">Installation...</span>
+                                </button>
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                Consultez <a href="https://ollama.com/library" target="_blank" class="text-primary-600 hover:underline">ollama.com/library</a> pour voir tous les modèles disponibles.
+                            </p>
+
+                            @if($isInstallingModel)
+                                <div class="mt-4 p-3 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg">
+                                    <div class="flex items-center gap-2 text-primary-700 dark:text-primary-300">
+                                        <x-heroicon-o-arrow-path class="w-5 h-5 animate-spin" />
+                                        <span class="text-sm font-medium">Téléchargement en cours...</span>
+                                    </div>
+                                    <p class="mt-1 text-xs text-primary-600 dark:text-primary-400">
+                                        Le téléchargement peut prendre plusieurs minutes selon la taille du modèle et votre connexion.
+                                    </p>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
                 </div>
             </x-filament::section>
         @endif
