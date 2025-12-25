@@ -99,21 +99,6 @@ class TestAgent extends Page implements HasForms
                     'id' => $msg->id, // Garder l'ID pour le tri
                 ];
 
-                // Pour les messages utilisateur : ajouter le contexte RAG envoyé
-                if ($msg->role === 'user') {
-                    // Le contexte RAG est stocké dans le message assistant suivant
-                    // Utiliser id au lieu de created_at car ils peuvent être identiques
-                    $nextAssistant = AiMessage::where('session_id', $msg->session_id)
-                        ->where('role', 'assistant')
-                        ->where('id', '>', $msg->id)
-                        ->orderBy('id')
-                        ->first();
-
-                    if ($nextAssistant && $nextAssistant->rag_context) {
-                        $data['rag_context'] = $nextAssistant->rag_context;
-                    }
-                }
-
                 // Pour les messages assistant
                 if ($msg->role === 'assistant') {
                     $data['processing_status'] = $msg->processing_status;
@@ -125,9 +110,14 @@ class TestAgent extends Page implements HasForms
                     $data['model_used'] = $msg->model_used;
                     $data['used_fallback_model'] = $msg->used_fallback_model;
 
-                    // Sources depuis le rag_context
-                    if ($msg->rag_context && isset($msg->rag_context['sources'])) {
-                        $data['sources'] = $msg->rag_context['sources'];
+                    // Contexte RAG complet pour le bouton "Voir le contexte envoyé à l'IA"
+                    if ($msg->rag_context) {
+                        $data['rag_context'] = $msg->rag_context;
+
+                        // Sources extraites pour affichage rapide
+                        if (isset($msg->rag_context['sources'])) {
+                            $data['sources'] = $msg->rag_context['sources'];
+                        }
                     }
                 }
 
@@ -348,7 +338,7 @@ class TestAgent extends Page implements HasForms
     {
         foreach ($this->messages as $index => $msg) {
             if (isset($msg['uuid']) && $msg['uuid'] === $message->uuid) {
-                $this->messages[$index] = [
+                $data = [
                     'role' => 'assistant',
                     'content' => $message->content ?: '',
                     'timestamp' => $msg['timestamp'],
@@ -356,13 +346,23 @@ class TestAgent extends Page implements HasForms
                     'processing_status' => $message->processing_status,
                     'processing_error' => $message->processing_error,
                     'tokens' => $message->tokens_prompt || $message->tokens_completion
-                        ? ($msg->tokens_prompt ?? 0) + ($message->tokens_completion ?? 0)
+                        ? ($message->tokens_prompt ?? 0) + ($message->tokens_completion ?? 0)
                         : null,
                     'generation_time_ms' => $message->generation_time_ms,
                     'model_used' => $message->model_used,
                     'used_fallback_model' => $message->used_fallback_model,
-                    'sources' => $message->rag_context['sources'] ?? [],
                 ];
+
+                // Contexte RAG complet pour le bouton "Voir le contexte envoyé à l'IA"
+                if ($message->rag_context) {
+                    $data['rag_context'] = $message->rag_context;
+
+                    if (isset($message->rag_context['sources'])) {
+                        $data['sources'] = $message->rag_context['sources'];
+                    }
+                }
+
+                $this->messages[$index] = $data;
                 break;
             }
         }
