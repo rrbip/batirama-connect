@@ -966,6 +966,7 @@ class PromptBuilder
         return AiMessage::where('session_id', $session->id)
             ->whereIn('role', ['user', 'assistant'])
             ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
             ->limit($windowSize * 2) // user + assistant = 2 messages par échange
             ->get()
             ->reverse()
@@ -3540,7 +3541,7 @@ class PdfGeneratorService
         $data = [
             'session' => $session,
             'agent' => $session->agent,
-            'messages' => $session->messages()->orderBy('created_at')->get(),
+            'messages' => $session->messages()->orderBy('created_at')->orderBy('id')->get(),
             'client_info' => $session->publicToken?->client_info,
             'external_ref' => $session->publicToken?->external_ref,
             'generated_at' => now(),

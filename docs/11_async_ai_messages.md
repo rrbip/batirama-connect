@@ -759,6 +759,7 @@ if ($msg->role === 'user') {
         ->where('role', 'assistant')
         ->where('created_at', '>', $msg->created_at)
         ->orderBy('created_at')
+        ->orderBy('id') // Tri secondaire pour ordre stable
         ->first();
 
     // Attacher le contexte RAG au message utilisateur
