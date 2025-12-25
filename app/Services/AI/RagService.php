@@ -124,6 +124,7 @@ class RagService
                 ->whereIn('role', ['user', 'assistant'])
                 ->where('processing_status', AiMessage::STATUS_COMPLETED)
                 ->orderBy('created_at', 'desc')
+                ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
                 ->take($agent->context_window_size * 2)
                 ->get()
                 ->reverse();
@@ -131,7 +132,7 @@ class RagService
             $conversationHistory = $historyMessages->map(fn (AiMessage $msg) => [
                 'role' => $msg->role,
                 'content' => $msg->content,
-                'timestamp' => $msg->created_at->format('H:i'),
+                'timestamp' => $msg->created_at->format('H:i:s'),
             ])->values()->toArray();
         }
 

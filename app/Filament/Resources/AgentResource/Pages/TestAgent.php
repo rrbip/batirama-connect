@@ -94,7 +94,7 @@ class TestAgent extends Page implements HasForms
                 $data = [
                     'role' => $msg->role,
                     'content' => $msg->content ?: '',
-                    'timestamp' => $msg->created_at->format('H:i'),
+                    'timestamp' => $msg->created_at->format('H:i:s'),
                     'uuid' => $msg->uuid,
                     'id' => $msg->id, // Garder l'ID pour le tri
                 ];

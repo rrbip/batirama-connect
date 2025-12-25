@@ -154,6 +154,7 @@ class PromptBuilder
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
             ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
             ->take($windowSize * 2)
             ->get()
             ->reverse();
@@ -178,6 +179,7 @@ class PromptBuilder
         $messages = $session->messages()
             ->whereIn('role', ['user', 'assistant'])
             ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc') // Tri secondaire pour ordre stable
             ->take($windowSize * 2)
             ->get()
             ->reverse();
