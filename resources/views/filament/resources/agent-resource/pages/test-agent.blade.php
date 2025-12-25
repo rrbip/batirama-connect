@@ -343,7 +343,7 @@
                                                                                     </div>
                                                                                     <div class="flex-1 {{ $historyMsg['role'] === 'user' ? 'text-right' : '' }}">
                                                                                         <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-left' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' }}">
-                                                                                            <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ $historyMsg['content'] }}</p>
+                                                                                            <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{!! nl2br(e(\Illuminate\Support\Str::limit($historyMsg['content'], 300))) !!}</p>
                                                                                             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
                                                                                         </div>
                                                                                     </div>
