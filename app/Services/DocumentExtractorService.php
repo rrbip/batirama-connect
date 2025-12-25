@@ -287,19 +287,29 @@ class DocumentExtractorService
     }
 
     /**
-     * S'assure que le texte est en UTF-8
+     * S'assure que le texte est en UTF-8 et corrige le double encodage
      */
     private function ensureUtf8(string $text): string
     {
-        // Si déjà valide UTF-8, retourner tel quel
+        // 1. D'abord, vérifier s'il y a du double encodage UTF-8
+        // Ex: "Ã©" au lieu de "é" (UTF-8 interprété comme ISO-8859-1 puis ré-encodé)
         if (mb_check_encoding($text, 'UTF-8')) {
-            // Mais vérifier qu'il n'y a pas de caractères de remplacement
+            // Patterns typiques de double encodage UTF-8
+            if (preg_match('/Ã[©¨ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿À-ÿ]/', $text)) {
+                $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
+                if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                    Log::debug('Fixed double UTF-8 encoding');
+                    return $decoded;
+                }
+            }
+
+            // Pas de caractères de remplacement, c'est bon
             if (!str_contains($text, "\u{FFFD}") && !str_contains($text, '�')) {
                 return $text;
             }
         }
 
-        // Essayer de détecter l'encodage
+        // 2. Essayer de détecter l'encodage
         $encodings = ['UTF-8', 'Windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'CP1252'];
         $detectedEncoding = mb_detect_encoding($text, $encodings, true);
 
@@ -310,13 +320,13 @@ class DocumentExtractorService
             }
         }
 
-        // Fallback: essayer Windows-1252 (très courant pour les PDFs français)
+        // 3. Fallback: essayer Windows-1252 (très courant pour les PDFs français)
         $converted = @iconv('Windows-1252', 'UTF-8//IGNORE', $text);
         if ($converted !== false && !empty($converted)) {
             return $converted;
         }
 
-        // Dernier recours: supprimer les caractères non-UTF8
+        // 4. Dernier recours: supprimer les caractères non-UTF8
         return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 
