@@ -197,13 +197,19 @@ class RagService
             $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
 
             // Construire le filtre tenant_id pour isolation des données
+            // Ne filtre que si la collection supporte le tenant_id (configuré dans qdrant.php)
             $filter = [];
             if ($agent->tenant_id) {
-                $filter = [
-                    'must' => [
-                        ['key' => 'tenant_id', 'match' => ['value' => $agent->tenant_id]]
-                    ]
-                ];
+                $collectionConfig = config("qdrant.collections.{$agent->qdrant_collection}.payload_indexes", []);
+                $supportsTenantId = isset($collectionConfig['tenant_id']);
+
+                if ($supportsTenantId) {
+                    $filter = [
+                        'must' => [
+                            ['key' => 'tenant_id', 'match' => ['value' => $agent->tenant_id]]
+                        ]
+                    ];
+                }
             }
 
             Log::info('RAG search starting', [

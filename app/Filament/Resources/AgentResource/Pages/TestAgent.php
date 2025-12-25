@@ -99,19 +99,10 @@ class TestAgent extends Page implements HasForms
                     'id' => $msg->id, // Garder l'ID pour le tri
                 ];
 
-                // Pour les messages utilisateur : ajouter le contexte RAG envoyé
+                // Pour les messages utilisateur
                 if ($msg->role === 'user') {
-                    // Le contexte RAG est stocké dans le message assistant suivant
-                    // Utiliser id au lieu de created_at car ils peuvent être identiques
-                    $nextAssistant = AiMessage::where('session_id', $msg->session_id)
-                        ->where('role', 'assistant')
-                        ->where('id', '>', $msg->id)
-                        ->orderBy('id')
-                        ->first();
-
-                    if ($nextAssistant && $nextAssistant->rag_context) {
-                        $data['rag_context'] = $nextAssistant->rag_context;
-                    }
+                    // Le contexte RAG reste sur le message assistant
+                    // (plus logique car c'est le contexte utilisé pour générer la réponse)
                 }
 
                 // Pour les messages assistant
@@ -124,7 +115,12 @@ class TestAgent extends Page implements HasForms
                     $data['processing_error'] = $msg->processing_error;
                     $data['model_used'] = $msg->model_used;
 
-                    // Sources depuis le rag_context
+                    // Contexte RAG complet pour le bouton "Voir le contexte"
+                    if ($msg->rag_context) {
+                        $data['rag_context'] = $msg->rag_context;
+                    }
+
+                    // Sources depuis le rag_context (pour rétrocompatibilité)
                     if ($msg->rag_context && isset($msg->rag_context['sources'])) {
                         $data['sources'] = $msg->rag_context['sources'];
                     }

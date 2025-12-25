@@ -235,230 +235,6 @@
                                             <span>{{ $message['timestamp'] }}</span>
                                         </div>
                                     </div>
-
-                                    {{-- Bouton pour voir le contexte envoye a l'IA --}}
-                                    @if(!empty($message['rag_context']))
-                                        @php
-                                            $context = $message['rag_context'];
-                                            $learnedSources = $context['learned_sources'] ?? [];
-                                            $documentSources = $context['document_sources'] ?? [];
-                                            $conversationHistory = $context['conversation_history'] ?? [];
-                                            $systemPrompt = $context['system_prompt_sent'] ?? '';
-                                            $stats = $context['stats'] ?? [];
-                                            $totalSources = count($learnedSources) + count($documentSources);
-                                            $modalId = 'context-modal-' . ($message['uuid'] ?? $index);
-                                        @endphp
-
-                                        <div x-data="{ open: false }">
-                                            {{-- Bouton d'ouverture --}}
-                                            <button
-                                                @click="open = true"
-                                                type="button"
-                                                class="mt-2 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                                            >
-                                                <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
-                                                <span>Voir le contexte envoye a l'IA</span>
-                                                @if($totalSources > 0 || count($conversationHistory) > 0)
-                                                    <span class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-500 dark:text-gray-400">
-                                                        {{ $totalSources + count($conversationHistory) }}
-                                                    </span>
-                                                @endif
-                                            </button>
-
-                                            {{-- Modale plein ecran --}}
-                                            <template x-teleport="body">
-                                                <div
-                                                    x-show="open"
-                                                    x-transition:enter="transition ease-out duration-200"
-                                                    x-transition:enter-start="opacity-0"
-                                                    x-transition:enter-end="opacity-100"
-                                                    x-transition:leave="transition ease-in duration-150"
-                                                    x-transition:leave-start="opacity-100"
-                                                    x-transition:leave-end="opacity-0"
-                                                    class="fixed inset-0 z-50 overflow-hidden"
-                                                    style="display: none;"
-                                                >
-                                                    {{-- Backdrop --}}
-                                                    <div class="absolute inset-0 bg-black/50" @click="open = false"></div>
-
-                                                    {{-- Contenu de la modale --}}
-                                                    <div class="absolute inset-4 md:inset-8 lg:inset-12 bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-                                                        {{-- Header --}}
-                                                        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                                                            <div>
-                                                                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Contexte envoye a l'IA</h2>
-                                                                <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                                                                    {{ $totalSources }} source(s) documentaire(s)
-                                                                    @if(count($conversationHistory) > 0)
-                                                                        &bull; {{ count($conversationHistory) }} message(s) d'historique
-                                                                    @endif
-                                                                </p>
-                                                            </div>
-                                                            <button @click="open = false" class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                                                                <x-heroicon-o-x-mark class="w-6 h-6" />
-                                                            </button>
-                                                        </div>
-
-                                                        {{-- Corps scrollable --}}
-                                                        <div class="flex-1 overflow-y-auto p-6 space-y-6">
-                                                            {{-- 1. Prompt systeme --}}
-                                                            @if(!empty($systemPrompt))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                    <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-emerald-50 dark:bg-emerald-950 border-b border-gray-200 dark:border-gray-600 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors">
-                                                                            <span class="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                                                                                <x-heroicon-o-cog-6-tooth class="w-5 h-5" />
-                                                                                1. Prompt systeme
-                                                                            </span>
-                                                                        </summary>
-                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900">
-                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $systemPrompt }}</pre>
-                                                                        </div>
-                                                                    </details>
-                                                                </div>
-                                                            @endif
-
-                                                            {{-- 2. Historique de conversation --}}
-                                                            @if(!empty($conversationHistory))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                    <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-violet-50 dark:bg-violet-950 border-b border-gray-200 dark:border-gray-600 hover:bg-violet-100 dark:hover:bg-violet-900 transition-colors">
-                                                                            <span class="font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-2">
-                                                                                <x-heroicon-o-clock class="w-5 h-5" />
-                                                                                2. Historique de conversation ({{ count($conversationHistory) }} messages)
-                                                                                @if(isset($stats['context_window_size']))
-                                                                                    <span class="text-xs font-normal text-violet-500 dark:text-violet-400">(fenetre: {{ $stats['context_window_size'] }} echanges max)</span>
-                                                                                @endif
-                                                                            </span>
-                                                                        </summary>
-                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                                                                            @foreach($conversationHistory as $historyMsg)
-                                                                                <div class="flex gap-3 {{ $historyMsg['role'] === 'user' ? 'flex-row-reverse' : '' }}">
-                                                                                    <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-800' : 'bg-gray-200 dark:bg-gray-700' }}">
-                                                                                        @if($historyMsg['role'] === 'user')
-                                                                                            <x-heroicon-o-user class="w-4 h-4 text-blue-600 dark:text-blue-300" />
-                                                                                        @else
-                                                                                            <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-600 dark:text-gray-300" />
-                                                                                        @endif
-                                                                                    </div>
-                                                                                    <div class="flex-1 {{ $historyMsg['role'] === 'user' ? 'text-right' : '' }}">
-                                                                                        <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-left' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' }}">
-                                                                                            <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ $historyMsg['content'] }}</p>
-                                                                                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            @endforeach
-                                                                        </div>
-                                                                    </details>
-                                                                </div>
-                                                            @endif
-
-                                                            {{-- 3. Documents indexes (RAG) --}}
-                                                            @if(!empty($documentSources))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                    <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-950 border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
-                                                                            <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
-                                                                                <x-heroicon-o-document-text class="w-5 h-5" />
-                                                                                3. Documents indexes - RAG ({{ count($documentSources) }})
-                                                                            </span>
-                                                                        </summary>
-                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                                                                            @foreach($documentSources as $doc)
-                                                                                <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                                                                                    <details>
-                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
-                                                                                                Document #{{ $doc['index'] ?? $loop->iteration }}
-                                                                                                @if(isset($doc['metadata']['title']))
-                                                                                                    - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
-                                                                                                @elseif(isset($doc['metadata']['filename']))
-                                                                                                    - {{ $doc['metadata']['filename'] }}
-                                                                                                @endif
-                                                                                            </span>
-                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
-                                                                                                {{ $doc['score'] ?? 0 }}% pertinent
-                                                                                            </span>
-                                                                                        </summary>
-                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
-                                                                                            <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
-                                                                                        </div>
-                                                                                    </details>
-                                                                                </div>
-                                                                            @endforeach
-                                                                        </div>
-                                                                    </details>
-                                                                </div>
-                                                            @endif
-
-                                                            {{-- 4. Sources d'apprentissage --}}
-                                                            @if(!empty($learnedSources))
-                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                    <details open>
-                                                                        <summary class="px-4 py-3 cursor-pointer bg-amber-50 dark:bg-amber-950 border-b border-gray-200 dark:border-gray-600 hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors">
-                                                                            <span class="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-2">
-                                                                                <x-heroicon-o-academic-cap class="w-5 h-5" />
-                                                                                4. Sources d'apprentissage ({{ count($learnedSources) }})
-                                                                            </span>
-                                                                        </summary>
-                                                                        <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
-                                                                            @foreach($learnedSources as $learned)
-                                                                                <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                                                                                    <details>
-                                                                                        <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                            <span class="font-medium text-gray-800 dark:text-gray-100">
-                                                                                                Cas #{{ $learned['index'] ?? $loop->iteration }}
-                                                                                            </span>
-                                                                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
-                                                                                                {{ $learned['score'] ?? 0 }}% similaire
-                                                                                            </span>
-                                                                                        </summary>
-                                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
-                                                                                            <div>
-                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Question</p>
-                                                                                                <p class="text-sm text-gray-800 dark:text-gray-100">{{ $learned['question'] ?? '' }}</p>
-                                                                                            </div>
-                                                                                            <div>
-                                                                                                <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Reponse validee</p>
-                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-amber-50 dark:bg-amber-900/50 p-3 rounded border border-amber-200 dark:border-amber-700">{{ $learned['answer'] ?? '' }}</pre>
-                                                                                            </div>
-                                                                                        </div>
-                                                                                    </details>
-                                                                                </div>
-                                                                            @endforeach
-                                                                        </div>
-                                                                    </details>
-                                                                </div>
-                                                            @endif
-
-                                                            {{-- 5. Donnees brutes JSON --}}
-                                                            <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                                                                <details>
-                                                                    <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                                                                        <span class="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
-                                                                            <x-heroicon-o-code-bracket class="w-5 h-5" />
-                                                                            5. Donnees brutes (JSON)
-                                                                        </span>
-                                                                    </summary>
-                                                                    <div class="p-4 bg-gray-950">
-                                                                        <pre class="text-xs text-green-400 font-mono whitespace-pre-wrap overflow-x-auto">{{ json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
-                                                                    </div>
-                                                                </details>
-                                                            </div>
-                                                        </div>
-
-                                                        {{-- Footer --}}
-                                                        <div class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-end">
-                                                            <button @click="open = false" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
-                                                                Fermer
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    @endif
                                 </div>
                             </div>
 
@@ -534,6 +310,230 @@
                                                     @endif
                                                 </div>
                                             </div>
+
+                                            {{-- Bouton pour voir le contexte envoye a l'IA --}}
+                                            @if(!empty($message['rag_context']))
+                                                @php
+                                                    $context = $message['rag_context'];
+                                                    $learnedSources = $context['learned_sources'] ?? [];
+                                                    $documentSources = $context['document_sources'] ?? [];
+                                                    $conversationHistory = $context['conversation_history'] ?? [];
+                                                    $systemPrompt = $context['system_prompt_sent'] ?? '';
+                                                    $stats = $context['stats'] ?? [];
+                                                    $totalSources = count($learnedSources) + count($documentSources);
+                                                    $modalId = 'context-modal-' . ($message['uuid'] ?? $index);
+                                                @endphp
+
+                                                <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700" x-data="{ open: false }">
+                                                    {{-- Bouton d'ouverture --}}
+                                                    <button
+                                                        @click="open = true"
+                                                        type="button"
+                                                        class="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                                                    >
+                                                        <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
+                                                        <span>Voir le contexte envoye a l'IA</span>
+                                                        @if($totalSources > 0 || count($conversationHistory) > 0)
+                                                            <span class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 rounded text-gray-500 dark:text-gray-400">
+                                                                {{ $totalSources + count($conversationHistory) }}
+                                                            </span>
+                                                        @endif
+                                                    </button>
+
+                                                    {{-- Modale plein ecran --}}
+                                                    <template x-teleport="body">
+                                                        <div
+                                                            x-show="open"
+                                                            x-transition:enter="transition ease-out duration-200"
+                                                            x-transition:enter-start="opacity-0"
+                                                            x-transition:enter-end="opacity-100"
+                                                            x-transition:leave="transition ease-in duration-150"
+                                                            x-transition:leave-start="opacity-100"
+                                                            x-transition:leave-end="opacity-0"
+                                                            class="fixed inset-0 z-50 overflow-hidden"
+                                                            style="display: none;"
+                                                        >
+                                                            {{-- Backdrop --}}
+                                                            <div class="absolute inset-0 bg-black/50" @click="open = false"></div>
+
+                                                            {{-- Contenu de la modale --}}
+                                                            <div class="absolute inset-4 md:inset-8 lg:inset-12 bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                                                                {{-- Header --}}
+                                                                <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                                                                    <div>
+                                                                        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Contexte envoye a l'IA</h2>
+                                                                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                                                                            {{ $totalSources }} source(s) documentaire(s)
+                                                                            @if(count($conversationHistory) > 0)
+                                                                                &bull; {{ count($conversationHistory) }} message(s) d'historique
+                                                                            @endif
+                                                                        </p>
+                                                                    </div>
+                                                                    <button @click="open = false" class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                                        <x-heroicon-o-x-mark class="w-6 h-6" />
+                                                                    </button>
+                                                                </div>
+
+                                                                {{-- Corps scrollable --}}
+                                                                <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                                                                    {{-- 1. Prompt systeme --}}
+                                                                    @if(!empty($systemPrompt))
+                                                                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                            <details open>
+                                                                                <summary class="px-4 py-3 cursor-pointer bg-emerald-50 dark:bg-emerald-950 border-b border-gray-200 dark:border-gray-600 hover:bg-emerald-100 dark:hover:bg-emerald-900 transition-colors">
+                                                                                    <span class="font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                                                                                        <x-heroicon-o-cog-6-tooth class="w-5 h-5" />
+                                                                                        1. Prompt systeme
+                                                                                    </span>
+                                                                                </summary>
+                                                                                <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                                    <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $systemPrompt }}</pre>
+                                                                                </div>
+                                                                            </details>
+                                                                        </div>
+                                                                    @endif
+
+                                                                    {{-- 2. Historique de conversation --}}
+                                                                    @if(!empty($conversationHistory))
+                                                                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                            <details open>
+                                                                                <summary class="px-4 py-3 cursor-pointer bg-violet-50 dark:bg-violet-950 border-b border-gray-200 dark:border-gray-600 hover:bg-violet-100 dark:hover:bg-violet-900 transition-colors">
+                                                                                    <span class="font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-2">
+                                                                                        <x-heroicon-o-clock class="w-5 h-5" />
+                                                                                        2. Historique de conversation ({{ count($conversationHistory) }} messages)
+                                                                                        @if(isset($stats['context_window_size']))
+                                                                                            <span class="text-xs font-normal text-violet-500 dark:text-violet-400">(fenetre: {{ $stats['context_window_size'] }} echanges max)</span>
+                                                                                        @endif
+                                                                                    </span>
+                                                                                </summary>
+                                                                                <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                                    @foreach($conversationHistory as $historyMsg)
+                                                                                        <div class="flex gap-3 {{ $historyMsg['role'] === 'user' ? 'flex-row-reverse' : '' }}">
+                                                                                            <div class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-800' : 'bg-gray-200 dark:bg-gray-700' }}">
+                                                                                                @if($historyMsg['role'] === 'user')
+                                                                                                    <x-heroicon-o-user class="w-4 h-4 text-blue-600 dark:text-blue-300" />
+                                                                                                @else
+                                                                                                    <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                                                                                @endif
+                                                                                            </div>
+                                                                                            <div class="flex-1 {{ $historyMsg['role'] === 'user' ? 'text-right' : '' }}">
+                                                                                                <div class="inline-block max-w-[80%] p-3 rounded-lg {{ $historyMsg['role'] === 'user' ? 'bg-blue-100 dark:bg-blue-900 text-left' : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600' }}">
+                                                                                                    <p class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ $historyMsg['content'] }}</p>
+                                                                                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ $historyMsg['timestamp'] ?? '' }}</p>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    @endforeach
+                                                                                </div>
+                                                                            </details>
+                                                                        </div>
+                                                                    @endif
+
+                                                                    {{-- 3. Documents indexes (RAG) --}}
+                                                                    @if(!empty($documentSources))
+                                                                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                            <details open>
+                                                                                <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-950 border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
+                                                                                    <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                                                                                        <x-heroicon-o-document-text class="w-5 h-5" />
+                                                                                        3. Documents indexes - RAG ({{ count($documentSources) }})
+                                                                                    </span>
+                                                                                </summary>
+                                                                                <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                                    @foreach($documentSources as $doc)
+                                                                                        <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                                                                                            <details>
+                                                                                                <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                                    <span class="font-medium text-gray-800 dark:text-gray-100">
+                                                                                                        Document #{{ $doc['index'] ?? $loop->iteration }}
+                                                                                                        @if(isset($doc['metadata']['title']))
+                                                                                                            - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
+                                                                                                        @elseif(isset($doc['metadata']['filename']))
+                                                                                                            - {{ $doc['metadata']['filename'] }}
+                                                                                                        @endif
+                                                                                                    </span>
+                                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
+                                                                                                        {{ $doc['score'] ?? 0 }}% pertinent
+                                                                                                    </span>
+                                                                                                </summary>
+                                                                                                <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
+                                                                                                    <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                </div>
+                                                                                            </details>
+                                                                                        </div>
+                                                                                    @endforeach
+                                                                                </div>
+                                                                            </details>
+                                                                        </div>
+                                                                    @endif
+
+                                                                    {{-- 4. Sources d'apprentissage --}}
+                                                                    @if(!empty($learnedSources))
+                                                                        <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                            <details open>
+                                                                                <summary class="px-4 py-3 cursor-pointer bg-amber-50 dark:bg-amber-950 border-b border-gray-200 dark:border-gray-600 hover:bg-amber-100 dark:hover:bg-amber-900 transition-colors">
+                                                                                    <span class="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                                                                                        <x-heroicon-o-academic-cap class="w-5 h-5" />
+                                                                                        4. Sources d'apprentissage ({{ count($learnedSources) }})
+                                                                                    </span>
+                                                                                </summary>
+                                                                                <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                                    @foreach($learnedSources as $learned)
+                                                                                        <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
+                                                                                            <details>
+                                                                                                <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                                    <span class="font-medium text-gray-800 dark:text-gray-100">
+                                                                                                        Cas #{{ $learned['index'] ?? $loop->iteration }}
+                                                                                                    </span>
+                                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
+                                                                                                        {{ $learned['score'] ?? 0 }}% similaire
+                                                                                                    </span>
+                                                                                                </summary>
+                                                                                                <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                                                                                                    <div>
+                                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Question</p>
+                                                                                                        <p class="text-sm text-gray-800 dark:text-gray-100">{{ $learned['question'] ?? '' }}</p>
+                                                                                                    </div>
+                                                                                                    <div>
+                                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Reponse validee</p>
+                                                                                                        <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-amber-50 dark:bg-amber-900/50 p-3 rounded border border-amber-200 dark:border-amber-700">{{ $learned['answer'] ?? '' }}</pre>
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            </details>
+                                                                                        </div>
+                                                                                    @endforeach
+                                                                                </div>
+                                                                            </details>
+                                                                        </div>
+                                                                    @endif
+
+                                                                    {{-- 5. Donnees brutes JSON --}}
+                                                                    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                        <details>
+                                                                            <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                                                                                <span class="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
+                                                                                    <x-heroicon-o-code-bracket class="w-5 h-5" />
+                                                                                    5. Donnees brutes (JSON)
+                                                                                </span>
+                                                                            </summary>
+                                                                            <div class="p-4 bg-gray-950">
+                                                                                <pre class="text-xs text-green-400 font-mono whitespace-pre-wrap overflow-x-auto">{{ json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                                                            </div>
+                                                                        </details>
+                                                                    </div>
+                                                                </div>
+
+                                                                {{-- Footer --}}
+                                                                <div class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-end">
+                                                                    <button @click="open = false" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">
+                                                                        Fermer
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            @endif
                                         </div>
                                     @endif
                                 </div>
