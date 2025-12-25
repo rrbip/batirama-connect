@@ -264,8 +264,8 @@ class DocumentExtractorService
     {
         if (!$this->isOcrAvailable()) {
             throw new \RuntimeException(
-                "Tesseract OCR n'est pas installé sur ce système. " .
-                "Installez-le avec: apt-get install tesseract-ocr tesseract-ocr-fra"
+                "Tesseract OCR n'est pas installé ou non détecté. " .
+                "Vérifiez que le package tesseract-ocr est installé dans le conteneur Docker."
             );
         }
 
@@ -306,16 +306,23 @@ class DocumentExtractorService
         static $available = null;
 
         if ($available === null) {
-            // Utiliser 'command -v' (POSIX) ou tester directement tesseract --version
-            $result = Process::run('tesseract --version 2>/dev/null');
-            $available = $result->successful();
+            // tesseract --version peut retourner sur stdout ou stderr selon la version
+            // On capture les deux et on vérifie si "tesseract" apparaît dans la sortie
+            $result = Process::run('tesseract --version 2>&1');
+            $output = $result->output();
+
+            // Vérifier si la sortie contient "tesseract" (insensible à la casse)
+            $available = stripos($output, 'tesseract') !== false;
 
             if ($available) {
                 Log::info('Tesseract OCR available', [
-                    'version' => explode("\n", $result->output())[0] ?? 'unknown',
+                    'version' => explode("\n", $output)[0] ?? 'unknown',
                 ]);
             } else {
-                Log::info('Tesseract OCR not available on this system');
+                Log::info('Tesseract OCR not available on this system', [
+                    'output' => $output,
+                    'exit_code' => $result->exitCode(),
+                ]);
             }
         }
 
