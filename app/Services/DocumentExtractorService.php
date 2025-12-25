@@ -262,6 +262,9 @@ class DocumentExtractorService
      */
     private function cleanText(string $text): string
     {
+        // Détecter et convertir l'encodage en UTF-8
+        $text = $this->ensureUtf8($text);
+
         // Normaliser les retours à la ligne
         $text = str_replace(["\r\n", "\r"], "\n", $text);
 
@@ -281,6 +284,40 @@ class DocumentExtractorService
 
         // Trim global
         return trim($text);
+    }
+
+    /**
+     * S'assure que le texte est en UTF-8
+     */
+    private function ensureUtf8(string $text): string
+    {
+        // Si déjà valide UTF-8, retourner tel quel
+        if (mb_check_encoding($text, 'UTF-8')) {
+            // Mais vérifier qu'il n'y a pas de caractères de remplacement
+            if (!str_contains($text, "\u{FFFD}") && !str_contains($text, '�')) {
+                return $text;
+            }
+        }
+
+        // Essayer de détecter l'encodage
+        $encodings = ['UTF-8', 'Windows-1252', 'ISO-8859-1', 'ISO-8859-15', 'CP1252'];
+        $detectedEncoding = mb_detect_encoding($text, $encodings, true);
+
+        if ($detectedEncoding && $detectedEncoding !== 'UTF-8') {
+            $converted = mb_convert_encoding($text, 'UTF-8', $detectedEncoding);
+            if ($converted !== false) {
+                return $converted;
+            }
+        }
+
+        // Fallback: essayer Windows-1252 (très courant pour les PDFs français)
+        $converted = @iconv('Windows-1252', 'UTF-8//IGNORE', $text);
+        if ($converted !== false && !empty($converted)) {
+            return $converted;
+        }
+
+        // Dernier recours: supprimer les caractères non-UTF8
+        return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 
     /**
