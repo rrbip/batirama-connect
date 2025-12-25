@@ -287,7 +287,8 @@ class DocumentExtractorService
     }
 
     /**
-     * S'assure que le texte est en UTF-8 valide et corrige le double encodage si détecté
+     * S'assure que le texte est en UTF-8 valide
+     * Note: Ne modifie pas l'encodage si déjà valide pour éviter de corrompre les données
      */
     private function ensureUtf8(string $text): string
     {
@@ -295,29 +296,18 @@ class DocumentExtractorService
             return $text;
         }
 
-        // Détecter le double encodage UTF-8 : chercher des séquences comme "Ã©" (é doublement encodé)
-        // Ces séquences apparaissent quand du UTF-8 est lu comme Latin-1 puis ré-encodé en UTF-8
-        if (preg_match('/\xC3[\x80-\xBF]/', $text)) {
-            // Tenter de corriger : convertir de UTF-8 vers Latin-1 pour récupérer les bytes UTF-8 originaux
-            $decoded = @mb_convert_encoding($text, 'ISO-8859-1', 'UTF-8');
-            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
-                return $decoded;
-            }
-        }
-
-        // Si déjà UTF-8 valide, retourner tel quel
+        // Si déjà UTF-8 valide, retourner tel quel sans modification
         if (mb_check_encoding($text, 'UTF-8')) {
             return $text;
         }
 
-        // Sinon, tenter conversion depuis Windows-1252
+        // Sinon seulement, tenter conversion depuis Windows-1252
         $converted = @mb_convert_encoding($text, 'UTF-8', 'Windows-1252');
-        if ($converted !== false && mb_check_encoding($converted, 'UTF-8')) {
+        if ($converted !== false) {
             return $converted;
         }
 
-        // Dernier recours
-        return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        return $text;
     }
 
     /**
