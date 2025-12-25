@@ -47,6 +47,8 @@ class OllamaService implements LLMServiceInterface
     {
         $startTime = microtime(true);
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;
+        $usedFallback = $options['_used_fallback'] ?? false;
 
         try {
             $response = Http::timeout($this->timeout)
@@ -77,7 +79,9 @@ class OllamaService implements LLMServiceInterface
                 tokensPrompt: $data['prompt_eval_count'] ?? null,
                 tokensCompletion: $data['eval_count'] ?? null,
                 generationTimeMs: $generationTime,
-                raw: $data
+                raw: $data,
+                usedFallback: $usedFallback,
+                requestedModel: $requestedModel
             );
 
         } catch (ConnectionException $e) {
@@ -92,7 +96,9 @@ class OllamaService implements LLMServiceInterface
                 return $this->generate($prompt, [
                     ...$options,
                     'model' => $options['fallback_model'],
-                    'fallback_model' => null
+                    'fallback_model' => null,
+                    '_requested_model' => $requestedModel,
+                    '_used_fallback' => true,
                 ]);
             }
 
@@ -139,6 +145,8 @@ class OllamaService implements LLMServiceInterface
     {
         $startTime = microtime(true);
         $model = $options['model'] ?? $this->defaultModel;
+        $requestedModel = $options['_requested_model'] ?? $model;
+        $usedFallback = $options['_used_fallback'] ?? false;
 
         $response = Http::timeout($this->timeout)
             ->post("{$this->baseUrl}/api/chat", [
@@ -164,7 +172,9 @@ class OllamaService implements LLMServiceInterface
             tokensPrompt: $data['prompt_eval_count'] ?? null,
             tokensCompletion: $data['eval_count'] ?? null,
             generationTimeMs: $generationTime,
-            raw: $data
+            raw: $data,
+            usedFallback: $usedFallback,
+            requestedModel: $requestedModel
         );
     }
 

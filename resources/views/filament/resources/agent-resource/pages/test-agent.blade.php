@@ -524,7 +524,14 @@
                                                 <span>{{ $message['timestamp'] }}</span>
                                                 <div class="flex items-center gap-2">
                                                     @if(isset($message['model_used']))
-                                                        <span class="text-gray-400">{{ $message['model_used'] }}</span>
+                                                        <span class="text-gray-400 flex items-center gap-1">
+                                                            {{ $message['model_used'] }}
+                                                            @if(!empty($message['used_fallback_model']))
+                                                                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300" title="Modele de fallback utilise">
+                                                                    fallback
+                                                                </span>
+                                                            @endif
+                                                        </span>
                                                     @endif
                                                     @if(isset($message['tokens']) && $message['tokens'])
                                                         <span>{{ $message['tokens'] }} tokens</span>

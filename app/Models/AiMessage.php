@@ -31,6 +31,7 @@ class AiMessage extends Model
         'attachments',
         'rag_context',
         'model_used',
+        'used_fallback_model',
         'tokens_prompt',
         'tokens_completion',
         'generation_time_ms',
@@ -52,6 +53,7 @@ class AiMessage extends Model
     protected $casts = [
         'attachments' => 'array',
         'rag_context' => 'array',
+        'used_fallback_model' => 'boolean',
         'validated_at' => 'datetime',
         'created_at' => 'datetime',
         'queued_at' => 'datetime',
@@ -183,13 +185,15 @@ class AiMessage extends Model
         ?int $tokensPrompt = null,
         ?int $tokensCompletion = null,
         ?int $generationTimeMs = null,
-        ?array $ragContext = null
+        ?array $ragContext = null,
+        bool $usedFallback = false
     ): self {
         $this->update([
             'processing_status' => self::STATUS_COMPLETED,
             'processing_completed_at' => now(),
             'content' => $content,
             'model_used' => $model,
+            'used_fallback_model' => $usedFallback,
             'tokens_prompt' => $tokensPrompt,
             'tokens_completion' => $tokensCompletion,
             'generation_time_ms' => $generationTimeMs,

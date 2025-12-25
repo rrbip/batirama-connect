@@ -81,7 +81,8 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 tokensPrompt: $response->tokensPrompt,
                 tokensCompletion: $response->tokensCompletion,
                 generationTimeMs: $response->generationTimeMs,
-                ragContext: $response->raw['context'] ?? null
+                ragContext: $response->raw['context'] ?? null,
+                usedFallback: $response->usedFallback
             );
 
             // Incrémenter le compteur de messages de la session
@@ -91,6 +92,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'message_id' => $this->message->id,
                 'message_uuid' => $this->message->uuid,
                 'model' => $response->model,
+                'used_fallback' => $response->usedFallback,
                 'generation_time_ms' => $response->generationTimeMs,
                 'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
             ]);

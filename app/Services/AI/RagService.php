@@ -323,6 +323,7 @@ class RagService
 
         if ($role === 'assistant' && $response) {
             $messageData['model_used'] = $response->model;
+            $messageData['used_fallback_model'] = $response->usedFallback;
             $messageData['tokens_prompt'] = $response->tokensPrompt;
             $messageData['tokens_completion'] = $response->tokensCompletion;
             $messageData['generation_time_ms'] = $response->generationTimeMs;

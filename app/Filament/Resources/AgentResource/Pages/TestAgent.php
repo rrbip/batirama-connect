@@ -123,6 +123,7 @@ class TestAgent extends Page implements HasForms
                     $data['generation_time_ms'] = $msg->generation_time_ms;
                     $data['processing_error'] = $msg->processing_error;
                     $data['model_used'] = $msg->model_used;
+                    $data['used_fallback_model'] = $msg->used_fallback_model;
 
                     // Sources depuis le rag_context
                     if ($msg->rag_context && isset($msg->rag_context['sources'])) {
@@ -359,6 +360,7 @@ class TestAgent extends Page implements HasForms
                         : null,
                     'generation_time_ms' => $message->generation_time_ms,
                     'model_used' => $message->model_used,
+                    'used_fallback_model' => $message->used_fallback_model,
                     'sources' => $message->rag_context['sources'] ?? [],
                 ];
                 break;

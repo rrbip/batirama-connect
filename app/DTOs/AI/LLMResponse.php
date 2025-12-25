@@ -12,7 +12,9 @@ readonly class LLMResponse
         public ?int $tokensPrompt = null,
         public ?int $tokensCompletion = null,
         public ?int $generationTimeMs = null,
-        public array $raw = []
+        public array $raw = [],
+        public bool $usedFallback = false,
+        public ?string $requestedModel = null
     ) {}
 
     public function toArray(): array
@@ -23,6 +25,8 @@ readonly class LLMResponse
             'tokens_prompt' => $this->tokensPrompt,
             'tokens_completion' => $this->tokensCompletion,
             'generation_time_ms' => $this->generationTimeMs,
+            'used_fallback' => $this->usedFallback,
+            'requested_model' => $this->requestedModel,
         ];
     }
 }

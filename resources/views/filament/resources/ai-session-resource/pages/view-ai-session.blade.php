@@ -508,7 +508,14 @@
                                             <span>{{ $message->created_at?->format('H:i') }}</span>
                                             <div class="flex items-center gap-2">
                                                 @if($message->model_used)
-                                                    <span class="text-gray-400">{{ $message->model_used }}</span>
+                                                    <span class="text-gray-400 flex items-center gap-1">
+                                                        {{ $message->model_used }}
+                                                        @if($message->used_fallback_model)
+                                                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300" title="Modele de fallback utilise">
+                                                                fallback
+                                                            </span>
+                                                        @endif
+                                                    </span>
                                                 @endif
                                                 @if($message->tokens_completion)
                                                     <span>{{ $message->tokens_prompt + $message->tokens_completion }} tokens</span>
