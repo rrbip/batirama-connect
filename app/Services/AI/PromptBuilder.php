@@ -65,6 +65,9 @@ class PromptBuilder
         // System message avec contexte intégré
         $systemContent = $agent->system_prompt;
 
+        // Ajouter les garde-fous si strict_mode est activé
+        $systemContent .= $agent->getStrictModeGuardrails();
+
         // Ajouter les réponses apprises similaires (priorité haute)
         if (!empty($learnedResponses)) {
             $learnedContent = $this->formatLearnedResponses($learnedResponses);

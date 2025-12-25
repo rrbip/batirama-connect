@@ -35,8 +35,8 @@ class RagService
         $learnedResponses = $this->learningService->findSimilarLearnedResponses(
             question: $userMessage,
             agentSlug: $agent->slug,
-            limit: config('ai.rag.max_learned_responses', 3),
-            minScore: config('ai.rag.learned_min_score', 0.75)
+            limit: $agent->getMaxLearnedResponses(),
+            minScore: $agent->getLearnedMinScore()
         );
 
         // 2. Recherche dans la base vectorielle documentaire
@@ -59,7 +59,7 @@ class RagService
         // 5. Tronquer si nécessaire pour respecter le contexte
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
-            config('ai.rag.context_size', 4000)
+            $agent->getContextTokenLimit()
         );
 
         // 6. Construire le prompt avec TOUT le contexte et générer la réponse
@@ -191,7 +191,7 @@ class RagService
             // Générer l'embedding de la requête
             $queryVector = $this->embeddingService->embed($query);
 
-            $minScore = config('ai.rag.min_score', 0.5);
+            $minScore = $agent->getMinRagScore();
             $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
 
             Log::info('RAG search starting', [
@@ -251,7 +251,7 @@ class RagService
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
                 limit: 3,
-                scoreThreshold: config('ai.rag.min_score', 0.6)
+                scoreThreshold: $agent->getMinRagScore()
             );
 
             // Filtrer les doublons
