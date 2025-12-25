@@ -619,9 +619,30 @@
 
                 {{-- Installer un nouveau modèle --}}
                 <div class="border-t border-gray-200 dark:border-gray-700 pt-6">
-                    <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                        Installer un nouveau modèle
-                    </h4>
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Installer un nouveau modèle
+                        </h4>
+                        <div class="flex items-center gap-3">
+                            @if($lastSyncInfo['last_sync'] ?? null)
+                                <span class="text-xs text-gray-500 dark:text-gray-400">
+                                    Sync: {{ \Carbon\Carbon::parse($lastSyncInfo['last_sync'])->diffForHumans() }}
+                                    ({{ $lastSyncInfo['source'] ?? 'config' }})
+                                </span>
+                            @endif
+                            <button
+                                wire:click="syncAvailableModels"
+                                wire:loading.attr="disabled"
+                                wire:target="syncAvailableModels"
+                                class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 transition"
+                                title="Actualiser la liste des modèles disponibles"
+                            >
+                                <x-heroicon-o-arrow-path class="w-3.5 h-3.5" wire:loading.class="animate-spin" wire:target="syncAvailableModels" />
+                                <span wire:loading.remove wire:target="syncAvailableModels">Synchroniser</span>
+                                <span wire:loading wire:target="syncAvailableModels">Sync...</span>
+                            </button>
+                        </div>
+                    </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         {{-- Liste des modèles recommandés --}}

@@ -14,6 +14,7 @@ use App\Services\AI\QdrantService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
@@ -46,6 +47,7 @@ class AiStatusPage extends Page
     // Modèles Ollama
     public array $ollamaModels = [];
     public array $availableModels = [];
+    public array $lastSyncInfo = [];
     public ?string $modelToInstall = null;
     public ?string $customModelName = null;
     public bool $isInstallingModel = false;
@@ -71,6 +73,7 @@ class AiStatusPage extends Page
         // Modèles Ollama
         $this->loadOllamaModels();
         $this->availableModels = $this->getAvailableModels();
+        $this->lastSyncInfo = $this->getLastSyncInfo();
     }
 
     /**
@@ -92,12 +95,77 @@ class AiStatusPage extends Page
      */
     protected function getAvailableModels(): array
     {
+        // Récupérer les modèles depuis le cache ou la config
+        $cachedModels = Cache::get('ollama_available_models', []);
         $configModels = config('ai.ollama.available_models', []);
+
+        // Fusionner: cache a priorité sur config pour les clés identiques
+        $allModels = array_merge($configModels, $cachedModels);
+
         $installedNames = collect($this->ollamaModels)->pluck('name')->toArray();
 
-        return collect($configModels)
+        return collect($allModels)
             ->filter(fn ($details, $modelKey) => !in_array($modelKey, $installedNames))
             ->toArray();
+    }
+
+    /**
+     * Synchronise la liste des modèles disponibles
+     */
+    public function syncAvailableModels(): void
+    {
+        $ollama = app(OllamaService::class);
+        $syncedModels = [];
+        $source = 'config';
+
+        // Option 1: Essayer de récupérer depuis une URL configurée
+        $modelsListUrl = config('ai.ollama.models_list_url');
+        if ($modelsListUrl) {
+            $urlModels = $ollama->fetchModelsFromUrl($modelsListUrl);
+            if ($urlModels && !empty($urlModels)) {
+                $syncedModels = $urlModels;
+                $source = 'url';
+            }
+        }
+
+        // Option 2: Sinon, récupérer les infos des modèles populaires depuis Ollama
+        if (empty($syncedModels)) {
+            $popularModels = $ollama->fetchPopularModelsInfo();
+            if (!empty($popularModels)) {
+                $syncedModels = $popularModels;
+                $source = 'ollama';
+            }
+        }
+
+        // Option 3: Utiliser la liste de config comme fallback
+        if (empty($syncedModels)) {
+            $syncedModels = config('ai.ollama.available_models', []);
+            $source = 'config (fallback)';
+        }
+
+        // Sauvegarder en cache pour 24h
+        Cache::put('ollama_available_models', $syncedModels, now()->addHours(24));
+        Cache::put('ollama_models_last_sync', now()->toDateTimeString(), now()->addHours(24));
+        Cache::put('ollama_models_sync_source', $source, now()->addHours(24));
+
+        $this->refreshStatus();
+
+        Notification::make()
+            ->title('Liste synchronisée')
+            ->body("Modèles disponibles mis à jour depuis: {$source} (" . count($syncedModels) . " modèles)")
+            ->success()
+            ->send();
+    }
+
+    /**
+     * Retourne les infos de dernière synchronisation
+     */
+    public function getLastSyncInfo(): array
+    {
+        return [
+            'last_sync' => Cache::get('ollama_models_last_sync'),
+            'source' => Cache::get('ollama_models_sync_source', 'config'),
+        ];
     }
 
     protected function checkServices(): array

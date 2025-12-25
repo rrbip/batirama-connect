@@ -27,6 +27,10 @@ return [
         // Nombre de requêtes parallèles
         'num_parallel' => env('OLLAMA_NUM_PARALLEL', 2),
 
+        // URL pour synchroniser la liste des modèles disponibles (optionnel)
+        // Format attendu: JSON { "model-key": { "name": "...", "size": "...", "type": "chat|embedding|code", "description": "..." } }
+        'models_list_url' => env('OLLAMA_MODELS_LIST_URL', null),
+
         // Liste des modèles disponibles pour installation
         // Ces modèles sont vérifiés compatibles et recommandés
         'available_models' => [

@@ -295,6 +295,92 @@ class OllamaService implements LLMServiceInterface
         return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
+    /**
+     * Récupère une liste de modèles depuis une URL externe
+     */
+    public function fetchModelsFromUrl(string $url): ?array
+    {
+        try {
+            $response = Http::timeout(30)->get($url);
+
+            if (!$response->successful()) {
+                Log::warning('Failed to fetch models list from URL', [
+                    'url' => $url,
+                    'status' => $response->status(),
+                ]);
+                return null;
+            }
+
+            $data = $response->json();
+
+            // Valider le format
+            if (!is_array($data)) {
+                Log::warning('Invalid models list format from URL', ['url' => $url]);
+                return null;
+            }
+
+            // S'assurer que chaque entrée a les champs requis
+            $validatedModels = [];
+            foreach ($data as $key => $model) {
+                if (is_array($model) && isset($model['name'])) {
+                    $validatedModels[$key] = [
+                        'name' => $model['name'],
+                        'size' => $model['size'] ?? 'Taille inconnue',
+                        'type' => $model['type'] ?? 'chat',
+                        'description' => $model['description'] ?? '',
+                    ];
+                }
+            }
+
+            return $validatedModels;
+        } catch (\Exception $e) {
+            Log::error('Exception fetching models from URL', [
+                'url' => $url,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Récupère les modèles populaires depuis l'API Ollama (si disponible)
+     * Note: L'API Ollama ne fournit pas de liste des modèles disponibles,
+     * cette méthode essaie de récupérer des infos sur des modèles connus
+     */
+    public function fetchPopularModelsInfo(): array
+    {
+        $popularModels = [
+            'llama3.2:1b', 'llama3.2:3b', 'llama3.1:8b', 'mistral:7b',
+            'gemma2:2b', 'gemma2:9b', 'phi3:mini', 'qwen2.5:7b',
+            'nomic-embed-text', 'codellama:7b',
+        ];
+
+        $modelsInfo = [];
+        foreach ($popularModels as $modelName) {
+            try {
+                $response = Http::timeout(5)->post("{$this->baseUrl}/api/show", [
+                    'name' => $modelName,
+                ]);
+
+                if ($response->successful()) {
+                    $data = $response->json();
+                    $modelsInfo[$modelName] = [
+                        'name' => $modelName,
+                        'size' => isset($data['size']) ? $this->formatBytes($data['size']) : 'Taille variable',
+                        'type' => str_contains($modelName, 'embed') ? 'embedding' :
+                                 (str_contains($modelName, 'code') ? 'code' : 'chat'),
+                        'description' => $data['modelfile'] ?? '',
+                        'available' => true,
+                    ];
+                }
+            } catch (\Exception $e) {
+                // Modèle non disponible ou erreur, on continue
+            }
+        }
+
+        return $modelsInfo;
+    }
+
     public function getBaseUrl(): string
     {
         return $this->baseUrl;
