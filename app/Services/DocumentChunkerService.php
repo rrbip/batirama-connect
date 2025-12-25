@@ -35,6 +35,17 @@ class DocumentChunkerService
 
         $strategy = $document->chunk_strategy ?? config('documents.chunk_settings.default_strategy', 'paragraph');
 
+        Log::info('DocumentChunker: starting', [
+            'document_id' => $document->id,
+            'strategy' => $strategy,
+            'text_length' => mb_strlen($text),
+            'text_tokens' => $this->estimateTokens($text),
+            'max_chunk_size' => $this->maxChunkSize,
+            'first_100_chars' => mb_substr($text, 0, 100),
+            'has_newlines' => str_contains($text, "\n"),
+            'newline_count' => substr_count($text, "\n"),
+        ]);
+
         $rawChunks = match ($strategy) {
             'fixed_size' => $this->chunkByFixedSize($text),
             'sentence' => $this->chunkBySentence($text),
@@ -42,6 +53,12 @@ class DocumentChunkerService
             'recursive' => $this->chunkRecursive($text),
             default => $this->chunkByParagraph($text),
         };
+
+        Log::info('DocumentChunker: raw chunks created', [
+            'document_id' => $document->id,
+            'strategy' => $strategy,
+            'raw_chunk_count' => count($rawChunks),
+        ]);
 
         // Supprimer les anciens chunks
         $document->chunks()->delete();
@@ -309,6 +326,11 @@ class DocumentChunkerService
      */
     private function groupIntoChunks(array $items): array
     {
+        Log::info('groupIntoChunks: starting', [
+            'item_count' => count($items),
+            'max_chunk_size' => $this->maxChunkSize,
+        ]);
+
         $chunks = [];
         $currentChunk = '';
         $currentOffset = 0;
@@ -359,6 +381,11 @@ class DocumentChunkerService
                 'end_offset' => $currentOffset + mb_strlen($currentChunk),
             ];
         }
+
+        Log::info('groupIntoChunks: finished', [
+            'chunk_count' => count($chunks),
+            'chunks_tokens' => array_map(fn($c) => $this->estimateTokens($c['content']), $chunks),
+        ]);
 
         return $chunks;
     }
