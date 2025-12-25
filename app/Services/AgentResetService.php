@@ -18,6 +18,7 @@ class AgentResetService
 
     /**
      * Reinitialise completement un agent:
+     * - Supprime toutes les sessions IA et leurs messages (incluant rag_context)
      * - Supprime tous les documents et leurs chunks
      * - Supprime et recree la collection Qdrant
      * - Supprime les reponses apprises de l'agent
@@ -25,6 +26,8 @@ class AgentResetService
     public function reset(Agent $agent): array
     {
         $stats = [
+            'sessions_deleted' => 0,
+            'messages_deleted' => 0,
             'documents_deleted' => 0,
             'chunks_deleted' => 0,
             'files_deleted' => 0,
@@ -40,7 +43,12 @@ class AgentResetService
         DB::beginTransaction();
 
         try {
-            // 1. Supprimer les fichiers physiques
+            // 1. Supprimer les sessions IA et leurs messages (contient rag_context)
+            $sessionStats = $this->deleteSessions($agent);
+            $stats['sessions_deleted'] = $sessionStats['sessions'];
+            $stats['messages_deleted'] = $sessionStats['messages'];
+
+            // 2. Supprimer les fichiers physiques
             $documents = $agent->documents()->get();
             foreach ($documents as $document) {
                 if ($document->storage_path && Storage::disk('local')->exists($document->storage_path)) {
@@ -49,20 +57,20 @@ class AgentResetService
                 }
             }
 
-            // 2. Supprimer les chunks (en cascade depuis les documents)
+            // 3. Supprimer les chunks (en cascade depuis les documents)
             $stats['chunks_deleted'] = DB::table('document_chunks')
                 ->whereIn('document_id', $agent->documents()->pluck('id'))
                 ->delete();
 
-            // 3. Supprimer les documents (force delete pour eviter soft delete)
+            // 4. Supprimer les documents (force delete pour eviter soft delete)
             $stats['documents_deleted'] = $agent->documents()->forceDelete();
 
-            // 4. Reinitialiser la collection Qdrant de l'agent
+            // 5. Reinitialiser la collection Qdrant de l'agent
             if (!empty($agent->qdrant_collection)) {
                 $stats['collection_reset'] = $this->resetQdrantCollection($agent);
             }
 
-            // 5. Supprimer les reponses apprises pour cet agent
+            // 6. Supprimer les reponses apprises pour cet agent
             $stats['learned_responses_deleted'] = $this->deleteLearnedResponses($agent);
 
             DB::commit();
@@ -86,6 +94,51 @@ class AgentResetService
 
             throw $e;
         }
+    }
+
+    /**
+     * Supprime toutes les sessions IA et leurs messages associes
+     */
+    private function deleteSessions(Agent $agent): array
+    {
+        $sessionIds = $agent->sessions()->pluck('id');
+
+        if ($sessionIds->isEmpty()) {
+            return ['sessions' => 0, 'messages' => 0];
+        }
+
+        // Supprimer les feedbacks des messages
+        DB::table('ai_feedbacks')
+            ->whereIn('message_id', function ($query) use ($sessionIds) {
+                $query->select('id')
+                    ->from('ai_messages')
+                    ->whereIn('session_id', $sessionIds);
+            })
+            ->delete();
+
+        // Supprimer les messages (contient rag_context avec les donnees envoyees a l'IA)
+        $messagesDeleted = DB::table('ai_messages')
+            ->whereIn('session_id', $sessionIds)
+            ->delete();
+
+        // Supprimer les tokens d'acces public lies aux sessions
+        DB::table('public_access_tokens')
+            ->whereIn('session_id', $sessionIds)
+            ->delete();
+
+        // Supprimer les sessions
+        $sessionsDeleted = $agent->sessions()->delete();
+
+        Log::info('Sessions and messages deleted', [
+            'agent_id' => $agent->id,
+            'sessions' => $sessionsDeleted,
+            'messages' => $messagesDeleted,
+        ]);
+
+        return [
+            'sessions' => $sessionsDeleted,
+            'messages' => $messagesDeleted,
+        ];
     }
 
     /**

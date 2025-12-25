@@ -286,6 +286,8 @@ class AgentResource extends Resource
                     ->modalHeading('Reinitialiser l\'agent')
                     ->modalDescription(fn (Agent $record) =>
                         "Attention ! Cette action va supprimer definitivement :\n" .
+                        "- Toutes les sessions IA ({$record->sessions()->count()} sessions)\n" .
+                        "- Tous les messages et contextes RAG envoyes a l'IA\n" .
                         "- Tous les documents de l'agent ({$record->documents()->count()} documents)\n" .
                         "- Tous les chunks et embeddings dans Qdrant\n" .
                         "- Toutes les reponses apprises (learned responses)\n\n" .
@@ -301,9 +303,12 @@ class AgentResource extends Resource
                             Notification::make()
                                 ->title('Agent reinitialise')
                                 ->body(sprintf(
-                                    "Supprime: %d documents, %d chunks, %d fichiers.\n" .
+                                    "Sessions: %d supprimees (%d messages)\n" .
+                                    "Documents: %d supprimes (%d chunks, %d fichiers)\n" .
                                     "Collection Qdrant: %s\n" .
-                                    "Reponses apprises supprimees: %d",
+                                    "Reponses apprises: %d supprimees",
+                                    $stats['sessions_deleted'],
+                                    $stats['messages_deleted'],
                                     $stats['documents_deleted'],
                                     $stats['chunks_deleted'],
                                     $stats['files_deleted'],
