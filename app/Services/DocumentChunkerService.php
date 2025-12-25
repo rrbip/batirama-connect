@@ -124,58 +124,75 @@ class DocumentChunkerService
     }
 
     /**
-     * Découpage par phrase
+     * Découpage par phrase - chaque phrase devient un chunk séparé
      */
     private function chunkBySentence(string $text): array
     {
-        $textTokens = $this->estimateTokens($text);
+        // Découper en phrases sur la ponctuation de fin
+        $sentences = preg_split('/(?<=[.!?])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
 
-        // Découper en phrases (plusieurs patterns pour plus de robustesse)
-        $sentences = preg_split('/(?<=[.!?;:])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-
-        // Si on n'a qu'une seule phrase mais le texte est conséquent,
-        // essayer de découper par lignes
-        if (count($sentences) <= 1 && $textTokens > $this->maxChunkSize * 0.5) {
-            $sentences = preg_split('/\n+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-            $sentences = array_map('trim', $sentences);
-            $sentences = array_filter($sentences);
+        // Si on n'a qu'une seule phrase, essayer de découper sur d'autres ponctuations
+        if (count($sentences) <= 1) {
+            $sentences = preg_split('/(?<=[.!?;:])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
         }
 
-        $chunks = $this->groupIntoChunks($sentences);
-
-        // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
-        if (count($chunks) === 1 && $textTokens > $this->maxChunkSize) {
-            return $this->chunkByFixedSize($text);
-        }
-
-        return $chunks;
+        // Convertir chaque phrase en chunk (sans regroupement)
+        return $this->itemsToChunks($sentences);
     }
 
     /**
-     * Découpage par paragraphe
+     * Découpage par paragraphe - chaque paragraphe/ligne devient un chunk séparé
      */
     private function chunkByParagraph(string $text): array
     {
-        $textTokens = $this->estimateTokens($text);
-
         // Découper en paragraphes (double saut de ligne)
         $paragraphs = preg_split('/\n\s*\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
         $paragraphs = array_map('trim', $paragraphs);
         $paragraphs = array_filter($paragraphs);
 
-        // Si on n'a qu'un seul paragraphe mais le texte est conséquent,
-        // essayer de découper par lignes simples (typique des PDF)
-        if (count($paragraphs) <= 1 && $textTokens > $this->maxChunkSize * 0.5) {
+        // Si on n'a qu'un seul paragraphe, découper par lignes simples
+        if (count($paragraphs) <= 1) {
             $paragraphs = preg_split('/\n/', $text, -1, PREG_SPLIT_NO_EMPTY);
             $paragraphs = array_map('trim', $paragraphs);
             $paragraphs = array_filter($paragraphs);
         }
 
-        $chunks = $this->groupIntoChunks($paragraphs);
+        // Convertir chaque paragraphe en chunk (sans regroupement)
+        return $this->itemsToChunks($paragraphs);
+    }
 
-        // Si on a toujours qu'un seul chunk mais le texte est grand, utiliser fixed_size
-        if (count($chunks) === 1 && $textTokens > $this->maxChunkSize) {
-            return $this->chunkByFixedSize($text);
+    /**
+     * Convertit une liste d'éléments en chunks individuels
+     * Si un élément est trop grand, il est découpé en fixed_size
+     */
+    private function itemsToChunks(array $items): array
+    {
+        $chunks = [];
+        $currentOffset = 0;
+
+        foreach ($items as $item) {
+            $item = trim($item);
+            if (empty($item)) {
+                continue;
+            }
+
+            // Si l'item est trop grand, le découper
+            if ($this->estimateTokens($item) > $this->maxChunkSize) {
+                $subChunks = $this->chunkByFixedSize($item);
+                foreach ($subChunks as $subChunk) {
+                    $subChunk['start_offset'] += $currentOffset;
+                    $subChunk['end_offset'] += $currentOffset;
+                    $chunks[] = $subChunk;
+                }
+            } else {
+                $chunks[] = [
+                    'content' => $item,
+                    'start_offset' => $currentOffset,
+                    'end_offset' => $currentOffset + mb_strlen($item),
+                ];
+            }
+
+            $currentOffset += mb_strlen($item) + 1; // +1 pour le séparateur
         }
 
         return $chunks;
