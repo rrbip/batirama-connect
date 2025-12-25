@@ -274,6 +274,12 @@ class DocumentExtractorService
         try {
             $ocr = new TesseractOCR($path);
 
+            // Spécifier le chemin du binaire tesseract (nécessaire dans certains environnements Docker)
+            $tesseractPath = $this->findTesseractExecutable();
+            if ($tesseractPath) {
+                $ocr->executable($tesseractPath);
+            }
+
             // Configurer Tesseract pour le français
             $ocr->lang('fra', 'eng'); // Français + Anglais comme fallback
             $ocr->psm(3); // Mode de segmentation automatique
@@ -327,6 +333,41 @@ class DocumentExtractorService
         }
 
         return $available;
+    }
+
+    /**
+     * Trouve le chemin du binaire tesseract
+     */
+    private function findTesseractExecutable(): ?string
+    {
+        static $path = null;
+        static $searched = false;
+
+        if (!$searched) {
+            $searched = true;
+
+            // Chemins possibles pour tesseract selon l'OS/distribution
+            $possiblePaths = [
+                '/usr/bin/tesseract',           // Alpine, Debian, Ubuntu
+                '/usr/local/bin/tesseract',     // Compilation manuelle
+                '/opt/homebrew/bin/tesseract',  // macOS Homebrew (ARM)
+                '/usr/local/opt/tesseract/bin/tesseract', // macOS Homebrew (Intel)
+            ];
+
+            foreach ($possiblePaths as $possiblePath) {
+                if (file_exists($possiblePath) && is_executable($possiblePath)) {
+                    $path = $possiblePath;
+                    Log::info('Found tesseract executable', ['path' => $path]);
+                    break;
+                }
+            }
+
+            if (!$path) {
+                Log::warning('Could not find tesseract executable in common paths');
+            }
+        }
+
+        return $path;
     }
 
     /**
