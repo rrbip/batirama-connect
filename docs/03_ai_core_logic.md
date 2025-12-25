@@ -1092,7 +1092,7 @@ class RagService
                 'sources' => collect($ragResults)->map(fn($r) => [
                     'id' => $r['id'],
                     'score' => $r['score'],
-                    'content' => $r['payload']['content'] ?? null,
+                    'content' => $this->fixUtf8Encoding($r['payload']['content'] ?? ''),
                     'hydrated' => $r['payload']['hydrated'] ?? false,
                 ])->toArray(),
                 'learned_matches' => collect($learnedResponses)->map(fn($r) => [
@@ -1102,6 +1102,36 @@ class RagService
                 'retrieval_mode' => $agent->retrieval_mode,
             ]
         );
+    }
+
+    /**
+     * Corrige les problèmes d'encodage UTF-8 (double encodage ou mauvaise détection)
+     * Gère les cas où le texte UTF-8 a été interprété comme ISO-8859-1 puis ré-encodé
+     * Ex: "Ã©" au lieu de "é", "garanï¿½e" au lieu de "garantie"
+     */
+    private function fixUtf8Encoding(string $text): string
+    {
+        if (empty($text)) {
+            return $text;
+        }
+
+        // Vérifie s'il y a des séquences de double encodage UTF-8
+        if (mb_check_encoding($text, 'UTF-8')) {
+            $decoded = @iconv('UTF-8', 'ISO-8859-1//IGNORE', $text);
+            if ($decoded !== false && mb_check_encoding($decoded, 'UTF-8')) {
+                return $decoded; // C'était du double encodage
+            }
+        }
+
+        // Conversion ISO-8859-1 vers UTF-8 si nécessaire
+        if (!mb_check_encoding($text, 'UTF-8')) {
+            $converted = mb_convert_encoding($text, 'UTF-8', 'ISO-8859-1');
+            if ($converted !== false) {
+                return $converted;
+            }
+        }
+
+        return mb_convert_encoding($text, 'UTF-8', 'UTF-8');
     }
 }
 ```
