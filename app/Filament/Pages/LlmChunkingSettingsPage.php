@@ -129,12 +129,12 @@ class LlmChunkingSettingsPage extends Page implements HasForms
                         TextInput::make('timeout_seconds')
                             ->label('Timeout (secondes)')
                             ->numeric()
-                            ->minValue(60)
-                            ->maxValue(3600)
+                            ->minValue(0)
+                            ->maxValue(7200)
                             ->required()
-                            ->default(300)
+                            ->default(0)
                             ->suffix('s')
-                            ->helperText('Délai maximum pour le traitement d\'une fenêtre.'),
+                            ->helperText('0 = pas de timeout (illimité). Recommandé pour les modèles locaux.'),
                     ])
                     ->columns(2),
 

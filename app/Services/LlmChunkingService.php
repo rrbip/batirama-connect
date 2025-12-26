@@ -198,17 +198,24 @@ class LlmChunkingService
         $model = $this->settings->getModelFor($agent);
         $prompt = $this->settings->buildPrompt($windowText);
 
-        $response = Http::timeout($this->settings->timeout_seconds)
-            ->post($this->settings->getOllamaUrl() . '/api/generate', [
-                'model' => $model,
-                'prompt' => $prompt,
-                'stream' => false,
-                'format' => 'json',
-                'options' => [
-                    'temperature' => $this->settings->temperature,
-                    'num_predict' => 4096,
-                ],
-            ]);
+        // Timeout: 0 = infini, sinon utiliser la valeur configurée
+        $timeout = $this->settings->timeout_seconds;
+
+        $request = Http::withOptions([
+            'timeout' => $timeout > 0 ? $timeout : 0,
+            'connect_timeout' => 30, // 30s pour la connexion uniquement
+        ]);
+
+        $response = $request->post($this->settings->getOllamaUrl() . '/api/generate', [
+            'model' => $model,
+            'prompt' => $prompt,
+            'stream' => false,
+            'format' => 'json',
+            'options' => [
+                'temperature' => $this->settings->temperature,
+                'num_predict' => 4096,
+            ],
+        ]);
 
         if (!$response->successful()) {
             throw new \RuntimeException('Ollama error: ' . $response->body());

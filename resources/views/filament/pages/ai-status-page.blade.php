@@ -605,18 +605,32 @@ php artisan queue:work --queue=llm-chunking
                                         </span>
                                     </td>
                                     <td class="px-4 py-3">
-                                        <div x-data="{ showFull: false }" class="max-w-md">
+                                        @php
+                                            $fullErrorReport = "Job: {$job['name']}\nQueue: {$job['queue']}\nDate: " . \Carbon\Carbon::parse($job['failed_at'])->format('d/m/Y H:i:s') . "\n\nErreur:\n{$job['error']}" . ($job['full_exception'] ? "\n\nStack trace:\n{$job['full_exception']}" : '');
+                                        @endphp
+                                        <div x-data="{ showFull: false, copied: false, errorReport: @js($fullErrorReport) }" class="max-w-md">
                                             <p class="text-danger-600 dark:text-danger-400 text-xs font-mono break-words">
                                                 {{ $job['error'] }}
                                             </p>
                                             @if($job['full_exception'])
-                                                <button
-                                                    @click="showFull = !showFull"
-                                                    class="text-xs text-primary-600 hover:underline mt-1"
-                                                >
-                                                    <span x-show="!showFull">Voir stacktrace...</span>
-                                                    <span x-show="showFull" x-cloak>Masquer stacktrace</span>
-                                                </button>
+                                                <div class="flex items-center gap-2 mt-1">
+                                                    <button
+                                                        @click="showFull = !showFull"
+                                                        class="text-xs text-primary-600 hover:underline"
+                                                    >
+                                                        <span x-show="!showFull">Voir stacktrace</span>
+                                                        <span x-show="showFull" x-cloak>Masquer stacktrace</span>
+                                                    </button>
+                                                    <span class="text-gray-300 dark:text-gray-600">|</span>
+                                                    <button
+                                                        @click="navigator.clipboard.writeText(errorReport).then(() => { copied = true; setTimeout(() => copied = false, 2000) })"
+                                                        class="text-xs text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 flex items-center gap-1"
+                                                    >
+                                                        <x-heroicon-o-clipboard-document class="w-3 h-3" />
+                                                        <span x-show="!copied">Copier le rapport</span>
+                                                        <span x-show="copied" x-cloak class="text-success-600">Copié !</span>
+                                                    </button>
+                                                </div>
                                                 <pre x-show="showFull" x-cloak class="mt-2 p-2 bg-gray-800 text-green-400 text-xs rounded overflow-x-auto max-h-48 overflow-y-auto">{{ $job['full_exception'] }}</pre>
                                             @endif
                                         </div>
