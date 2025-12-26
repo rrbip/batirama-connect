@@ -72,8 +72,9 @@ class WebCrawlerService
         }
 
         // Vérifier l'URL existante pour cache conditionnel
+        // On n'envoie les headers conditionnels que si le fichier existe en cache
         $existingUrl = WebCrawlUrl::where('url_hash', $this->urlNormalizer->hash($url))->first();
-        if ($existingUrl) {
+        if ($existingUrl && $existingUrl->storage_path && Storage::disk('local')->exists($existingUrl->storage_path)) {
             if ($existingUrl->etag) {
                 $request = $request->withHeaders(['If-None-Match' => $existingUrl->etag]);
             }
