@@ -155,7 +155,7 @@ class DocumentResource extends Resource
                                                 ->color('gray')
                                                 ->url(fn ($record) => $record ? route('admin.documents.view', $record) : null)
                                                 ->openUrlInNewTab()
-                                                ->visible(fn ($record) => $record && in_array($record->document_type, ['pdf']) && Storage::disk('local')->exists($record->storage_path ?? '')),
+                                                ->visible(fn ($record) => $record && in_array($record->document_type, ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp']) && Storage::disk('local')->exists($record->storage_path ?? '')),
                                         ])->columnSpanFull(),
                                     ])
                                     ->visible(fn ($record) => $record !== null)
