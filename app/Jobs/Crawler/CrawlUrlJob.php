@@ -55,6 +55,15 @@ class CrawlUrlJob implements ShouldQueue
 
         $url = $crawlUrl->url;
 
+        // Déterminer les domaines autorisés (utiliser start_url si non défini)
+        $allowedDomains = $this->crawl->allowed_domains ?? [];
+        if (empty($allowedDomains)) {
+            $startDomain = $urlNormalizer->getDomain($this->crawl->start_url);
+            if ($startDomain) {
+                $allowedDomains = [$startDomain];
+            }
+        }
+
         Log::info('Crawling URL', [
             'crawl_id' => $this->crawl->id,
             'url' => $url,
@@ -72,7 +81,7 @@ class CrawlUrlJob implements ShouldQueue
             }
 
             // Vérifier les domaines autorisés
-            if (!$urlNormalizer->isAllowedDomain($url, $this->crawl->allowed_domains ?? [])) {
+            if (!$urlNormalizer->isAllowedDomain($url, $allowedDomains)) {
                 $this->markSkipped('domain_not_allowed');
                 return;
             }
@@ -143,7 +152,7 @@ class CrawlUrlJob implements ShouldQueue
 
             // Si c'est du HTML, extraire les liens
             if (str_contains($contentType, 'text/html')) {
-                $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer);
+                $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer, $allowedDomains);
             }
 
             // Vérifier si doit indexer
@@ -195,7 +204,8 @@ class CrawlUrlJob implements ShouldQueue
         string $html,
         string $baseUrl,
         WebCrawlerService $crawler,
-        UrlNormalizer $urlNormalizer
+        UrlNormalizer $urlNormalizer,
+        array $allowedDomains
     ): void {
         // Vérifier les limites
         if ($this->crawl->pages_discovered >= $this->crawl->max_pages) {
@@ -221,7 +231,7 @@ class CrawlUrlJob implements ShouldQueue
             }
 
             // Vérifier le domaine
-            if (!$urlNormalizer->isAllowedDomain($link, $this->crawl->allowed_domains ?? [])) {
+            if (!$urlNormalizer->isAllowedDomain($link, $allowedDomains)) {
                 continue;
             }
 
