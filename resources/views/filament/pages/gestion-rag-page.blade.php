@@ -93,11 +93,11 @@
                                     id="rebuild_agent_id"
                                     name="agent_id"
                                     required
-                                    class="fi-select-input block w-full border-none py-1.5 pe-8 text-base text-gray-950 transition duration-75 focus:ring-0 disabled:text-gray-500 disabled:[-webkit-text-fill-color:theme(colors.gray.500)] dark:text-white dark:disabled:text-gray-400 sm:text-sm sm:leading-6 bg-transparent"
+                                    class="fi-select-input block w-full rounded-lg border border-gray-300 dark:border-gray-600 py-2 px-3 text-base text-gray-900 dark:text-white bg-white dark:bg-gray-700 transition duration-75 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                                 >
-                                    <option value="">Sélectionner un agent...</option>
+                                    <option value="" class="text-gray-500">Sélectionner un agent...</option>
                                     @foreach(\App\Models\Agent::whereNotNull('qdrant_collection')->get() as $agent)
-                                        <option value="{{ $agent->id }}">{{ $agent->name }}</option>
+                                        <option value="{{ $agent->id }}" class="text-gray-900 dark:text-white bg-white dark:bg-gray-700">{{ $agent->name }}</option>
                                     @endforeach
                                 </select>
                             </div>
