@@ -882,57 +882,59 @@ class AiStatusPage extends Page
                     }
                 }),
 
-            Action::make('process_queue_jobs')
-                ->label('Traiter jobs en file')
+            Action::make('start_queue_workers')
+                ->label('Démarrer les workers')
                 ->icon('heroicon-o-play-circle')
                 ->color('primary')
                 ->visible(fn () => ($this->queueStats['pending'] ?? 0) > 0)
                 ->requiresConfirmation()
-                ->modalHeading('Traiter les jobs en file d\'attente')
-                ->modalDescription('Cette action va exécuter tous les jobs en attente de manière synchrone. Cela peut prendre du temps, surtout pour les jobs LLM chunking.')
+                ->modalHeading('Démarrer les workers de queue')
+                ->modalDescription('Cette action va démarrer des workers en arrière-plan pour traiter les jobs en attente.')
                 ->action(function () {
-                    $processed = 0;
-                    $errors = 0;
-                    $maxJobs = 50; // Limite de sécurité
+                    $queuesWithJobs = array_keys($this->queueStats['by_queue'] ?? []);
 
-                    while ($processed < $maxJobs) {
-                        $job = DB::table('jobs')->orderBy('id')->first();
+                    if (empty($queuesWithJobs)) {
+                        $queuesWithJobs = ['default'];
+                    }
 
-                        if (!$job) {
-                            break;
-                        }
+                    $started = [];
+                    $errors = [];
+                    $basePath = base_path();
 
+                    foreach ($queuesWithJobs as $queue) {
                         try {
-                            // Exécuter le job via artisan
-                            \Artisan::call('queue:work', [
-                                '--once' => true,
-                                '--queue' => $job->queue,
-                            ]);
-                            $processed++;
+                            // Démarrer un worker en arrière-plan avec nohup
+                            $command = "cd {$basePath} && nohup php artisan queue:work --queue={$queue} --stop-when-empty > /dev/null 2>&1 &";
+                            exec($command, $output, $returnCode);
+
+                            if ($returnCode === 0) {
+                                $started[] = $queue;
+                            } else {
+                                $errors[] = $queue;
+                            }
                         } catch (\Exception $e) {
-                            $errors++;
-                            \Log::error('Queue job processing failed', [
-                                'job_id' => $job->id,
-                                'queue' => $job->queue,
+                            $errors[] = $queue;
+                            \Log::error('Failed to start queue worker', [
+                                'queue' => $queue,
                                 'error' => $e->getMessage(),
                             ]);
-                            // Supprimer le job pour éviter une boucle infinie
-                            DB::table('jobs')->where('id', $job->id)->delete();
                         }
                     }
 
+                    // Attendre un peu pour voir l'effet
+                    sleep(1);
                     $this->refreshStatus();
 
-                    if ($errors > 0) {
+                    if (!empty($errors)) {
                         Notification::make()
-                            ->title('Traitement partiel')
-                            ->body("{$processed} job(s) traité(s), {$errors} erreur(s)")
+                            ->title('Démarrage partiel')
+                            ->body("Workers démarrés: " . implode(', ', $started) . "\nÉchecs: " . implode(', ', $errors))
                             ->warning()
                             ->send();
                     } else {
                         Notification::make()
-                            ->title('Traitement terminé')
-                            ->body("{$processed} job(s) traité(s) avec succès")
+                            ->title('Workers démarrés')
+                            ->body("Workers lancés pour: " . implode(', ', $started) . "\n(--stop-when-empty activé)")
                             ->success()
                             ->send();
                     }
