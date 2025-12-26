@@ -35,6 +35,7 @@ class AiStatusPage extends Page
 
     public array $services = [];
     public array $queueStats = [];
+    public array $pendingJobs = [];
     public array $documentStats = [];
     public array $failedDocuments = [];
     public array $failedJobs = [];
@@ -61,6 +62,7 @@ class AiStatusPage extends Page
     {
         $this->services = $this->checkServices();
         $this->queueStats = $this->getQueueStats();
+        $this->pendingJobs = $this->getPendingJobs();
         $this->documentStats = $this->getDocumentStats();
         $this->failedDocuments = $this->getFailedDocuments();
         $this->failedJobs = $this->getFailedJobs();
@@ -322,18 +324,72 @@ class AiStatusPage extends Page
             $pending = DB::table('jobs')->count();
             $failed = DB::table('failed_jobs')->count();
 
+            // Stats par queue
+            $byQueue = DB::table('jobs')
+                ->select('queue', DB::raw('count(*) as count'))
+                ->groupBy('queue')
+                ->pluck('count', 'queue')
+                ->toArray();
+
             return [
                 'pending' => $pending,
                 'failed' => $failed,
                 'connection' => config('queue.default'),
+                'by_queue' => $byQueue,
             ];
         } catch (\Exception $e) {
             return [
                 'pending' => 0,
                 'failed' => 0,
                 'connection' => config('queue.default'),
+                'by_queue' => [],
                 'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Récupère les jobs en attente avec leurs détails
+     */
+    protected function getPendingJobs(): array
+    {
+        try {
+            return DB::table('jobs')
+                ->orderBy('created_at')
+                ->limit(20)
+                ->get()
+                ->map(function ($job) {
+                    $payload = json_decode($job->payload, true);
+                    $displayName = $payload['displayName'] ?? 'Job inconnu';
+                    $data = $payload['data']['command'] ?? null;
+
+                    // Essayer d'extraire des infos utiles du job sérialisé
+                    $documentInfo = null;
+                    if ($data && str_contains($data, 'Document')) {
+                        if (preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                            $documentInfo = "Document #{$matches[1]}";
+                        }
+                    }
+
+                    $waitTime = now()->timestamp - $job->created_at;
+
+                    return [
+                        'id' => $job->id,
+                        'name' => class_basename($displayName),
+                        'full_name' => $displayName,
+                        'queue' => $job->queue,
+                        'attempts' => $job->attempts,
+                        'document' => $documentInfo,
+                        'created_at' => date('H:i:s', $job->created_at),
+                        'wait_time' => $waitTime,
+                        'wait_time_human' => $waitTime > 60
+                            ? gmdate('H:i:s', $waitTime)
+                            : "{$waitTime}s",
+                    ];
+                })
+                ->toArray();
+        } catch (\Exception $e) {
+            return [];
         }
     }
 

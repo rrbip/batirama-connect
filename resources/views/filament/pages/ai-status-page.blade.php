@@ -96,14 +96,30 @@
                     </div>
                 </div>
 
+                {{-- Stats par queue --}}
+                @if(!empty($queueStats['by_queue']))
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        @foreach($queueStats['by_queue'] as $queue => $count)
+                            <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full {{
+                                $queue === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                ($queue === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                            }}">
+                                {{ $queue }}: {{ $count }}
+                            </span>
+                        @endforeach
+                    </div>
+                @endif
+
                 @if(($queueStats['connection'] ?? 'sync') !== 'sync')
                     <div class="mt-4 p-3 bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700 rounded-lg">
                         <div class="flex items-start gap-2">
                             <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
                             <div class="text-sm text-warning-700 dark:text-warning-300">
-                                <strong>Driver database actif.</strong> Assurez-vous qu'un worker est en cours d'exécution:
+                                <strong>Driver database actif.</strong> Assurez-vous que les workers sont en cours d'exécution:
                                 <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-                                    php artisan queue:work --daemon
+php artisan queue:work --queue=default
+php artisan queue:work --queue=llm-chunking
                                 </code>
                             </div>
                         </div>
@@ -192,6 +208,79 @@
                 @endif
             </x-filament::section>
         </div>
+
+        {{-- Pending Jobs List --}}
+        @if(count($pendingJobs) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-clock class="w-5 h-5" />
+                        Jobs en attente ({{ count($pendingJobs) }})
+                    </div>
+                </x-slot>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Job</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Queue</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Document</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Créé à</th>
+                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Attente</th>
+                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Essais</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                            @foreach($pendingJobs as $job)
+                                <tr class="{{ $job['wait_time'] > 300 ? 'bg-warning-50 dark:bg-warning-900/10' : '' }}">
+                                    <td class="px-4 py-3">
+                                        <span class="font-medium text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{
+                                            $job['queue'] === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                            ($job['queue'] === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                        }}">
+                                            {{ $job['queue'] }}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400">
+                                        {{ $job['document'] ?? '-' }}
+                                    </td>
+                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
+                                        {{ $job['created_at'] }}
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span class="{{ $job['wait_time'] > 300 ? 'text-warning-600 dark:text-warning-400 font-medium' : 'text-gray-500 dark:text-gray-400' }}">
+                                            {{ $job['wait_time_human'] }}
+                                        </span>
+                                    </td>
+                                    <td class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">
+                                        {{ $job['attempts'] }}
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+
+                @if(!empty($queueStats['by_queue']['llm-chunking']))
+                    <div class="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
+                        <div class="flex items-start gap-2">
+                            <x-heroicon-o-cpu-chip class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" />
+                            <div class="text-sm text-purple-700 dark:text-purple-300">
+                                <strong>Jobs LLM Chunking en attente.</strong> Démarrez le worker dédié:
+                                <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
+                                    php artisan queue:work --queue=llm-chunking
+                                </code>
+                            </div>
+                        </div>
+                    </div>
+                @endif
+            </x-filament::section>
+        @endif
 
         {{-- AI Messages Stats --}}
         @if(!isset($aiMessageStats['error']))
