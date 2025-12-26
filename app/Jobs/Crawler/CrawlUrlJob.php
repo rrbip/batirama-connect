@@ -86,6 +86,7 @@ class CrawlUrlJob implements ShouldQueue
             // Vérifier robots.txt
             if (! $crawler->isAllowedByRobots($url, $this->crawl)) {
                 $this->markError('robots_txt');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -93,6 +94,7 @@ class CrawlUrlJob implements ShouldQueue
             // Vérifier les domaines autorisés
             if (! $urlNormalizer->isAllowedDomain($url, $allowedDomains)) {
                 $this->markError('domain_not_allowed');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -108,6 +110,7 @@ class CrawlUrlJob implements ShouldQueue
 
             if (! $result['success']) {
                 $this->markError($result['error'] ?? 'Unknown fetch error');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -141,6 +144,7 @@ class CrawlUrlJob implements ShouldQueue
             // Vérifier le code HTTP
             if ($result['status'] >= 400) {
                 $this->markError("HTTP {$result['status']}");
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -203,6 +207,7 @@ class CrawlUrlJob implements ShouldQueue
             $contentType = $result['content_type'] ?? '';
             if (! $crawler->isSupportedContentType($contentType)) {
                 $this->markError('unsupported_type');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -211,6 +216,7 @@ class CrawlUrlJob implements ShouldQueue
             $maxSize = 10 * 1024 * 1024; // 10 Mo
             if ($result['content_length'] > $maxSize) {
                 $this->markError('content_too_large');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -410,7 +416,10 @@ class CrawlUrlJob implements ShouldQueue
     }
 
     /**
-     * Vérifie si le crawl est terminé
+     * Vérifie si le crawl est terminé.
+     *
+     * Un crawl est terminé quand il n'y a plus d'URLs en attente (pending)
+     * ni en cours de traitement (fetching).
      */
     private function checkCrawlCompletion(): void
     {
@@ -422,25 +431,21 @@ class CrawlUrlJob implements ShouldQueue
             return;
         }
 
-        $pendingCount = WebCrawlUrlCrawl::where('crawl_id', $this->crawl->id)
+        // Compter les URLs en attente ou en cours de traitement
+        // Les jobs en cours ont leur entrée marquée 'fetching' au démarrage
+        // Les jobs en queue ont leur entrée marquée 'pending'
+        $activeCount = WebCrawlUrlCrawl::where('crawl_id', $this->crawl->id)
             ->whereIn('status', ['pending', 'fetching'])
-            ->count();
-
-        // Vérifier aussi qu'il y a des jobs en queue pour ce crawl
-        $queuedJobsCount = \Illuminate\Support\Facades\DB::table('jobs')
-            ->where('payload', 'like', '%CrawlUrlJob%')
-            ->where('payload', 'like', '%"crawl_id":' . $this->crawl->id . '%')
             ->count();
 
         Log::debug('Checking crawl completion', [
             'crawl_id' => $this->crawl->id,
-            'pending_entries' => $pendingCount,
-            'queued_jobs' => $queuedJobsCount,
+            'active_entries' => $activeCount,
             'pages_discovered' => $this->crawl->pages_discovered,
             'pages_crawled' => $this->crawl->pages_crawled,
         ]);
 
-        if ($pendingCount === 0 && $queuedJobsCount === 0) {
+        if ($activeCount === 0) {
             $this->crawl->update([
                 'status' => 'completed',
                 'completed_at' => now(),
@@ -448,6 +453,7 @@ class CrawlUrlJob implements ShouldQueue
 
             Log::info('Web crawl completed', [
                 'crawl_id' => $this->crawl->id,
+                'pages_discovered' => $this->crawl->pages_discovered,
                 'pages_crawled' => $this->crawl->pages_crawled,
             ]);
         }
