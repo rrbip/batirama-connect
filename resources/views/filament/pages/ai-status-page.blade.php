@@ -209,94 +209,128 @@ php artisan queue:work --queue=llm-chunking
             </x-filament::section>
         </div>
 
-        {{-- Pending Jobs List --}}
+        {{-- Pending Jobs by Queue --}}
         @if(count($pendingJobs) > 0)
             <x-filament::section>
                 <x-slot name="heading">
                     <div class="flex items-center gap-2">
-                        <x-heroicon-o-clock class="w-5 h-5" />
-                        Jobs en attente ({{ count($pendingJobs) }})
+                        <x-heroicon-o-queue-list class="w-5 h-5" />
+                        Files de traitement ({{ count($pendingJobs) }} queue(s) active(s))
                     </div>
                 </x-slot>
 
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="bg-gray-50 dark:bg-gray-800">
-                            <tr>
-                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Job</th>
-                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Queue</th>
-                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Statut</th>
-                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Document</th>
-                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Attente</th>
-                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Essais</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                            @foreach($pendingJobs as $job)
-                                <tr class="{{ $job['status'] === 'stuck' ? 'bg-danger-50 dark:bg-danger-900/10' : ($job['status'] === 'waiting' && $job['wait_time'] > 300 ? 'bg-warning-50 dark:bg-warning-900/10' : '') }}">
-                                    <td class="px-4 py-3">
-                                        <span class="font-medium text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs font-medium rounded-full {{
-                                            $job['queue'] === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
-                                            ($job['queue'] === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                            'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
-                                        }}">
-                                            {{ $job['queue'] }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center">
-                                        <span class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full {{
-                                            $job['status'] === 'processing' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                            ($job['status'] === 'stuck' ? 'bg-danger-100 text-danger-700 dark:bg-danger-800 dark:text-danger-300' :
-                                            'bg-warning-100 text-warning-700 dark:bg-warning-800 dark:text-warning-300')
-                                        }}">
-                                            @if($job['status'] === 'processing')
-                                                <x-heroicon-s-arrow-path class="w-3 h-3 animate-spin" />
-                                            @elseif($job['status'] === 'stuck')
-                                                <x-heroicon-s-exclamation-triangle class="w-3 h-3" />
-                                            @else
-                                                <x-heroicon-s-clock class="w-3 h-3" />
-                                            @endif
-                                            {{ $job['status_label'] }}
-                                        </span>
-                                        @if($job['processing_time'])
-                                            <div class="text-xs text-gray-500 mt-1">
-                                                Depuis {{ $job['processing_time'] }}
+                <div class="space-y-4">
+                    @foreach($pendingJobs as $queue)
+                        <div class="border rounded-lg overflow-hidden {{
+                            $queue['status'] === 'stuck' ? 'border-danger-300 dark:border-danger-700' :
+                            ($queue['status'] === 'processing' ? 'border-primary-300 dark:border-primary-700' :
+                            'border-warning-300 dark:border-warning-700')
+                        }}">
+                            {{-- Queue Header --}}
+                            <div class="px-4 py-3 flex items-center justify-between {{
+                                $queue['status'] === 'stuck' ? 'bg-danger-50 dark:bg-danger-900/20' :
+                                ($queue['status'] === 'processing' ? 'bg-primary-50 dark:bg-primary-900/20' :
+                                'bg-warning-50 dark:bg-warning-900/20')
+                            }}">
+                                <div class="flex items-center gap-3">
+                                    <span class="px-2.5 py-1 text-sm font-semibold rounded-full {{
+                                        $queue['name'] === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                        ($queue['name'] === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                        'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                    }}">
+                                        {{ $queue['name'] }}
+                                    </span>
+
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full {{
+                                        $queue['status'] === 'processing' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                        ($queue['status'] === 'stuck' ? 'bg-danger-100 text-danger-700 dark:bg-danger-800 dark:text-danger-300' :
+                                        'bg-warning-100 text-warning-700 dark:bg-warning-800 dark:text-warning-300')
+                                    }}">
+                                        @if($queue['status'] === 'processing')
+                                            <x-heroicon-s-arrow-path class="w-3 h-3 animate-spin" />
+                                        @elseif($queue['status'] === 'stuck')
+                                            <x-heroicon-s-exclamation-triangle class="w-3 h-3" />
+                                        @else
+                                            <x-heroicon-s-clock class="w-3 h-3" />
+                                        @endif
+                                        {{ $queue['status_label'] }}
+                                    </span>
+                                </div>
+
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {{ $queue['total'] }} job(s) en file
+                                </span>
+                            </div>
+
+                            {{-- Queue Content --}}
+                            <div class="px-4 py-3 bg-white dark:bg-gray-900">
+                                {{-- Job en cours --}}
+                                @if($queue['processing'])
+                                    <div class="mb-3 p-3 rounded-lg {{
+                                        $queue['processing']['is_stuck'] ? 'bg-danger-50 dark:bg-danger-900/20 border border-danger-200 dark:border-danger-700' :
+                                        'bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700'
+                                    }}">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                @if($queue['processing']['is_stuck'])
+                                                    <x-heroicon-s-exclamation-triangle class="w-5 h-5 text-danger-500" />
+                                                @else
+                                                    <x-heroicon-s-arrow-path class="w-5 h-5 text-primary-500 animate-spin" />
+                                                @endif
+                                                <div>
+                                                    <span class="font-medium text-gray-900 dark:text-gray-100">{{ $queue['processing']['name'] }}</span>
+                                                    @if($queue['processing']['document'])
+                                                        <span class="text-gray-500 dark:text-gray-400 text-sm ml-2">{{ $queue['processing']['document'] }}</span>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="text-sm font-medium {{ $queue['processing']['is_stuck'] ? 'text-danger-600 dark:text-danger-400' : 'text-primary-600 dark:text-primary-400' }}">
+                                                    En traitement depuis {{ $queue['processing']['processing_time'] }}
+                                                </div>
+                                                @if($queue['processing']['is_stuck'])
+                                                    <div class="text-xs text-danger-500">Worker probablement crashé</div>
+                                                @endif
+                                            </div>
+                                        </div>
+                                    </div>
+                                @else
+                                    <div class="mb-3 p-3 rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700">
+                                        <div class="flex items-center gap-2 text-warning-700 dark:text-warning-300">
+                                            <x-heroicon-s-pause-circle class="w-5 h-5" />
+                                            <span class="text-sm font-medium">Aucun worker actif sur cette queue</span>
+                                        </div>
+                                    </div>
+                                @endif
+
+                                {{-- Jobs en attente --}}
+                                @if(count($queue['waiting']) > 0)
+                                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                                        Prochains en attente :
+                                    </div>
+                                    <div class="space-y-1">
+                                        @foreach($queue['waiting'] as $job)
+                                            <div class="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-800 rounded text-sm">
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
+                                                    @if($job['document'])
+                                                        <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['document'] }}</span>
+                                                    @endif
+                                                </div>
+                                                <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['wait_time_human'] }}</span>
+                                            </div>
+                                        @endforeach
+                                        @if($queue['total'] > count($queue['waiting']) + ($queue['processing'] ? 1 : 0))
+                                            <div class="text-xs text-gray-500 dark:text-gray-400 text-center py-1">
+                                                + {{ $queue['total'] - count($queue['waiting']) - ($queue['processing'] ? 1 : 0) }} autres en attente...
                                             </div>
                                         @endif
-                                    </td>
-                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400">
-                                        {{ $job['document'] ?? '-' }}
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <span class="{{ $job['wait_time'] > 300 ? 'text-warning-600 dark:text-warning-400 font-medium' : 'text-gray-500 dark:text-gray-400' }}">
-                                            {{ $job['wait_time_human'] }}
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 text-center text-gray-500 dark:text-gray-400">
-                                        {{ $job['attempts'] }}
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
-                </div>
-
-                @if(!empty($queueStats['by_queue']['llm-chunking']))
-                    <div class="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-700 rounded-lg">
-                        <div class="flex items-start gap-2">
-                            <x-heroicon-o-cpu-chip class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" />
-                            <div class="text-sm text-purple-700 dark:text-purple-300">
-                                <strong>Jobs LLM Chunking en attente.</strong> Démarrez le worker dédié:
-                                <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-                                    php artisan queue:work --queue=llm-chunking
-                                </code>
+                                    </div>
+                                @endif
                             </div>
                         </div>
-                    </div>
-                @endif
+                    @endforeach
+                </div>
             </x-filament::section>
         @endif
 

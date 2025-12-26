@@ -349,72 +349,81 @@ class AiStatusPage extends Page
     }
 
     /**
-     * Récupère les jobs en attente avec leurs détails
+     * Récupère les détails des jobs par queue
      */
     protected function getPendingJobs(): array
     {
         try {
-            return DB::table('jobs')
-                ->orderBy('created_at')
-                ->limit(20)
-                ->get()
-                ->map(function ($job) {
-                    $payload = json_decode($job->payload, true);
-                    $displayName = $payload['displayName'] ?? 'Job inconnu';
-                    $data = $payload['data']['command'] ?? null;
+            $jobs = DB::table('jobs')->orderBy('created_at')->get();
 
-                    // Essayer d'extraire des infos utiles du job sérialisé
-                    $documentInfo = null;
-                    if ($data && str_contains($data, 'Document')) {
-                        if (preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
-                            $documentInfo = "Document #{$matches[1]}";
-                        }
+            // Grouper par queue
+            $queues = [];
+
+            foreach ($jobs as $job) {
+                $queue = $job->queue;
+
+                if (!isset($queues[$queue])) {
+                    $queues[$queue] = [
+                        'name' => $queue,
+                        'total' => 0,
+                        'processing' => null,
+                        'waiting' => [],
+                        'status' => 'waiting', // waiting, processing, stuck
+                        'status_label' => 'En attente',
+                    ];
+                }
+
+                $queues[$queue]['total']++;
+
+                $payload = json_decode($job->payload, true);
+                $displayName = $payload['displayName'] ?? 'Job inconnu';
+
+                // Extraire info document
+                $data = $payload['data']['command'] ?? null;
+                $documentInfo = null;
+                if ($data && str_contains($data, 'Document')) {
+                    if (preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                        $documentInfo = "Document #{$matches[1]}";
                     }
+                }
 
-                    $waitTime = now()->timestamp - $job->created_at;
+                $isReserved = !empty($job->reserved_at);
+                $reservedTime = $isReserved ? (now()->timestamp - $job->reserved_at) : 0;
+                $waitTime = now()->timestamp - $job->created_at;
 
-                    // Déterminer le vrai statut du job
-                    // reserved_at = timestamp quand un worker a pris le job
-                    $isReserved = !empty($job->reserved_at);
-                    $reservedTime = $isReserved ? (now()->timestamp - $job->reserved_at) : 0;
+                $jobData = [
+                    'id' => $job->id,
+                    'name' => class_basename($displayName),
+                    'document' => $documentInfo,
+                    'wait_time_human' => $waitTime > 60 ? gmdate('H:i:s', $waitTime) : "{$waitTime}s",
+                    'attempts' => $job->attempts,
+                ];
 
-                    // Si réservé depuis plus de 5 minutes, probablement bloqué
-                    $isStuck = $isReserved && $reservedTime > 300;
+                if ($isReserved) {
+                    // Job en cours de traitement
+                    $isStuck = $reservedTime > 300;
+
+                    $queues[$queue]['processing'] = array_merge($jobData, [
+                        'processing_time' => $reservedTime > 60 ? gmdate('H:i:s', $reservedTime) : "{$reservedTime}s",
+                        'is_stuck' => $isStuck,
+                    ]);
 
                     if ($isStuck) {
-                        $status = 'stuck';
-                        $statusLabel = 'Bloqué';
-                        $statusColor = 'danger';
-                    } elseif ($isReserved) {
-                        $status = 'processing';
-                        $statusLabel = 'En cours';
-                        $statusColor = 'primary';
+                        $queues[$queue]['status'] = 'stuck';
+                        $queues[$queue]['status_label'] = 'Bloqué';
                     } else {
-                        $status = 'waiting';
-                        $statusLabel = 'En attente';
-                        $statusColor = 'warning';
+                        $queues[$queue]['status'] = 'processing';
+                        $queues[$queue]['status_label'] = 'En cours';
                     }
+                } else {
+                    // Job en attente - garder seulement les 5 premiers
+                    if (count($queues[$queue]['waiting']) < 5) {
+                        $queues[$queue]['waiting'][] = $jobData;
+                    }
+                }
+            }
 
-                    return [
-                        'id' => $job->id,
-                        'name' => class_basename($displayName),
-                        'full_name' => $displayName,
-                        'queue' => $job->queue,
-                        'attempts' => $job->attempts,
-                        'document' => $documentInfo,
-                        'created_at' => date('H:i:s', $job->created_at),
-                        'wait_time' => $waitTime,
-                        'wait_time_human' => $waitTime > 60
-                            ? gmdate('H:i:s', $waitTime)
-                            : "{$waitTime}s",
-                        'status' => $status,
-                        'status_label' => $statusLabel,
-                        'status_color' => $statusColor,
-                        'reserved_at' => $isReserved ? date('H:i:s', $job->reserved_at) : null,
-                        'processing_time' => $isReserved ? ($reservedTime > 60 ? gmdate('H:i:s', $reservedTime) : "{$reservedTime}s") : null,
-                    ];
-                })
-                ->toArray();
+            return array_values($queues);
         } catch (\Exception $e) {
             return [];
         }
