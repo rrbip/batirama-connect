@@ -150,6 +150,7 @@ class PromptBuilder
             $payload = $result['payload'] ?? [];
             $documentTitle = $payload['document_title'] ?? null;
             $chunkCategory = $payload['chunk_category'] ?? null;
+            $summary = $payload['summary'] ?? null;
 
             // Construire l'en-tête avec les métadonnées
             $header = "### Source {$num} (pertinence: {$score}%)";
@@ -162,6 +163,11 @@ class PromptBuilder
             // Ajouter le titre du document si présent
             if ($documentTitle) {
                 $header .= "\n**Document:** {$documentTitle}";
+            }
+
+            // Ajouter le résumé si présent (aide l'IA à comprendre rapidement)
+            if ($summary) {
+                $header .= "\n**Résumé:** {$summary}";
             }
 
             $contextParts[] = "{$header}\n{$content}";
