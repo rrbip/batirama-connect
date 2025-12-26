@@ -259,6 +259,8 @@ class DocumentExtractorService
 
     /**
      * Extrait le texte d'une image avec Tesseract OCR
+     * Utilise shell_exec directement car la librairie TesseractOCR a des problèmes
+     * avec proc_open dans certains environnements PHP-FPM
      */
     private function extractFromImage(string $path): string
     {
@@ -272,17 +274,28 @@ class DocumentExtractorService
         Log::info('Extracting text from image with OCR', ['path' => $path]);
 
         try {
-            $ocr = new TesseractOCR($path);
+            $tesseract = $this->findTesseractExecutable();
+            $escapedPath = escapeshellarg($path);
 
-            // Spécifier le chemin du binaire tesseract (nécessaire dans les environnements Docker)
-            $ocr->executable($this->findTesseractExecutable());
+            // Exécuter tesseract directement via shell_exec
+            // -l fra+eng : français + anglais
+            // --psm 3 : segmentation automatique
+            // --oem 3 : LSTM + Legacy engine
+            // stdout : sortie vers stdout au lieu d'un fichier
+            $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
 
-            // Configurer Tesseract pour le français
-            $ocr->lang('fra', 'eng'); // Français + Anglais comme fallback
-            $ocr->psm(3); // Mode de segmentation automatique
-            $ocr->oem(3); // LSTM + Legacy engine
+            Log::info('Running OCR command', ['command' => $command]);
 
-            $text = $ocr->run();
+            $text = shell_exec($command);
+
+            if ($text === null) {
+                throw new \RuntimeException("La commande tesseract a échoué");
+            }
+
+            // Vérifier si c'est un message d'erreur
+            if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
+                throw new \RuntimeException("Erreur Tesseract: " . trim($text));
+            }
 
             Log::info('OCR extraction successful', [
                 'path' => $path,
