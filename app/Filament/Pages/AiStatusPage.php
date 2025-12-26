@@ -882,6 +882,62 @@ class AiStatusPage extends Page
                     }
                 }),
 
+            Action::make('process_queue_jobs')
+                ->label('Traiter jobs en file')
+                ->icon('heroicon-o-play-circle')
+                ->color('primary')
+                ->visible(fn () => ($this->queueStats['pending'] ?? 0) > 0)
+                ->requiresConfirmation()
+                ->modalHeading('Traiter les jobs en file d\'attente')
+                ->modalDescription('Cette action va exécuter tous les jobs en attente de manière synchrone. Cela peut prendre du temps, surtout pour les jobs LLM chunking.')
+                ->action(function () {
+                    $processed = 0;
+                    $errors = 0;
+                    $maxJobs = 50; // Limite de sécurité
+
+                    while ($processed < $maxJobs) {
+                        $job = DB::table('jobs')->orderBy('id')->first();
+
+                        if (!$job) {
+                            break;
+                        }
+
+                        try {
+                            // Exécuter le job via artisan
+                            \Artisan::call('queue:work', [
+                                '--once' => true,
+                                '--queue' => $job->queue,
+                            ]);
+                            $processed++;
+                        } catch (\Exception $e) {
+                            $errors++;
+                            \Log::error('Queue job processing failed', [
+                                'job_id' => $job->id,
+                                'queue' => $job->queue,
+                                'error' => $e->getMessage(),
+                            ]);
+                            // Supprimer le job pour éviter une boucle infinie
+                            DB::table('jobs')->where('id', $job->id)->delete();
+                        }
+                    }
+
+                    $this->refreshStatus();
+
+                    if ($errors > 0) {
+                        Notification::make()
+                            ->title('Traitement partiel')
+                            ->body("{$processed} job(s) traité(s), {$errors} erreur(s)")
+                            ->warning()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Traitement terminé')
+                            ->body("{$processed} job(s) traité(s) avec succès")
+                            ->success()
+                            ->send();
+                    }
+                }),
+
             Action::make('retry_all_failed')
                 ->label('Relancer tous les échecs')
                 ->icon('heroicon-o-arrow-path')
