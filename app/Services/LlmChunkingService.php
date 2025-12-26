@@ -53,10 +53,17 @@ class LlmChunkingService
         $allChunks = [];
         $chunkIndex = 0;
         $errors = [];
+        $llmResponses = [];
 
         foreach ($windows as $windowIndex => $window) {
             try {
-                $result = $this->processWindow($window['text'], $document->agent);
+                $rawResult = $this->processWindowWithRaw($window['text'], $document->agent);
+                $result = $rawResult['parsed'];
+                $llmResponses[] = [
+                    'window_index' => $windowIndex,
+                    'raw_response' => $rawResult['raw'],
+                    'parsed_chunks' => count($result['chunks']),
+                ];
 
                 // Créer les nouvelles catégories suggérées
                 foreach ($result['new_categories'] as $newCat) {
@@ -125,10 +132,19 @@ class LlmChunkingService
             }
         }
 
-        // Mettre à jour le document
+        // Mettre à jour le document avec les métadonnées LLM
+        $existingMetadata = $document->extraction_metadata ?? [];
         $document->update([
             'chunk_count' => count($allChunks),
             'chunk_strategy' => 'llm_assisted',
+            'extraction_metadata' => array_merge($existingMetadata, [
+                'llm_chunking' => [
+                    'processed_at' => now()->toIso8601String(),
+                    'window_count' => count($windows),
+                    'model' => $this->settings->getModelFor($document->agent),
+                    'responses' => $llmResponses,
+                ],
+            ]),
         ]);
 
         // Fusionner les chunks consécutifs de même catégorie
@@ -288,6 +304,14 @@ class LlmChunkingService
      */
     public function processWindow(string $windowText, ?Agent $agent = null): array
     {
+        return $this->processWindowWithRaw($windowText, $agent)['parsed'];
+    }
+
+    /**
+     * Traite une fenêtre de texte via Ollama et retourne aussi la réponse brute
+     */
+    public function processWindowWithRaw(string $windowText, ?Agent $agent = null): array
+    {
         $model = $this->settings->getModelFor($agent);
         $prompt = $this->settings->buildPrompt($windowText);
 
@@ -318,7 +342,10 @@ class LlmChunkingService
         $content = $data['response'] ?? '';
 
         // Parser le JSON de la réponse
-        return $this->parseResponse($content);
+        return [
+            'raw' => $content,
+            'parsed' => $this->parseResponse($content),
+        ];
     }
 
     /**

@@ -233,6 +233,16 @@ class DocumentResource extends Resource
                                                 default => '-',
                                             }),
 
+                                        Forms\Components\Placeholder::make('extraction_method_display')
+                                            ->label('Méthode utilisée')
+                                            ->content(fn ($record) => match ($record?->extraction_method) {
+                                                'auto' => 'Automatique',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                                null => '-',
+                                                default => $record?->extraction_method,
+                                            }),
+
                                         Forms\Components\Placeholder::make('extracted_at_display')
                                             ->label('Extrait le')
                                             ->content(fn ($record) => $record?->extracted_at?->format('d/m/Y H:i') ?? '-'),
@@ -245,7 +255,7 @@ class DocumentResource extends Resource
                                             ->label('Taille')
                                             ->content(fn ($record) => $record?->getFileSizeForHumans() ?? '-'),
                                     ])
-                                    ->columns(4),
+                                    ->columns(5),
 
                                 Forms\Components\Section::make('Texte extrait')
                                     ->schema([
@@ -295,6 +305,74 @@ class DocumentResource extends Resource
                                             ->default('sentence'),
                                     ])
                                     ->columns(3),
+
+                                Forms\Components\Section::make('Réponses LLM (données brutes)')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('llm_chunking_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $llmData = $metadata['llm_chunking'] ?? null;
+
+                                                if (!$llmData) {
+                                                    return 'Aucune donnée LLM disponible';
+                                                }
+
+                                                $html = '<div class="space-y-2 mb-4">';
+                                                $html .= '<div class="text-sm"><strong>Modèle:</strong> ' . e($llmData['model'] ?? '-') . '</div>';
+                                                $html .= '<div class="text-sm"><strong>Traité le:</strong> ' . ($llmData['processed_at'] ? \Carbon\Carbon::parse($llmData['processed_at'])->format('d/m/Y H:i') : '-') . '</div>';
+                                                $html .= '<div class="text-sm"><strong>Fenêtres:</strong> ' . ($llmData['window_count'] ?? 0) . '</div>';
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Placeholder::make('llm_raw_responses')
+                                            ->label('Réponses JSON brutes')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $llmData = $metadata['llm_chunking'] ?? null;
+                                                $responses = $llmData['responses'] ?? [];
+
+                                                if (empty($responses)) {
+                                                    return 'Aucune réponse disponible';
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+                                                foreach ($responses as $resp) {
+                                                    $windowIndex = $resp['window_index'] ?? 0;
+                                                    $rawResponse = $resp['raw_response'] ?? '';
+                                                    $parsedChunks = $resp['parsed_chunks'] ?? 0;
+
+                                                    // Formatter le JSON pour l'affichage
+                                                    $formattedJson = $rawResponse;
+                                                    $decoded = json_decode($rawResponse, true);
+                                                    if ($decoded !== null) {
+                                                        $formattedJson = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+                                                    }
+
+                                                    $html .= sprintf(
+                                                        '<div class="border border-gray-200 dark:border-gray-700 rounded-lg">
+                                                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between">
+                                                                <span class="font-medium">Fenêtre #%d</span>
+                                                                <span class="text-sm text-gray-500">%d chunks générés</span>
+                                                            </div>
+                                                            <pre class="p-3 text-xs overflow-x-auto max-h-64 overflow-y-auto bg-gray-900 text-gray-100 rounded-b-lg"><code>%s</code></pre>
+                                                        </div>',
+                                                        $windowIndex,
+                                                        $parsedChunks,
+                                                        e($formattedJson)
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsed()
+                                    ->visible(fn ($record) => $record?->chunk_strategy === 'llm_assisted'),
                             ])
                             ->visible(fn ($record) => $record !== null),
 
