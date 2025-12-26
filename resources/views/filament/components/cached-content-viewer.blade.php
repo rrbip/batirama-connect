@@ -43,9 +43,32 @@
     {{-- Contenu --}}
     @if($isHtml)
         {{-- HTML: Aperçu iframe ou code source --}}
+        @php
+            // Injecter une balise <base> pour que les URLs relatives fonctionnent
+            $parsedUrl = parse_url($url);
+            $baseUrl = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '');
+            if (!empty($parsedUrl['port'])) {
+                $baseUrl .= ':' . $parsedUrl['port'];
+            }
+            $baseTag = '<base href="' . $baseUrl . '/" target="_blank">';
+
+            // Injecter après <head> ou au début du document
+            if (stripos($content, '<head>') !== false) {
+                $htmlWithBase = preg_replace('/<head>/i', '<head>' . $baseTag, $content, 1);
+            } elseif (stripos($content, '<head ') !== false) {
+                $htmlWithBase = preg_replace('/<head([^>]*)>/i', '<head$1>' . $baseTag, $content, 1);
+            } elseif (stripos($content, '<html') !== false) {
+                $htmlWithBase = preg_replace('/<html([^>]*)>/i', '<html$1><head>' . $baseTag . '</head>', $content, 1);
+            } else {
+                $htmlWithBase = $baseTag . $content;
+            }
+        @endphp
         <div x-show="viewMode === 'preview'" class="border rounded-lg overflow-hidden dark:border-gray-700">
+            <div class="bg-blue-50 dark:bg-blue-900/20 px-3 py-1 text-xs text-blue-600 dark:text-blue-400 border-b dark:border-gray-700">
+                Les ressources (CSS, images) sont chargées depuis {{ $baseUrl }}
+            </div>
             <iframe
-                srcdoc="{!! e($content) !!}"
+                srcdoc="{{ $htmlWithBase }}"
                 class="w-full bg-white"
                 style="height: 70vh; min-height: 500px;"
                 sandbox="allow-same-origin allow-scripts"
