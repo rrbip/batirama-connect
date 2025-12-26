@@ -76,15 +76,15 @@ class WebCrawlResource extends Resource
                                         Forms\Components\Select::make('max_pages')
                                             ->label('Limite de pages')
                                             ->options([
-                                                100 => '100 pages',
+                                                0 => '🚀 Illimité',
                                                 500 => '500 pages',
                                                 1000 => '1 000 pages',
                                                 5000 => '5 000 pages',
                                                 10000 => '10 000 pages',
                                                 50000 => '50 000 pages',
-                                                0 => 'Illimité',
+                                                100000 => '100 000 pages',
                                             ])
-                                            ->default(1000),
+                                            ->default(0),
 
                                         Forms\Components\TextInput::make('max_disk_mb')
                                             ->label('Limite disque (Mo)')
