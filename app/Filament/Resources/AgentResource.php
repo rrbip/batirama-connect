@@ -186,6 +186,10 @@ class AgentResource extends Resource
                                         Forms\Components\Toggle::make('allow_iterative_search')
                                             ->label('Recherche itérative')
                                             ->helperText('Permet plusieurs requêtes de recherche'),
+
+                                        Forms\Components\Toggle::make('use_category_filtering')
+                                            ->label('Filtrage par catégorie')
+                                            ->helperText('Détecte la catégorie de la question pour filtrer les résultats RAG. Améliore la précision quand les chunks ont des catégories.'),
                                     ])
                                     ->columns(2),
 

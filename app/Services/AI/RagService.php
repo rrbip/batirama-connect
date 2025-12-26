@@ -20,7 +20,8 @@ class RagService
         private OllamaService $ollamaService,
         private HydrationService $hydrationService,
         private PromptBuilder $promptBuilder,
-        private LearningService $learningService
+        private LearningService $learningService,
+        private CategoryDetectionService $categoryDetectionService
     ) {}
 
     /**
@@ -194,26 +195,75 @@ class RagService
             $minScore = $agent->getMinRagScore();
             $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
 
+            // Détecter la catégorie de la question pour pré-filtrer
+            $categoryFilter = [];
+            $categoryDetection = null;
+
+            if ($agent->use_category_filtering) {
+                $categoryDetection = $this->categoryDetectionService->detect($query, $agent);
+
+                if ($categoryDetection['categories']->isNotEmpty()) {
+                    $categoryFilter = $this->categoryDetectionService->buildQdrantFilter(
+                        $categoryDetection['categories']
+                    );
+
+                    Log::info('RAG category filter applied', [
+                        'agent' => $agent->slug,
+                        'detected_categories' => $categoryDetection['categories']->pluck('name')->toArray(),
+                        'detection_method' => $categoryDetection['method'],
+                        'confidence' => $categoryDetection['confidence'],
+                    ]);
+                }
+            }
+
             Log::info('RAG search starting', [
                 'agent' => $agent->slug,
                 'collection' => $agent->qdrant_collection,
                 'query' => $query,
                 'min_score' => $minScore,
                 'limit' => $limit,
+                'has_category_filter' => !empty($categoryFilter),
             ]);
 
-            // Rechercher dans la collection de l'agent
+            // Rechercher avec filtre de catégorie si disponible
             $results = $this->qdrantService->search(
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
                 limit: $limit,
+                filter: $categoryFilter,
                 scoreThreshold: $minScore
             );
+
+            // Si pas assez de résultats avec le filtre, refaire une recherche sans filtre
+            if (!empty($categoryFilter) && count($results) < 2) {
+                Log::info('RAG fallback: not enough filtered results, searching without filter', [
+                    'agent' => $agent->slug,
+                    'filtered_count' => count($results),
+                ]);
+
+                $unfilteredResults = $this->qdrantService->search(
+                    vector: $queryVector,
+                    collection: $agent->qdrant_collection,
+                    limit: $limit,
+                    filter: [],
+                    scoreThreshold: $minScore
+                );
+
+                // Fusionner les résultats en gardant les filtrés en priorité
+                $existingIds = collect($results)->pluck('id')->toArray();
+                $additionalResults = collect($unfilteredResults)
+                    ->filter(fn($r) => !in_array($r['id'], $existingIds))
+                    ->take($limit - count($results))
+                    ->toArray();
+
+                $results = array_merge($results, $additionalResults);
+            }
 
             Log::info('RAG search completed', [
                 'agent' => $agent->slug,
                 'results_count' => count($results),
                 'results_scores' => collect($results)->pluck('score')->toArray(),
+                'results_categories' => collect($results)->pluck('payload.chunk_category')->filter()->toArray(),
             ]);
 
             return $results;

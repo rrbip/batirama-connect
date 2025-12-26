@@ -47,6 +47,7 @@ class Agent extends Model
         'is_active',
         'default_extraction_method',
         'default_chunk_strategy',
+        'use_category_filtering',
     ];
 
     protected $casts = [
@@ -59,6 +60,7 @@ class Agent extends Model
         'allow_iterative_search' => 'boolean',
         'allow_attachments' => 'boolean',
         'allow_public_access' => 'boolean',
+        'use_category_filtering' => 'boolean',
     ];
 
     public function tenant(): BelongsTo
