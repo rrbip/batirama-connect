@@ -66,16 +66,22 @@ class StartWebCrawlJob implements ShouldQueue
                 ['url' => $normalizedUrl]
             );
 
-            // Créer l'entrée pivot
-            $urlEntry = WebCrawlUrlCrawl::create([
-                'crawl_id' => $this->crawl->id,
-                'crawl_url_id' => $crawlUrl->id,
-                'depth' => 0,
-                'status' => 'pending',
-            ]);
+            // Créer l'entrée pivot (ou récupérer si déjà existante - cas de retry)
+            $urlEntry = WebCrawlUrlCrawl::firstOrCreate(
+                [
+                    'crawl_id' => $this->crawl->id,
+                    'crawl_url_id' => $crawlUrl->id,
+                ],
+                [
+                    'depth' => 0,
+                    'status' => 'pending',
+                ]
+            );
 
-            // Mettre à jour les stats
-            $this->crawl->increment('pages_discovered');
+            // Mettre à jour les stats seulement si c'est une nouvelle entrée
+            if ($urlEntry->wasRecentlyCreated) {
+                $this->crawl->increment('pages_discovered');
+            }
 
             // Dispatcher le job de crawl pour l'URL de départ
             CrawlUrlJob::dispatch($this->crawl, $urlEntry);
