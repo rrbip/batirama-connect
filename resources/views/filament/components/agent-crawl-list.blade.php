@@ -1,3 +1,8 @@
+@php
+    // Récupérer les agents liés depuis le record du composant parent
+    $agentConfigs = $this->record->agentConfigs()->with('agent')->get();
+@endphp
+
 <div class="space-y-4">
     @forelse($agentConfigs as $config)
         <div class="rounded-lg border border-gray-200 dark:border-gray-700 p-4">

@@ -494,10 +494,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->schema([
                         ViewEntry::make('agentConfigs')
                             ->label('')
-                            ->view('filament.components.agent-crawl-list')
-                            ->viewData([
-                                'agentConfigs' => fn () => $this->record->agentConfigs()->with('agent')->get(),
-                            ]),
+                            ->view('filament.components.agent-crawl-list'),
                     ]),
 
                 Section::make('Configuration')
