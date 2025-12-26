@@ -17,9 +17,9 @@ use App\Services\Crawler\UrlNormalizer;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Infolists\Components\Grid;
-use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Infolists\Infolist;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -37,9 +37,142 @@ class ViewWebCrawl extends ViewRecord implements HasTable
 
     protected static string $view = 'filament.resources.web-crawl-resource.pages.view-web-crawl';
 
+    public ?int $editingAgentConfigId = null;
+
+    public array $editFormData = [
+        'url_filter_mode' => 'exclude',
+        'url_patterns' => '',
+        'content_types' => ['html', 'pdf', 'image', 'document'],
+        'chunk_strategy' => '',
+    ];
+
     public function getTitle(): string
     {
         return 'Détails du Crawl';
+    }
+
+    /**
+     * Ouvre le modal d'édition pour un agent config.
+     */
+    public function editAgentConfig(int $configId): void
+    {
+        $config = AgentWebCrawl::find($configId);
+
+        if (! $config || $config->web_crawl_id !== $this->record->id) {
+            return;
+        }
+
+        $this->editingAgentConfigId = $configId;
+        $this->editFormData = [
+            'url_filter_mode' => $config->url_filter_mode ?? 'exclude',
+            'url_patterns' => is_array($config->url_patterns) ? implode("\n", $config->url_patterns) : '',
+            'content_types' => $config->content_types ?? ['html', 'pdf', 'image', 'document'],
+            'chunk_strategy' => $config->chunk_strategy ?? '',
+        ];
+
+        $this->dispatch('open-modal', id: 'edit-agent-config');
+    }
+
+    /**
+     * Supprime un agent config et ses documents.
+     */
+    public function deleteAgentConfig(int $configId): void
+    {
+        $config = AgentWebCrawl::find($configId);
+
+        if (! $config || $config->web_crawl_id !== $this->record->id) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Configuration non trouvée.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        // Supprimer les documents de cet agent pour ce crawl
+        $documents = $this->record->documents()
+            ->where('agent_id', $config->agent_id)
+            ->with('chunks')
+            ->get();
+
+        foreach ($documents as $document) {
+            $document->chunks()->delete();
+            $document->forceDelete();
+        }
+
+        // Supprimer les entrées d'indexation
+        $config->urlEntries()->delete();
+
+        // Supprimer la configuration
+        $config->delete();
+
+        Notification::make()
+            ->title('Agent supprimé')
+            ->body('L\'agent a été retiré du crawl et ses documents supprimés.')
+            ->success()
+            ->send();
+    }
+
+    /**
+     * Sauvegarde les modifications d'un agent config.
+     */
+    public function saveAgentConfig(): void
+    {
+        $config = AgentWebCrawl::find($this->editingAgentConfigId);
+
+        if (! $config || $config->web_crawl_id !== $this->record->id) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Configuration non trouvée.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        // Convertir les patterns
+        $patterns = $this->editFormData['url_patterns']
+            ? array_filter(array_map('trim', explode("\n", $this->editFormData['url_patterns'])))
+            : [];
+
+        $config->update([
+            'url_filter_mode' => $this->editFormData['url_filter_mode'],
+            'url_patterns' => $patterns,
+            'content_types' => $this->editFormData['content_types'],
+            'chunk_strategy' => $this->editFormData['chunk_strategy'] ?: null,
+        ]);
+
+        $this->editingAgentConfigId = null;
+        $this->dispatch('close-modal', id: 'edit-agent-config');
+
+        Notification::make()
+            ->title('Configuration sauvegardée')
+            ->success()
+            ->send();
+    }
+
+    /**
+     * Retourne les données du formulaire d'édition.
+     */
+    public function getEditAgentConfigFormData(): array
+    {
+        if (! $this->editingAgentConfigId) {
+            return [];
+        }
+
+        $config = AgentWebCrawl::find($this->editingAgentConfigId);
+
+        if (! $config) {
+            return [];
+        }
+
+        return [
+            'url_filter_mode' => $config->url_filter_mode,
+            'url_patterns' => is_array($config->url_patterns) ? implode("\n", $config->url_patterns) : '',
+            'content_types' => $config->content_types ?? ['html', 'pdf', 'image', 'document'],
+            'chunk_strategy' => $config->chunk_strategy ?? '',
+        ];
     }
 
     protected function getHeaderActions(): array
@@ -359,58 +492,13 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 Section::make('Agents liés')
                     ->description('Chaque agent a sa propre configuration d\'indexation')
                     ->schema([
-                        RepeatableEntry::make('agentConfigs')
+                        ViewEntry::make('agentConfigs')
                             ->label('')
-                            ->schema([
-                                Grid::make(6)
-                                    ->schema([
-                                        TextEntry::make('agent.name')
-                                            ->label('Agent')
-                                            ->weight('bold'),
-
-                                        TextEntry::make('index_status')
-                                            ->label('Statut')
-                                            ->badge()
-                                            ->color(fn ($state) => match ($state) {
-                                                'pending' => 'gray',
-                                                'indexing' => 'warning',
-                                                'indexed' => 'success',
-                                                'error' => 'danger',
-                                                default => 'gray',
-                                            })
-                                            ->formatStateUsing(fn ($state) => match ($state) {
-                                                'pending' => 'En attente',
-                                                'indexing' => 'En cours',
-                                                'indexed' => 'Indexé',
-                                                'error' => 'Erreur',
-                                                default => $state,
-                                            }),
-
-                                        TextEntry::make('pages_indexed')
-                                            ->label('Indexées')
-                                            ->color('success'),
-
-                                        TextEntry::make('pages_skipped')
-                                            ->label('Ignorées')
-                                            ->color('warning'),
-
-                                        TextEntry::make('pages_error')
-                                            ->label('Erreurs')
-                                            ->color('danger'),
-
-                                        TextEntry::make('effective_chunk_strategy')
-                                            ->label('Chunking')
-                                            ->formatStateUsing(fn ($state) => match ($state) {
-                                                'simple' => 'Simple',
-                                                'html_semantic' => 'HTML',
-                                                'llm_assisted' => 'LLM',
-                                                default => $state,
-                                            }),
-                                    ]),
-                            ])
-                            ->contained(false),
-                    ])
-                    ->visible(fn () => $this->record->agentConfigs()->count() > 0),
+                            ->view('filament.components.agent-crawl-list')
+                            ->viewData([
+                                'agentConfigs' => fn () => $this->record->agentConfigs()->with('agent')->get(),
+                            ]),
+                    ]),
 
                 Section::make('Configuration')
                     ->collapsed()
