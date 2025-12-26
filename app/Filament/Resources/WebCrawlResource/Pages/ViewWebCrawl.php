@@ -420,10 +420,10 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Voir')
                     ->icon('heroicon-o-eye')
                     ->color('gray')
-                    ->visible(fn ($record) => $record->url?->storage_path && Storage::disk('crawl')->exists($record->url->storage_path))
+                    ->visible(fn ($record) => $record->url?->storage_path && Storage::disk('local')->exists($record->url->storage_path))
                     ->modalHeading(fn ($record) => 'Contenu caché: ' . \Illuminate\Support\Str::limit($record->url?->url, 50))
                     ->modalContent(function ($record) {
-                        $content = Storage::disk('crawl')->get($record->url->storage_path);
+                        $content = Storage::disk('local')->get($record->url->storage_path);
                         $contentType = $record->url->content_type ?? 'text/plain';
 
                         // Si c'est du HTML, l'afficher proprement
