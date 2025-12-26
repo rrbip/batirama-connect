@@ -6,22 +6,23 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * Représente un crawl de site web.
+ *
+ * Le crawl est maintenant un cache pur, sans lien direct avec un agent.
+ * Les agents sont liés via AgentWebCrawl avec leur propre configuration.
+ */
 class WebCrawl extends Model
 {
     use HasFactory;
 
     protected $fillable = [
         'uuid',
-        'agent_id',
         'start_url',
         'allowed_domains',
-        'url_filter_mode',
-        'url_patterns',
-        'chunk_strategy',
         'max_depth',
         'max_pages',
         'max_disk_mb',
@@ -34,11 +35,6 @@ class WebCrawl extends Model
         'status',
         'pages_discovered',
         'pages_crawled',
-        'pages_indexed',
-        'pages_skipped',
-        'pages_error',
-        'documents_found',
-        'images_found',
         'total_size_bytes',
         'started_at',
         'paused_at',
@@ -47,7 +43,6 @@ class WebCrawl extends Model
 
     protected $casts = [
         'allowed_domains' => 'array',
-        'url_patterns' => 'array',
         'custom_headers' => 'array',
         'respect_robots_txt' => 'boolean',
         'started_at' => 'datetime',
@@ -56,11 +51,31 @@ class WebCrawl extends Model
     ];
 
     /**
-     * L'agent IA associé
+     * Les configurations d'indexation par agent
      */
-    public function agent(): BelongsTo
+    public function agentConfigs(): HasMany
     {
-        return $this->belongsTo(Agent::class);
+        return $this->hasMany(AgentWebCrawl::class);
+    }
+
+    /**
+     * Les agents liés à ce crawl (via AgentWebCrawl)
+     */
+    public function agents(): BelongsToMany
+    {
+        return $this->belongsToMany(Agent::class, 'agent_web_crawls')
+            ->withPivot([
+                'url_filter_mode',
+                'url_patterns',
+                'content_types',
+                'chunk_strategy',
+                'index_status',
+                'pages_indexed',
+                'pages_skipped',
+                'pages_error',
+                'last_indexed_at',
+            ])
+            ->withTimestamps();
     }
 
     /**
@@ -73,19 +88,15 @@ class WebCrawl extends Model
                 'parent_id',
                 'depth',
                 'status',
-                'matched_pattern',
-                'skip_reason',
-                'document_id',
                 'error_message',
                 'retry_count',
                 'fetched_at',
-                'indexed_at',
             ])
             ->withTimestamps();
     }
 
     /**
-     * Les entrées pivot de ce crawl
+     * Les entrées pivot de ce crawl (pour le cache)
      */
     public function urlEntries(): HasMany
     {
@@ -93,7 +104,7 @@ class WebCrawl extends Model
     }
 
     /**
-     * Les documents créés par ce crawl
+     * Tous les documents créés par ce crawl (tous agents confondus)
      */
     public function documents(): HasMany
     {
@@ -114,16 +125,6 @@ class WebCrawl extends Model
         } catch (\Exception $e) {
             return null;
         }
-    }
-
-    /**
-     * Chiffre et stocke les credentials
-     */
-    public function setAuthCredentialsAttribute(?array $value): void
-    {
-        $this->attributes['auth_credentials'] = $value
-            ? encrypt(json_encode($value))
-            : null;
     }
 
     /**
@@ -151,7 +152,7 @@ class WebCrawl extends Model
     }
 
     /**
-     * Calcule le pourcentage de progression
+     * Calcule le pourcentage de progression du crawl (cache)
      */
     public function getProgressPercentAttribute(): int
     {
@@ -175,5 +176,29 @@ class WebCrawl extends Model
         }
 
         return round($bytes, 2) . ' ' . $units[$i];
+    }
+
+    /**
+     * Retourne le domaine principal du site
+     */
+    public function getDomainAttribute(): string
+    {
+        return parse_url($this->start_url, PHP_URL_HOST) ?? '';
+    }
+
+    /**
+     * Compte le nombre total de pages indexées (tous agents)
+     */
+    public function getTotalPagesIndexedAttribute(): int
+    {
+        return $this->agentConfigs()->sum('pages_indexed');
+    }
+
+    /**
+     * Vérifie si au moins un agent est en cours d'indexation
+     */
+    public function hasIndexingAgents(): bool
+    {
+        return $this->agentConfigs()->where('index_status', 'indexing')->exists();
     }
 }

@@ -8,6 +8,12 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * Table pivot entre WebCrawl et WebCrawlUrl.
+ *
+ * Représente le statut de récupération (cache) d'une URL dans un crawl.
+ * L'indexation est maintenant gérée par AgentWebCrawlUrl.
+ */
 class WebCrawlUrlCrawl extends Model
 {
     use HasFactory;
@@ -20,20 +26,15 @@ class WebCrawlUrlCrawl extends Model
         'parent_id',
         'depth',
         'status',
-        'matched_pattern',
-        'skip_reason',
-        'document_id',
         'error_message',
         'retry_count',
         'fetched_at',
-        'indexed_at',
     ];
 
     protected $casts = [
         'depth' => 'integer',
         'retry_count' => 'integer',
         'fetched_at' => 'datetime',
-        'indexed_at' => 'datetime',
     ];
 
     /**
@@ -61,14 +62,6 @@ class WebCrawlUrlCrawl extends Model
     }
 
     /**
-     * Le document créé (si indexé)
-     */
-    public function document(): BelongsTo
-    {
-        return $this->belongsTo(Document::class);
-    }
-
-    /**
      * Vérifie si l'URL est en attente de traitement
      */
     public function isPending(): bool
@@ -77,19 +70,11 @@ class WebCrawlUrlCrawl extends Model
     }
 
     /**
-     * Vérifie si l'URL a été indexée
+     * Vérifie si l'URL a été récupérée
      */
-    public function isIndexed(): bool
+    public function isFetched(): bool
     {
-        return $this->status === 'indexed';
-    }
-
-    /**
-     * Vérifie si l'URL a été skippée
-     */
-    public function isSkipped(): bool
-    {
-        return $this->status === 'skipped';
+        return $this->status === 'fetched';
     }
 
     /**
@@ -117,35 +102,8 @@ class WebCrawlUrlCrawl extends Model
             'pending' => 'En attente',
             'fetching' => 'En cours',
             'fetched' => 'Récupéré',
-            'indexed' => 'Indexé',
-            'skipped' => 'Ignoré',
             'error' => 'Erreur',
             default => $this->status,
-        };
-    }
-
-    /**
-     * Retourne une description lisible de la raison du skip
-     */
-    public function getSkipReasonLabelAttribute(): ?string
-    {
-        if (!$this->skip_reason) {
-            return null;
-        }
-
-        return match ($this->skip_reason) {
-            'pattern_exclude' => 'Exclu par pattern',
-            'pattern_not_include' => 'Non inclus par pattern',
-            'robots_txt' => 'Interdit par robots.txt',
-            'unsupported_type' => 'Type non supporté',
-            'content_too_large' => 'Contenu trop volumineux',
-            'auth_required' => 'Authentification requise',
-            'timeout' => 'Timeout',
-            'http_error' => 'Erreur HTTP',
-            'max_depth' => 'Profondeur max atteinte',
-            'max_pages' => 'Limite de pages atteinte',
-            'duplicate' => 'URL déjà traitée',
-            default => $this->skip_reason,
         };
     }
 }

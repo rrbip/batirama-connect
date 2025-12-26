@@ -40,19 +40,23 @@ class WebCrawlUrl extends Model
                 'parent_id',
                 'depth',
                 'status',
-                'matched_pattern',
-                'skip_reason',
-                'document_id',
                 'error_message',
                 'retry_count',
                 'fetched_at',
-                'indexed_at',
             ])
             ->withTimestamps();
     }
 
     /**
-     * Les documents créés à partir de cette URL
+     * Les entrées d'indexation par agent pour cette URL
+     */
+    public function agentIndexEntries(): HasMany
+    {
+        return $this->hasMany(AgentWebCrawlUrl::class, 'web_crawl_url_id');
+    }
+
+    /**
+     * Les documents créés à partir de cette URL (tous agents)
      */
     public function documents(): HasMany
     {

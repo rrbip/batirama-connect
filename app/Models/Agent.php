@@ -7,6 +7,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -85,9 +86,32 @@ class Agent extends Model
         return $this->hasMany(Document::class);
     }
 
-    public function webCrawls(): HasMany
+    /**
+     * Les crawls liés à cet agent (via AgentWebCrawl)
+     */
+    public function webCrawls(): BelongsToMany
     {
-        return $this->hasMany(WebCrawl::class);
+        return $this->belongsToMany(WebCrawl::class, 'agent_web_crawls')
+            ->withPivot([
+                'url_filter_mode',
+                'url_patterns',
+                'content_types',
+                'chunk_strategy',
+                'index_status',
+                'pages_indexed',
+                'pages_skipped',
+                'pages_error',
+                'last_indexed_at',
+            ])
+            ->withTimestamps();
+    }
+
+    /**
+     * Les configurations de crawl pour cet agent
+     */
+    public function webCrawlConfigs(): HasMany
+    {
+        return $this->hasMany(AgentWebCrawl::class);
     }
 
     public function getOllamaUrl(): string

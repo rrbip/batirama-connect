@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs\Crawler;
 
+use App\Models\AgentWebCrawl;
 use App\Models\WebCrawl;
 use App\Models\WebCrawlUrl;
 use App\Models\WebCrawlUrlCrawl;
@@ -16,6 +17,12 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Job de crawl d'une URL.
+ *
+ * Ce job se charge uniquement du téléchargement et du stockage en cache.
+ * L'indexation est déléguée à IndexAgentUrlJob pour chaque agent lié.
+ */
 class CrawlUrlJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -38,18 +45,20 @@ class CrawlUrlJob implements ShouldQueue
         $this->urlEntry->refresh();
 
         // Vérifier que le crawl est toujours actif
-        if (!in_array($this->crawl->status, ['running', 'pending'])) {
+        if (! in_array($this->crawl->status, ['running', 'pending'])) {
             Log::info('Crawl is no longer active, skipping URL', [
                 'crawl_id' => $this->crawl->id,
                 'status' => $this->crawl->status,
             ]);
+
             return;
         }
 
         // Récupérer l'URL
         $crawlUrl = $this->urlEntry->url;
-        if (!$crawlUrl) {
+        if (! $crawlUrl) {
             Log::error('URL entry has no associated URL', ['entry_id' => $this->urlEntry->id]);
+
             return;
         }
 
@@ -75,14 +84,16 @@ class CrawlUrlJob implements ShouldQueue
 
         try {
             // Vérifier robots.txt
-            if (!$crawler->isAllowedByRobots($url, $this->crawl)) {
-                $this->markSkipped('robots_txt');
+            if (! $crawler->isAllowedByRobots($url, $this->crawl)) {
+                $this->markError('robots_txt');
+
                 return;
             }
 
             // Vérifier les domaines autorisés
-            if (!$urlNormalizer->isAllowedDomain($url, $allowedDomains)) {
-                $this->markSkipped('domain_not_allowed');
+            if (! $urlNormalizer->isAllowedDomain($url, $allowedDomains)) {
+                $this->markError('domain_not_allowed');
+
                 return;
             }
 
@@ -95,27 +106,26 @@ class CrawlUrlJob implements ShouldQueue
             // Récupérer le contenu
             $result = $crawler->fetch($url, $this->crawl);
 
-            if (!$result['success']) {
+            if (! $result['success']) {
                 $this->markError($result['error'] ?? 'Unknown fetch error');
+
                 return;
             }
 
             // Contenu non modifié (304) - garder le contenu existant
             if ($result['not_modified']) {
-                // Le contenu n'a pas changé, on garde l'ancien cache
-                // Mettre à jour le statut HTTP mais garder le storage_path existant
                 $crawlUrl->update(['http_status' => 304]);
 
-                // Si le contenu était déjà indexé, marquer comme indexé
-                // Sinon comme fetched pour que le bouton "Voir" fonctionne
-                $newStatus = $crawlUrl->storage_path ? 'indexed' : 'skipped';
                 $this->urlEntry->update([
-                    'status' => $newStatus,
-                    'skip_reason' => 'not_modified',
+                    'status' => 'fetched',
                     'fetched_at' => now(),
                 ]);
 
                 $this->crawl->increment('pages_crawled');
+
+                // Pas besoin de réindexer si le contenu n'a pas changé
+                $this->checkCrawlCompletion();
+
                 return;
             }
 
@@ -131,29 +141,55 @@ class CrawlUrlJob implements ShouldQueue
             // Vérifier le code HTTP
             if ($result['status'] >= 400) {
                 $this->markError("HTTP {$result['status']}");
+
                 return;
             }
 
             // Gérer les redirections
             if ($result['status'] >= 300 && $result['status'] < 400) {
                 // TODO: Suivre la redirection
-                $this->markSkipped('redirect');
+                $this->markError('redirect');
+
                 return;
             }
 
             // Vérifier le type de contenu
             $contentType = $result['content_type'] ?? '';
-            if (!$crawler->isSupportedContentType($contentType)) {
-                $this->markSkipped('unsupported_type');
+            if (! $crawler->isSupportedContentType($contentType)) {
+                $this->markError('unsupported_type');
+
                 return;
             }
 
             // Vérifier la taille
             $maxSize = 10 * 1024 * 1024; // 10 Mo
             if ($result['content_length'] > $maxSize) {
-                $this->markSkipped('content_too_large');
+                $this->markError('content_too_large');
+
                 return;
             }
+
+            // Si c'est du HTML, extraire les liens
+            if (str_contains($contentType, 'text/html')) {
+                $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer, $allowedDomains);
+            }
+
+            // Stocker le contenu en cache (toujours, indépendamment des patterns)
+            $storagePath = $crawler->storeContent(
+                $result['body'],
+                $contentType,
+                $url
+            );
+
+            // Mettre à jour l'URL avec le contenu
+            $oldContentHash = $crawlUrl->content_hash;
+            $newContentHash = hash('sha256', $result['body']);
+            $contentChanged = $oldContentHash !== $newContentHash;
+
+            $crawlUrl->update([
+                'storage_path' => $storagePath,
+                'content_hash' => $newContentHash,
+            ]);
 
             // Marquer comme récupéré
             $this->urlEntry->update([
@@ -162,40 +198,12 @@ class CrawlUrlJob implements ShouldQueue
             ]);
             $this->crawl->increment('pages_crawled');
 
-            // Si c'est du HTML, extraire les liens
-            if (str_contains($contentType, 'text/html')) {
-                $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer, $allowedDomains);
+            // Déclencher l'indexation pour chaque agent lié
+            if ($contentChanged || ! $oldContentHash) {
+                $this->triggerAgentIndexation($crawlUrl);
             }
 
-            // Vérifier si doit indexer
-            $indexCheck = $crawler->shouldIndex($url, $this->crawl);
-
-            if (!$indexCheck['should_index']) {
-                $this->urlEntry->update([
-                    'status' => 'skipped',
-                    'skip_reason' => $indexCheck['skip_reason'],
-                    'matched_pattern' => $indexCheck['matched_pattern'],
-                ]);
-                $this->crawl->increment('pages_skipped');
-                return;
-            }
-
-            // Stocker le contenu
-            $storagePath = $crawler->storeContent(
-                $result['body'],
-                $contentType,
-                $url
-            );
-
-            // Mettre à jour l'URL avec le contenu
-            $contentHash = hash('sha256', $result['body']);
-            $crawlUrl->update([
-                'storage_path' => $storagePath,
-                'content_hash' => $contentHash,
-            ]);
-
-            // Dispatcher le job de traitement du contenu
-            ProcessCrawledContentJob::dispatch($this->crawl, $this->urlEntry);
+            $this->checkCrawlCompletion();
 
         } catch (\Exception $e) {
             Log::error('Error crawling URL', [
@@ -206,6 +214,19 @@ class CrawlUrlJob implements ShouldQueue
 
             $this->markError($e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Déclenche l'indexation pour chaque agent lié à ce crawl.
+     */
+    private function triggerAgentIndexation(WebCrawlUrl $crawlUrl): void
+    {
+        // Récupérer tous les agents liés à ce crawl
+        $agentConfigs = AgentWebCrawl::where('web_crawl_id', $this->crawl->id)->get();
+
+        foreach ($agentConfigs as $agentConfig) {
+            IndexAgentUrlJob::dispatch($agentConfig, $crawlUrl);
         }
     }
 
@@ -222,6 +243,7 @@ class CrawlUrlJob implements ShouldQueue
         // Vérifier les limites
         if ($this->crawl->pages_discovered >= $this->crawl->max_pages) {
             Log::info('Max pages limit reached', ['crawl_id' => $this->crawl->id]);
+
             return;
         }
 
@@ -230,6 +252,7 @@ class CrawlUrlJob implements ShouldQueue
                 'crawl_id' => $this->crawl->id,
                 'depth' => $this->urlEntry->depth,
             ]);
+
             return;
         }
 
@@ -243,7 +266,7 @@ class CrawlUrlJob implements ShouldQueue
             }
 
             // Vérifier le domaine
-            if (!$urlNormalizer->isAllowedDomain($link, $allowedDomains)) {
+            if (! $urlNormalizer->isAllowedDomain($link, $allowedDomains)) {
                 continue;
             }
 
@@ -284,24 +307,6 @@ class CrawlUrlJob implements ShouldQueue
     }
 
     /**
-     * Marque l'URL comme skippée
-     */
-    private function markSkipped(string $reason): void
-    {
-        $this->urlEntry->update([
-            'status' => 'skipped',
-            'skip_reason' => $reason,
-        ]);
-        $this->crawl->increment('pages_skipped');
-
-        Log::debug('URL skipped', [
-            'crawl_id' => $this->crawl->id,
-            'url' => $this->urlEntry->url?->url,
-            'reason' => $reason,
-        ]);
-    }
-
-    /**
      * Marque l'URL comme en erreur
      */
     private function markError(string $message): void
@@ -311,7 +316,6 @@ class CrawlUrlJob implements ShouldQueue
             'error_message' => $message,
             'retry_count' => $this->urlEntry->retry_count + 1,
         ]);
-        $this->crawl->increment('pages_error');
 
         Log::warning('URL error', [
             'crawl_id' => $this->crawl->id,
@@ -351,9 +355,7 @@ class CrawlUrlJob implements ShouldQueue
 
             Log::info('Web crawl completed', [
                 'crawl_id' => $this->crawl->id,
-                'pages_indexed' => $this->crawl->pages_indexed,
-                'pages_skipped' => $this->crawl->pages_skipped,
-                'pages_error' => $this->crawl->pages_error,
+                'pages_crawled' => $this->crawl->pages_crawled,
             ]);
         }
     }
