@@ -15,6 +15,41 @@ class DocumentObserver
     ) {}
 
     /**
+     * Handle the Document "updating" event.
+     * Supprime de Qdrant si le document va être re-traité ou change d'agent.
+     */
+    public function updating(Document $document): void
+    {
+        // Si extraction_status passe à 'pending', supprimer l'ancien index
+        if ($document->isDirty('extraction_status') && $document->extraction_status === 'pending') {
+            Log::info('Document being re-processed, removing old index', [
+                'document_id' => $document->id,
+            ]);
+            $this->removeFromQdrant($document);
+        }
+
+        // Si l'agent change, supprimer de l'ancienne collection
+        if ($document->isDirty('agent_id')) {
+            $originalAgentId = $document->getOriginal('agent_id');
+
+            if ($originalAgentId) {
+                $oldAgent = \App\Models\Agent::find($originalAgentId);
+
+                if ($oldAgent && !empty($oldAgent->qdrant_collection)) {
+                    Log::info('Document agent changed, removing from old collection', [
+                        'document_id' => $document->id,
+                        'old_agent_id' => $originalAgentId,
+                        'new_agent_id' => $document->agent_id,
+                        'old_collection' => $oldAgent->qdrant_collection,
+                    ]);
+
+                    $this->removeFromQdrantCollection($document, $oldAgent->qdrant_collection);
+                }
+            }
+        }
+    }
+
+    /**
      * Handle the Document "deleting" event.
      * Desindexe le document de Qdrant avant la suppression.
      */
@@ -33,7 +68,7 @@ class DocumentObserver
     }
 
     /**
-     * Supprime tous les points du document de Qdrant
+     * Supprime tous les points du document de Qdrant (collection de l'agent actuel)
      */
     private function removeFromQdrant(Document $document): void
     {
@@ -43,8 +78,14 @@ class DocumentObserver
             return;
         }
 
-        $collection = $agent->qdrant_collection;
+        $this->removeFromQdrantCollection($document, $agent->qdrant_collection);
+    }
 
+    /**
+     * Supprime tous les points du document d'une collection Qdrant spécifique
+     */
+    private function removeFromQdrantCollection(Document $document, string $collection): void
+    {
         // Verifier que la collection existe
         if (!$this->qdrantService->collectionExists($collection)) {
             return;
