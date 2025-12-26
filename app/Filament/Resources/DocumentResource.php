@@ -538,6 +538,7 @@ class DocumentResource extends Resource
             'create' => Pages\CreateDocument::route('/create'),
             'edit' => Pages\EditDocument::route('/{record}/edit'),
             'chunks' => Pages\ManageChunks::route('/{record}/chunks'),
+            'bulk-import' => Pages\BulkImportDocuments::route('/bulk-import'),
         ];
     }
 }

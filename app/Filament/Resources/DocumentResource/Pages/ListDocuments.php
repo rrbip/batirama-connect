@@ -15,6 +15,12 @@ class ListDocuments extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('bulk-import')
+                ->label('Import en masse')
+                ->icon('heroicon-o-arrow-up-tray')
+                ->color('success')
+                ->url(DocumentResource::getUrl('bulk-import')),
+
             Actions\CreateAction::make(),
         ];
     }
