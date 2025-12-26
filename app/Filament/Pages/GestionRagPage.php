@@ -261,7 +261,8 @@ class GestionRagPage extends Page implements HasForms, HasTable
                 ]),
             ])
             ->defaultSort('created_at', 'desc')
-            ->paginated([10, 25, 50, 100]);
+            ->paginated([10, 25, 50, 100])
+            ->recordUrl(fn (Document $record) => DocumentResource::getUrl('edit', ['record' => $record]));
     }
 
     protected function categoriesTable(Table $table): Table
@@ -324,7 +325,8 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     DeleteBulkAction::make(),
                 ]),
             ])
-            ->defaultSort('usage_count', 'desc');
+            ->defaultSort('usage_count', 'desc')
+            ->recordUrl(fn (DocumentCategory $record) => DocumentCategoryResource::getUrl('edit', ['record' => $record]));
     }
 
     protected function crawlersTable(Table $table): Table
@@ -426,7 +428,8 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     DeleteBulkAction::make(),
                 ]),
             ])
-            ->defaultSort('created_at', 'desc');
+            ->defaultSort('created_at', 'desc')
+            ->recordUrl(fn (WebCrawl $record) => WebCrawlResource::getUrl('view', ['record' => $record]));
     }
 
     /**
