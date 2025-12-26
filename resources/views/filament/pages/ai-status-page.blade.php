@@ -286,13 +286,26 @@ php artisan queue:work --queue=default,llm-chunking
                                                     @endif
                                                 </div>
                                             </div>
-                                            <div class="text-right">
-                                                <div class="text-sm font-medium {{ $queue['processing']['is_stuck'] ? 'text-danger-600 dark:text-danger-400' : 'text-primary-600 dark:text-primary-400' }}">
-                                                    En traitement depuis {{ $queue['processing']['processing_time'] }}
+                                            <div class="flex items-center gap-3">
+                                                <div class="text-right">
+                                                    <div class="text-sm font-medium {{ $queue['processing']['is_stuck'] ? 'text-danger-600 dark:text-danger-400' : 'text-primary-600 dark:text-primary-400' }}">
+                                                        En traitement depuis {{ $queue['processing']['processing_time'] }}
+                                                    </div>
+                                                    @if($queue['processing']['is_stuck'])
+                                                        <div class="text-xs text-danger-500">Worker probablement crashé</div>
+                                                    @endif
                                                 </div>
-                                                @if($queue['processing']['is_stuck'])
-                                                    <div class="text-xs text-danger-500">Worker probablement crashé</div>
-                                                @endif
+                                                <button
+                                                    wire:click="cancelJob({{ $queue['processing']['id'] }})"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="cancelJob({{ $queue['processing']['id'] }})"
+                                                    wire:confirm="Annuler ce job ? Le document sera remis en attente."
+                                                    class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                                    title="Annuler ce job"
+                                                >
+                                                    <x-heroicon-o-stop class="w-4 h-4" />
+                                                    Stop
+                                                </button>
                                             </div>
                                         </div>
                                     </div>

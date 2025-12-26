@@ -119,6 +119,58 @@ class AiStatusPage extends Page
     }
 
     /**
+     * Annule un job en cours ou en attente
+     */
+    public function cancelJob(int $jobId): void
+    {
+        try {
+            $job = DB::table('jobs')->where('id', $jobId)->first();
+
+            if (!$job) {
+                Notification::make()
+                    ->title('Job non trouvé')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
+            // Extraire l'info du document si possible
+            $payload = json_decode($job->payload, true);
+            $data = $payload['data']['command'] ?? '';
+
+            // Si c'est un job de document, remettre le statut du document
+            if (preg_match('/document[";:\s]+[{]?[^}]*?"id";i:(\d+)/', $data, $matches) ||
+                preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                $documentId = (int) $matches[1];
+                $document = Document::find($documentId);
+                if ($document) {
+                    $document->update([
+                        'extraction_status' => 'pending',
+                        'extraction_error' => 'Job annulé manuellement',
+                    ]);
+                }
+            }
+
+            // Supprimer le job
+            DB::table('jobs')->where('id', $jobId)->delete();
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Job annulé')
+                ->body('Le job a été supprimé de la file d\'attente.')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
      * Charge les modèles Ollama installés avec leurs détails
      */
     protected function loadOllamaModels(): void
