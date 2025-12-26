@@ -682,6 +682,31 @@ class AiStatusPage extends Page
     }
 
     /**
+     * Supprime un message IA en échec
+     */
+    public function deleteAiMessage(int $messageId): void
+    {
+        $message = AiMessage::find($messageId);
+
+        if (!$message) {
+            Notification::make()
+                ->title('Message non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $message->delete();
+
+        $this->refreshStatus();
+
+        Notification::make()
+            ->title('Message supprimé')
+            ->success()
+            ->send();
+    }
+
+    /**
      * Relance un service Docker
      */
     public function restartService(string $serviceKey): void

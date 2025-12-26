@@ -500,15 +500,28 @@ php artisan queue:work --queue=default,llm-chunking
                                         {{ $msg['failed_at'] }}
                                     </td>
                                     <td class="px-4 py-3 text-center">
-                                        <button
-                                            wire:click="retryAiMessage({{ $msg['id'] }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="retryAiMessage({{ $msg['id'] }})"
-                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
-                                        >
-                                            <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryAiMessage({{ $msg['id'] }})" />
-                                            Relancer
-                                        </button>
+                                        <div class="flex items-center justify-center gap-2">
+                                            <button
+                                                wire:click="retryAiMessage({{ $msg['id'] }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="retryAiMessage({{ $msg['id'] }})"
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                                title="Relancer"
+                                            >
+                                                <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryAiMessage({{ $msg['id'] }})" />
+                                                Relancer
+                                            </button>
+                                            <button
+                                                wire:click="deleteAiMessage({{ $msg['id'] }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="deleteAiMessage({{ $msg['id'] }})"
+                                                wire:confirm="Supprimer ce message en échec ?"
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                                title="Supprimer"
+                                            >
+                                                <x-heroicon-o-trash class="w-3 h-3" />
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             @endforeach
