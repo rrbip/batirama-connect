@@ -97,6 +97,17 @@ class DocumentResource extends Resource
                                                 'legal' => 'Légal',
                                                 'other' => 'Autre',
                                             ]),
+
+                                        Forms\Components\Select::make('extraction_method')
+                                            ->label('Méthode d\'extraction (PDF)')
+                                            ->options([
+                                                'auto' => 'Automatique (recommandé)',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Utilisez OCR si le PDF a des problèmes de ligatures (lettres manquantes).')
+                                            ->columnSpanFull(),
                                     ])
                                     ->columns(2),
 

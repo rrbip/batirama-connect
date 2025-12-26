@@ -45,8 +45,11 @@ class DocumentExtractorService
             'file_size' => filesize($fullPath),
         ]);
 
+        // Récupérer la méthode d'extraction (auto, text, ocr)
+        $extractionMethod = $document->extraction_method ?? 'auto';
+
         $text = match ($extension) {
-            'pdf' => $this->extractFromPdf($fullPath),
+            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod),
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
             'doc' => $this->extractFromDoc($fullPath),
@@ -65,9 +68,47 @@ class DocumentExtractorService
 
     /**
      * Extrait le texte d'un fichier PDF
+     *
+     * @param string $path Chemin vers le fichier PDF
+     * @param string $method Méthode d'extraction: 'auto', 'text', ou 'ocr'
      */
-    private function extractFromPdf(string $path): string
+    private function extractFromPdf(string $path, string $method = 'auto'): string
     {
+        Log::info('PDF extraction starting', [
+            'path' => $path,
+            'method' => $method,
+        ]);
+
+        // Mode OCR forcé : convertir le PDF en images et appliquer Tesseract
+        if ($method === 'ocr') {
+            if (!$this->isOcrAvailable()) {
+                throw new \RuntimeException(
+                    "Mode OCR demandé mais Tesseract n'est pas disponible. " .
+                    "Installez tesseract-ocr dans le conteneur Docker."
+                );
+            }
+
+            Log::info('Using forced OCR mode for PDF', ['path' => $path]);
+
+            try {
+                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrClean = $this->cleanText($ocrText);
+
+                if (!empty($ocrClean)) {
+                    Log::info('Forced OCR extraction completed', [
+                        'path' => $path,
+                        'text_length' => strlen($ocrClean),
+                    ]);
+                    return $ocrClean;
+                }
+            } catch (\Exception $e) {
+                throw new \RuntimeException("Erreur OCR: {$e->getMessage()}");
+            }
+
+            throw new \RuntimeException("L'extraction OCR n'a produit aucun texte.");
+        }
+
+        // Mode texte forcé ou auto : essayer les méthodes textuelles
         $pdftotextResult = '';
         $pdfparserResult = '';
 
@@ -133,7 +174,23 @@ class DocumentExtractorService
             $bestTruncatedRatio = $this->getTruncatedRatio($pdfparserClean);
         }
 
-        // Si le taux de mots tronqués dépasse le seuil, essayer l'OCR
+        // En mode texte forcé, retourner le résultat même avec des problèmes
+        if ($method === 'text') {
+            if (!empty($bestText)) {
+                Log::info('Using forced text mode result', [
+                    'path' => $path,
+                    'truncated_ratio' => $bestTruncatedRatio,
+                ]);
+                return $bestText;
+            }
+
+            throw new \RuntimeException(
+                "Impossible d'extraire le texte du PDF en mode texte. " .
+                "Essayez le mode OCR pour ce document."
+            );
+        }
+
+        // Mode auto : si le taux de mots tronqués dépasse le seuil, essayer l'OCR
         if ($bestTruncatedRatio > self::OCR_FALLBACK_THRESHOLD && $this->isOcrAvailable()) {
             Log::info('Text extraction has too many truncated words, trying OCR fallback', [
                 'path' => $path,

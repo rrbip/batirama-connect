@@ -31,10 +31,12 @@ class ProcessBulkImportJob implements ShouldQueue
     /**
      * @param int $agentId
      * @param array<array{path: string, original_name: string, category: ?string}> $files
+     * @param string $extractionMethod Méthode d'extraction: 'auto', 'text', ou 'ocr'
      */
     public function __construct(
         public int $agentId,
-        public array $files
+        public array $files,
+        public string $extractionMethod = 'auto'
     ) {}
 
     public function handle(): void
@@ -114,6 +116,7 @@ class ProcessBulkImportJob implements ShouldQueue
             'title' => $title,
             'document_type' => $extension,
             'category' => $category,
+            'extraction_method' => $this->extractionMethod,
             'file_size' => strlen($content),
             'extraction_status' => 'pending',
             'is_indexed' => false,

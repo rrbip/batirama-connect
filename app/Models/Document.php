@@ -28,6 +28,7 @@ class Document extends Model
         'file_hash',
         'document_type',
         'category',
+        'extraction_method',
         'extraction_status',
         'extracted_text',
         'extraction_metadata',

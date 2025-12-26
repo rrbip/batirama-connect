@@ -61,8 +61,18 @@ class BulkImportDocuments extends Page
                             ])
                             ->default(2)
                             ->helperText('Pour les ZIP : nombre de niveaux de sous-dossiers à utiliser comme catégorie.'),
+
+                        Forms\Components\Select::make('extraction_method')
+                            ->label('Méthode d\'extraction (PDF)')
+                            ->options([
+                                'auto' => 'Automatique (recommandé)',
+                                'text' => 'Texte uniquement',
+                                'ocr' => 'OCR (Tesseract)',
+                            ])
+                            ->default('auto')
+                            ->helperText('OCR : convertit les pages PDF en images puis applique Tesseract. Utile pour les PDFs avec problèmes de ligatures.'),
                     ])
-                    ->columns(3),
+                    ->columns(4),
 
                 Forms\Components\Tabs::make('Import')
                     ->tabs([
@@ -135,6 +145,7 @@ class BulkImportDocuments extends Page
         $categoryPrefix = $data['category_prefix'] ?? '';
         $maxDepth = (int) ($data['max_depth'] ?? 2);
         $skipRootFolder = $data['skip_root_folder'] ?? true;
+        $extractionMethod = $data['extraction_method'] ?? 'auto';
 
         $filesToProcess = [];
 
@@ -174,7 +185,7 @@ class BulkImportDocuments extends Page
         }
 
         // Dispatcher le job de traitement
-        ProcessBulkImportJob::dispatch($agentId, $filesToProcess);
+        ProcessBulkImportJob::dispatch($agentId, $filesToProcess, $extractionMethod);
 
         Notification::make()
             ->title('Import lancé')
