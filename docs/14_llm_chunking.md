@@ -546,7 +546,104 @@ Pour les documents déjà indexés avec une stratégie classique :
 
 ---
 
-## 15. Plan de déploiement
+## 15. Filtrage RAG par Catégorie
+
+### 15.1 Vue d'ensemble
+
+Le système peut pré-filtrer les résultats RAG en détectant automatiquement la catégorie de la question utilisateur. Cela améliore la pertinence en ne retournant que les chunks de la catégorie détectée.
+
+### 15.2 Service CategoryDetectionService
+
+**Fichier** : `app/Services/AI/CategoryDetectionService.php`
+
+Détecte la catégorie d'une question via deux méthodes :
+
+1. **Keyword matching** (rapide) - Confiance 90%
+   - Cherche le nom de la catégorie dans la question
+   - Ex: "comment fonctionne le parrainage ?" → catégorie "Parrainage"
+
+2. **Embedding similarity** (fallback) - Confiance variable
+   - Compare l'embedding de la question aux embeddings des catégories
+   - Seuil minimum : 45% de similarité
+
+```php
+$detection = $categoryService->detect($question, $agent);
+// Retourne: ['categories' => Collection, 'confidence' => 0.9, 'method' => 'keyword']
+
+$filter = $categoryService->buildQdrantFilter($detection['categories']);
+// Retourne le filtre Qdrant pour la recherche
+```
+
+### 15.3 Configuration par Agent
+
+Chaque agent peut activer le filtrage par catégorie via le toggle "Filtrage par catégorie" dans les paramètres RAG (`AgentResource`).
+
+| Option | Description |
+|--------|-------------|
+| `use_category_filtering` | Active la détection et le filtrage automatique |
+
+### 15.4 Comportement du filtrage
+
+Le filtrage utilise une **stratégie stricte basée sur la confiance** :
+
+| Confiance | Comportement |
+|-----------|--------------|
+| ≥ 70% | **Filtrage strict** - Seuls les chunks de la catégorie détectée sont retournés, même s'il n'y en a qu'un |
+| < 70% | **Fallback** - Si moins de 2 résultats filtrés, complète avec des résultats non filtrés |
+
+**Exemple** : Question "Comment fonctionne le parrainage ?"
+- Catégorie détectée : "Parrainage" (90% via keyword)
+- Confiance ≥ 70% → Filtrage strict
+- Résultat : Seuls les chunks "Parrainage" sont retournés
+
+### 15.5 Payload Qdrant
+
+Pour que le filtrage fonctionne, les chunks doivent avoir le champ `chunk_category` dans leur payload Qdrant :
+
+```json
+{
+  "chunk_category": "Parrainage",
+  "chunk_category_id": 5,
+  "content": "...",
+  "summary": "..."
+}
+```
+
+**Important** : Les chunks indexés AVANT l'ajout des catégories n'ont pas ce champ. Il faut les ré-indexer via "Rebuild Index" pour ajouter les métadonnées de catégorie.
+
+### 15.6 Debug dans la modale de test
+
+La page `/admin/agents/{id}/test` affiche les détails du filtrage dans la section "Filtrage par catégorie" :
+- Méthode de détection (keyword/embedding)
+- Confiance (%)
+- Catégories détectées
+- Nombre de résultats filtrés vs total
+- Indicateur de fallback utilisé
+
+---
+
+## 16. Résumés de chunks dans le contexte RAG
+
+### 16.1 Enrichissement du contexte
+
+Chaque chunk LLM possède un résumé (`summary`) généré par l'IA. Ce résumé est inclus dans le contexte RAG envoyé au LLM pour améliorer sa compréhension.
+
+**Format dans le prompt** :
+```
+[Document: titre_document.pdf | Catégorie: Support]
+Résumé: Ce chunk explique la procédure de parrainage...
+Contenu: Le texte complet du chunk...
+```
+
+### 16.2 Pourquoi ne pas fusionner les chunks automatiquement
+
+La fusion automatique des chunks consécutifs de même catégorie a été **désactivée** car elle fait perdre les résumés individuels. Chaque chunk conserve son propre résumé pour un meilleur contexte RAG.
+
+La fusion reste disponible **manuellement** via la page "Gérer les chunks" si nécessaire.
+
+---
+
+## 17. Plan de déploiement
 
 1. Exécuter les migrations
 2. Créer les catégories de base via seeder (optionnel)
@@ -554,3 +651,4 @@ Pour les documents déjà indexés avec une stratégie classique :
 4. Démarrer le worker : `php artisan queue:work --queue=llm-chunking`
 5. Tester sur un document simple
 6. Activer pour les nouveaux imports
+7. **Ré-indexer les documents existants** pour ajouter les métadonnées de catégorie

@@ -90,9 +90,12 @@ mon-import.zip
 | Option | Description |
 |--------|-------------|
 | **Agent cible** | Tous les documents seront associés à cet agent |
+| **Stratégie de chunking** | Utilise la stratégie par défaut de l'agent (configurable dans AgentResource) |
 | **Préfixe de catégorie** | Ajouté devant la catégorie dérivée du chemin |
 | **Profondeur max** | Limite le nombre de niveaux de dossiers pour la catégorie |
 | **Ignorer dossier racine** | Si le ZIP contient un seul dossier racine, l'ignorer |
+
+**Note** : La stratégie de chunking est héritée du champ `default_chunk_strategy` de l'agent. Pour utiliser le chunking LLM, configurez l'agent avec `llm_assisted` avant l'import.
 
 ### Traitement
 
@@ -113,6 +116,7 @@ Permet de gérer finement les chunks d'un document après extraction.
 | Action | Description |
 |--------|-------------|
 | **Édition inline** | Modifier le contenu d'un chunk directement |
+| **Modifier catégorie** | Changer la catégorie d'un chunk (chunking LLM) |
 | **Supprimer** | Supprime le chunk (et son vecteur dans Qdrant) |
 | **Sélection multiple** | Cochez plusieurs chunks pour les fusionner |
 | **Fusionner** | Combine les chunks sélectionnés en un seul |
@@ -172,7 +176,12 @@ Affiche le message d'erreur si l'extraction a échoué.
 
 - **Indexé dans Qdrant** : Indicateur booléen
 - **Date d'indexation**
-- **Stratégie de chunking** : fixed_size, sentence, paragraph, recursive
+- **Stratégie de chunking** : fixed_size, sentence, paragraph, recursive, **llm_assisted**
+- **Méthode d'extraction** : Affiche la méthode utilisée (pdftotext, smalot, ocr, etc.)
+
+### Section "Réponses LLM brutes" (pour llm_assisted)
+
+Si le document a été chunké avec la stratégie LLM, cette section affiche les réponses JSON brutes d'Ollama pour chaque fenêtre traitée. Utile pour le debugging.
 
 ### Onglet "Chunks"
 
@@ -180,6 +189,9 @@ Liste tous les chunks du document avec :
 - **Numéro de chunk**
 - **Nombre de tokens**
 - **Statut d'indexation** (✓ Indexé / ✗ Non indexé)
+- **Catégorie** (badge coloré si chunking LLM)
+- **Résumé** (si chunking LLM)
+- **Mots-clés** (si chunking LLM)
 - **Contenu** (500 premiers caractères)
 
 ---
@@ -411,7 +423,26 @@ Le fichier a été supprimé du storage. Options :
 
 ---
 
-## 10. Bonnes Pratiques
+## 10. Filtrage RAG par Catégorie
+
+Voir [14_llm_chunking.md - Section 15](./14_llm_chunking.md#15-filtrage-rag-par-catégorie) pour la documentation complète.
+
+### Résumé
+
+- Les chunks LLM ont une catégorie assignée automatiquement
+- Le `CategoryDetectionService` détecte la catégorie de la question
+- Le filtrage Qdrant retourne uniquement les chunks de la catégorie détectée
+- Améliore significativement la pertinence des réponses
+
+### Activation
+
+1. Chunker les documents avec la stratégie `llm_assisted`
+2. Activer "Filtrage par catégorie" dans les paramètres RAG de l'agent
+3. Les questions seront automatiquement filtrées par catégorie
+
+---
+
+## 11. Bonnes Pratiques
 
 ### Préparation des documents
 

@@ -668,3 +668,58 @@ app/
 4. **Dashboard**
    - Stats: utilisateurs, agents, sessions, messages
    - Tableau activité récente
+
+---
+
+## 12. Fonctionnalités Avancées (Décembre 2025)
+
+### 12.1 Test d'Agent avec Analyse RAG
+
+La page `/admin/agents/{id}/test` a été enrichie avec :
+
+#### Section "Filtrage par catégorie"
+- **Méthode de détection** : keyword ou embedding
+- **Confiance** : pourcentage de confiance de la détection
+- **Catégories détectées** : liste des catégories identifiées
+- **Résultats filtrés/total** : nombre de chunks correspondant à la catégorie
+- **Fallback utilisé** : indique si le système a dû compléter avec des résultats non filtrés
+
+#### Section "Rapport pour analyse"
+Génère un rapport complet copiable pour debug/analyse :
+- Question posée
+- Agent utilisé et ses paramètres RAG
+- Détails du filtrage par catégorie
+- Sources RAG avec scores, catégories, résumés et contenus
+
+### 12.2 Gestion des Chunks
+
+La page `/admin/documents/{id}/chunks` permet maintenant :
+- **Affichage des catégories** avec badges colorés
+- **Modification de catégorie** pour chaque chunk
+- **Affichage des résumés et mots-clés** générés par le LLM
+- **Ré-indexation** après modification de catégorie
+
+### 12.3 Configuration Agent RAG
+
+L'onglet "Paramètres RAG" dans `AgentResource` inclut :
+
+| Option | Description |
+|--------|-------------|
+| `use_category_filtering` | Active le filtrage par catégorie |
+| `default_chunk_strategy` | Stratégie de chunking par défaut (incl. `llm_assisted`) |
+| `min_rag_score` | Score minimum pour les résultats RAG |
+
+### 12.4 Page de Statut IA
+
+La page `/admin/ai-status-page` affiche maintenant :
+- **Queues séparées** : `ai-messages` et `llm-chunking`
+- **Bouton Stop/Cancel** pour annuler un job en cours
+- **Bouton Delete** pour supprimer un message en échec
+- **Navigation par clic** sur les lignes des datatables
+
+### 12.5 Gestion RAG Globale
+
+La page `/admin/gestion-rag` inclut :
+- **Navigation cliquable** vers les documents et agents
+- **Actions de masse** : tout supprimer avec confirmation
+- **Filtrage par agent** et statut d'indexation
