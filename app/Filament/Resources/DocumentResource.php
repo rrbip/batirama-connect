@@ -258,12 +258,13 @@ class DocumentResource extends Resource
                                     ->columns(5),
 
                                 Forms\Components\Section::make('Texte extrait')
+                                    ->description('Vous pouvez modifier le texte avant de le re-chunker')
                                     ->schema([
                                         Forms\Components\Textarea::make('extracted_text')
                                             ->label('')
-                                            ->rows(10)
-                                            ->disabled()
-                                            ->columnSpanFull(),
+                                            ->rows(15)
+                                            ->columnSpanFull()
+                                            ->hint('Après modification, utilisez "Re-chunker" pour régénérer les chunks'),
                                     ])
                                     ->collapsed()
                                     ->visible(fn ($record) => $record?->extracted_text),
