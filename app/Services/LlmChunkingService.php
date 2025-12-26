@@ -131,18 +131,111 @@ class LlmChunkingService
             'chunk_strategy' => 'llm_assisted',
         ]);
 
+        // Fusionner les chunks consécutifs de même catégorie
+        $mergedCount = $this->mergeConsecutiveChunks($document);
+
         Log::info('LLM Chunking completed', [
             'document_id' => $document->id,
             'total_chunks' => count($allChunks),
+            'merged_chunks' => $mergedCount,
+            'final_chunks' => $document->fresh()->chunk_count,
             'errors' => count($errors),
         ]);
 
         return [
-            'chunks' => $allChunks,
-            'chunk_count' => count($allChunks),
+            'chunks' => $document->chunks()->orderBy('chunk_index')->get()->all(),
+            'chunk_count' => $document->fresh()->chunk_count,
             'window_count' => count($windows),
+            'merged_count' => $mergedCount,
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Fusionne les chunks consécutifs qui ont la même catégorie
+     * Améliore le contexte RAG en évitant la fragmentation
+     */
+    public function mergeConsecutiveChunks(Document $document): int
+    {
+        $chunks = $document->chunks()->orderBy('chunk_index')->get();
+
+        if ($chunks->count() < 2) {
+            return 0;
+        }
+
+        $mergedCount = 0;
+        $chunksToDelete = [];
+        $previousChunk = null;
+
+        foreach ($chunks as $chunk) {
+            // Si c'est le premier chunk ou si la catégorie est différente
+            if ($previousChunk === null ||
+                $previousChunk->category_id !== $chunk->category_id ||
+                $chunk->category_id === null) {
+                $previousChunk = $chunk;
+                continue;
+            }
+
+            // Même catégorie que le précédent - fusionner
+            $newContent = $previousChunk->content . "\n\n" . $chunk->content;
+
+            // Fusionner les keywords s'ils existent
+            $mergedKeywords = array_unique(array_merge(
+                $previousChunk->keywords ?? [],
+                $chunk->keywords ?? []
+            ));
+
+            // Mettre à jour le chunk précédent avec le contenu fusionné
+            $previousChunk->update([
+                'content' => $newContent,
+                'content_hash' => md5($newContent),
+                'token_count' => $this->estimateTokens($newContent),
+                'keywords' => array_values($mergedKeywords),
+                'end_offset' => $chunk->end_offset,
+                'is_indexed' => false,
+                'indexed_at' => null,
+            ]);
+
+            // Marquer ce chunk pour suppression
+            $chunksToDelete[] = $chunk->id;
+            $mergedCount++;
+
+            Log::debug('Chunks merged', [
+                'document_id' => $document->id,
+                'kept_chunk' => $previousChunk->chunk_index,
+                'deleted_chunk' => $chunk->chunk_index,
+                'category' => $previousChunk->category?->name,
+            ]);
+        }
+
+        // Supprimer les chunks fusionnés
+        if (!empty($chunksToDelete)) {
+            DocumentChunk::whereIn('id', $chunksToDelete)->delete();
+
+            // Renuméroter les chunks restants
+            $this->renumberChunks($document);
+
+            // Mettre à jour le compteur de chunks
+            $document->update([
+                'chunk_count' => $document->chunks()->count(),
+            ]);
+        }
+
+        return $mergedCount;
+    }
+
+    /**
+     * Renumérote les chunks séquentiellement après fusion
+     */
+    private function renumberChunks(Document $document): void
+    {
+        $chunks = $document->chunks()->orderBy('chunk_index')->get();
+
+        foreach ($chunks as $index => $chunk) {
+            if ($chunk->chunk_index !== $index) {
+                $chunk->update(['chunk_index' => $index]);
+            }
+        }
     }
 
     /**

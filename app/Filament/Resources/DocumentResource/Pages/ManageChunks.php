@@ -89,6 +89,15 @@ class ManageChunks extends Page
                 ))
                 ->action(fn () => $this->mergeSelectedChunks()),
 
+            Actions\Action::make('mergeByCategory')
+                ->label('Fusionner par catégorie')
+                ->icon('heroicon-o-squares-plus')
+                ->color('warning')
+                ->requiresConfirmation()
+                ->modalHeading('Fusionner les chunks consécutifs de même catégorie')
+                ->modalDescription('Cette action va fusionner automatiquement tous les chunks consécutifs qui ont la même catégorie. Cela améliore la qualité du contexte RAG.')
+                ->action(fn () => $this->mergeConsecutiveChunksByCategory()),
+
             Actions\Action::make('reindexAll')
                 ->label('Ré-indexer tout')
                 ->icon('heroicon-o-arrow-path')
@@ -124,6 +133,32 @@ class ManageChunks extends Page
     public function deselectAllChunks(): void
     {
         $this->selectedChunks = [];
+    }
+
+    /**
+     * Merge consecutive chunks with same category
+     */
+    public function mergeConsecutiveChunksByCategory(): void
+    {
+        $llmChunking = app(\App\Services\LlmChunkingService::class);
+        $mergedCount = $llmChunking->mergeConsecutiveChunks($this->record);
+
+        if ($mergedCount > 0) {
+            Notification::make()
+                ->title('Chunks fusionnés')
+                ->body("{$mergedCount} chunk(s) ont été fusionnés. Pensez à ré-indexer.")
+                ->success()
+                ->send();
+        } else {
+            Notification::make()
+                ->title('Aucune fusion')
+                ->body('Aucun chunk consécutif avec la même catégorie n\'a été trouvé.')
+                ->info()
+                ->send();
+        }
+
+        $this->selectedChunks = [];
+        unset($this->chunks);
     }
 
     /**
