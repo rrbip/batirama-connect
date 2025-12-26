@@ -472,10 +472,20 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Voir')
                     ->icon('heroicon-o-eye')
                     ->color('gray')
-                    ->visible(fn ($record) => $record->url?->storage_path && Storage::disk('local')->exists($record->url->storage_path))
-                    ->modalHeading(fn ($record) => 'Contenu caché: ' . \Illuminate\Support\Str::limit($record->url?->url, 50))
+                    ->visible(fn ($record) => !empty($record->url?->storage_path))
+                    ->modalHeading(fn ($record) => 'Aperçu: ' . \Illuminate\Support\Str::limit($record->url?->url, 50))
                     ->modalContent(function ($record) {
-                        $content = Storage::disk('local')->get($record->url->storage_path);
+                        $storagePath = $record->url->storage_path;
+
+                        // Vérifier si le fichier existe
+                        if (!Storage::disk('local')->exists($storagePath)) {
+                            return view('filament.components.cached-content-missing', [
+                                'url' => $record->url->url,
+                                'storagePath' => $storagePath,
+                            ]);
+                        }
+
+                        $content = Storage::disk('local')->get($storagePath);
                         $contentType = $record->url->content_type ?? 'text/plain';
                         $url = $record->url->url;
                         $isHtml = str_contains($contentType, 'text/html');
@@ -535,6 +545,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Ouvrir')
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->color('gray')
+                    ->visible(fn ($record) => empty($record->url?->storage_path)) // Seulement si pas de cache
                     ->url(fn ($record) => $record->url?->url)
                     ->openUrlInNewTab(),
             ])
