@@ -240,8 +240,8 @@ class CrawlUrlJob implements ShouldQueue
         UrlNormalizer $urlNormalizer,
         array $allowedDomains
     ): void {
-        // Vérifier les limites
-        if ($this->crawl->pages_discovered >= $this->crawl->max_pages) {
+        // Vérifier les limites (0 = illimité)
+        if ($this->crawl->max_pages > 0 && $this->crawl->pages_discovered >= $this->crawl->max_pages) {
             Log::info('Max pages limit reached', ['crawl_id' => $this->crawl->id]);
 
             return;
@@ -260,8 +260,8 @@ class CrawlUrlJob implements ShouldQueue
         $links = $crawler->extractLinks($html, $baseUrl);
 
         foreach ($links as $link) {
-            // Vérifier si on a atteint la limite
-            if ($this->crawl->pages_discovered >= $this->crawl->max_pages) {
+            // Vérifier si on a atteint la limite (0 = illimité)
+            if ($this->crawl->max_pages > 0 && $this->crawl->pages_discovered >= $this->crawl->max_pages) {
                 break;
             }
 
