@@ -40,8 +40,10 @@ class RagService
             minScore: $agent->getLearnedMinScore()
         );
 
-        // 2. Recherche dans la base vectorielle documentaire
-        $ragResults = $this->retrieveContext($agent, $userMessage);
+        // 2. Recherche dans la base vectorielle documentaire (avec détection catégorie)
+        $retrieval = $this->retrieveContextWithDetection($agent, $userMessage);
+        $ragResults = $retrieval['results'];
+        $categoryDetection = $retrieval['category_detection'];
 
         // 3. Hydratation SQL si configurée
         if ($agent->usesHydration() && !empty($ragResults)) {
@@ -86,7 +88,8 @@ class RagService
             messages: $messages,
             learnedResponses: $learnedResponses,
             ragResults: $ragResults,
-            session: $session
+            session: $session,
+            categoryDetection: $categoryDetection
         );
 
         // 8. Ajouter les métadonnées à la réponse
@@ -112,7 +115,8 @@ class RagService
         array $messages,
         array $learnedResponses,
         array $ragResults,
-        ?AiSession $session = null
+        ?AiSession $session = null,
+        ?array $categoryDetection = null
     ): array {
         // Extraire le system prompt envoyé
         $systemPrompt = collect($messages)
@@ -162,6 +166,9 @@ class RagService
                 'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
             ])->values()->toArray(),
 
+            // Détection de catégorie pour le filtrage RAG
+            'category_detection' => $categoryDetection,
+
             // Statistiques
             'stats' => [
                 'learned_count' => count($learnedResponses),
@@ -171,22 +178,39 @@ class RagService
                 'agent_slug' => $agent->slug,
                 'agent_model' => $agent->getModel(),
                 'temperature' => $agent->temperature,
+                'use_category_filtering' => $agent->use_category_filtering ?? false,
             ],
         ];
     }
 
     /**
-     * Recherche les documents pertinents dans Qdrant
+     * Recherche les documents pertinents dans Qdrant (version simple pour rétrocompatibilité)
      */
     public function retrieveContext(Agent $agent, string $query): array
     {
+        return $this->retrieveContextWithDetection($agent, $query)['results'];
+    }
+
+    /**
+     * Recherche les documents pertinents dans Qdrant avec infos de détection de catégorie
+     *
+     * @return array{results: array, category_detection: array|null}
+     */
+    public function retrieveContextWithDetection(Agent $agent, string $query): array
+    {
+        $categoryDetection = null;
+        $usedFallback = false;
+
         try {
             // Vérifier que l'agent a une collection configurée
             if (empty($agent->qdrant_collection)) {
                 Log::info('RAG skipped: No Qdrant collection configured', [
                     'agent' => $agent->slug,
                 ]);
-                return [];
+                return [
+                    'results' => [],
+                    'category_detection' => null,
+                ];
             }
 
             // Générer l'embedding de la requête
@@ -197,7 +221,6 @@ class RagService
 
             // Détecter la catégorie de la question pour pré-filtrer
             $categoryFilter = [];
-            $categoryDetection = null;
 
             if ($agent->use_category_filtering) {
                 $categoryDetection = $this->categoryDetectionService->detect($query, $agent);
@@ -207,12 +230,21 @@ class RagService
                         $categoryDetection['categories']
                     );
 
+                    // Convertir les catégories en array sérialisable
+                    $categoryDetection['categories'] = $categoryDetection['categories']->map(fn($c) => [
+                        'id' => $c->id,
+                        'name' => $c->name,
+                        'slug' => $c->slug,
+                    ])->values()->toArray();
+
                     Log::info('RAG category filter applied', [
                         'agent' => $agent->slug,
-                        'detected_categories' => $categoryDetection['categories']->pluck('name')->toArray(),
+                        'detected_categories' => collect($categoryDetection['categories'])->pluck('name')->toArray(),
                         'detection_method' => $categoryDetection['method'],
                         'confidence' => $categoryDetection['confidence'],
                     ]);
+                } else {
+                    $categoryDetection['categories'] = [];
                 }
             }
 
@@ -234,8 +266,12 @@ class RagService
                 scoreThreshold: $minScore
             );
 
+            $filteredCount = count($results);
+
             // Si pas assez de résultats avec le filtre, refaire une recherche sans filtre
             if (!empty($categoryFilter) && count($results) < 2) {
+                $usedFallback = true;
+
                 Log::info('RAG fallback: not enough filtered results, searching without filter', [
                     'agent' => $agent->slug,
                     'filtered_count' => count($results),
@@ -259,6 +295,13 @@ class RagService
                 $results = array_merge($results, $additionalResults);
             }
 
+            // Ajouter les infos de fallback à la détection
+            if ($categoryDetection !== null) {
+                $categoryDetection['used_fallback'] = $usedFallback;
+                $categoryDetection['filtered_results_count'] = $filteredCount;
+                $categoryDetection['total_results_count'] = count($results);
+            }
+
             Log::info('RAG search completed', [
                 'agent' => $agent->slug,
                 'results_count' => count($results),
@@ -266,7 +309,10 @@ class RagService
                 'results_categories' => collect($results)->pluck('payload.chunk_category')->filter()->toArray(),
             ]);
 
-            return $results;
+            return [
+                'results' => $results,
+                'category_detection' => $categoryDetection,
+            ];
 
         } catch (\Exception $e) {
             Log::error('RAG retrieval failed', [
@@ -275,7 +321,10 @@ class RagService
                 'error' => $e->getMessage()
             ]);
 
-            return [];
+            return [
+                'results' => [],
+                'category_detection' => $categoryDetection,
+            ];
         }
     }
 
