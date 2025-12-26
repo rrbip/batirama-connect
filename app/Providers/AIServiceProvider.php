@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Services\AI\CategoryDetectionService;
 use App\Services\AI\DispatcherService;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\HydrationService;
@@ -47,6 +48,12 @@ class AIServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(CategoryDetectionService::class, function ($app) {
+            return new CategoryDetectionService(
+                $app->make(EmbeddingService::class)
+            );
+        });
+
         $this->app->singleton(RagService::class, function ($app) {
             return new RagService(
                 $app->make(EmbeddingService::class),
@@ -54,7 +61,8 @@ class AIServiceProvider extends ServiceProvider
                 $app->make(OllamaService::class),
                 $app->make(HydrationService::class),
                 $app->make(PromptBuilder::class),
-                $app->make(LearningService::class)
+                $app->make(LearningService::class),
+                $app->make(CategoryDetectionService::class)
             );
         });
 
