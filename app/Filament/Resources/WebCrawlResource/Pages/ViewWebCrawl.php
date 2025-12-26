@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\WebCrawlResource\Pages;
 
+use App\Filament\Resources\DocumentResource;
 use App\Filament\Resources\WebCrawlResource;
 use App\Jobs\Crawler\CrawlUrlJob;
 use App\Jobs\Crawler\StartWebCrawlJob;
@@ -391,7 +392,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Document')
                     ->limit(30)
                     ->url(fn ($record) => $record->document_id
-                        ? route('filament.admin.resources.documents.view', ['record' => $record->document_id])
+                        ? DocumentResource::getUrl('edit', ['record' => $record->document_id])
                         : null),
 
                 Tables\Columns\TextColumn::make('fetched_at')
