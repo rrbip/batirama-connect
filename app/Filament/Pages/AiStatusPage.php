@@ -441,7 +441,14 @@ class AiStatusPage extends Page
 
                 if ($isReserved) {
                     // Job en cours de traitement
-                    $isStuck = $reservedTime > 300;
+                    // Seuils différents par queue (en secondes)
+                    $stuckThresholds = [
+                        'llm-chunking' => 1800, // 30 minutes - LLM peut être lent
+                        'default' => 600,       // 10 minutes
+                        'ai-messages' => 300,   // 5 minutes
+                    ];
+                    $threshold = $stuckThresholds[$queue] ?? 300;
+                    $isStuck = $reservedTime > $threshold;
 
                     $queues[$queue]['processing'] = array_merge($jobData, [
                         'processing_time' => $reservedTime > 60 ? gmdate('H:i:s', $reservedTime) : "{$reservedTime}s",
