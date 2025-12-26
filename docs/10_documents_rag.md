@@ -22,7 +22,7 @@ La gestion des Documents RAG permet d'importer, indexer et rechercher des docume
 |---------|-------------|
 | **Titre** | Nom du document ou nom original du fichier |
 | **Agent** | Agent IA associé (détermine la collection Qdrant) |
-| **Type** | Extension du fichier (pdf, txt, docx, etc.) |
+| **Type** | Extension du fichier (pdf, txt, docx, images, etc.) |
 | **Extraction** | Statut : En attente, En cours, Terminé, Échoué |
 | **Indexé** | Indicateur si le document est dans Qdrant |
 | **Chunks** | Nombre de morceaux indexés |
@@ -35,8 +35,16 @@ La gestion des Documents RAG permet d'importer, indexer et rechercher des docume
 | **Télécharger** | ↓ | Télécharge le fichier original |
 | **Retraiter** | ↻ | Relance l'extraction et l'indexation |
 | **Indexer** | 🔍 | Indexe uniquement (si déjà extrait) |
+| **Chunks** | ⊞ | Ouvre la page de gestion des chunks |
 | **Modifier** | ✏️ | Ouvre le formulaire d'édition |
 | **Supprimer** | 🗑️ | Supprime le document et ses chunks |
+
+### Actions en-tête
+
+| Action | Description |
+|--------|-------------|
+| **Import en masse** | Ouvre la page d'import multiple (ZIP ou fichiers) |
+| **Nouveau** | Crée un document unitaire |
 
 ### Filtres
 
@@ -47,7 +55,79 @@ La gestion des Documents RAG permet d'importer, indexer et rechercher des docume
 
 ---
 
-## 2. Formulaire d'Édition
+## 2. Import en Masse
+
+**URL** : `/admin/documents/bulk-import`
+
+Permet d'importer plusieurs documents simultanément.
+
+### Option 1 : Fichiers Multiples (Drag & Drop)
+
+- Glissez-déposez jusqu'à **100 fichiers** simultanément
+- Formats acceptés : PDF, DOCX, TXT, MD, images (JPG, PNG, etc.)
+- Le nom du fichier devient le titre du document
+- Tous les fichiers auront la même catégorie (préfixe optionnel)
+
+### Option 2 : Archive ZIP
+
+- Upload d'un fichier ZIP (jusqu'à 500MB)
+- La **structure des dossiers** définit les catégories
+
+**Exemple de structure ZIP :**
+```
+mon-import.zip
+├── Fiches Techniques/
+│   ├── Isolation/
+│   │   └── laine-verre.pdf      → Catégorie: "Fiches Techniques > Isolation"
+│   └── Plomberie/
+│       └── raccords.pdf         → Catégorie: "Fiches Techniques > Plomberie"
+└── Guides/
+    └── installation.pdf         → Catégorie: "Guides"
+```
+
+### Configuration de l'import
+
+| Option | Description |
+|--------|-------------|
+| **Agent cible** | Tous les documents seront associés à cet agent |
+| **Préfixe de catégorie** | Ajouté devant la catégorie dérivée du chemin |
+| **Profondeur max** | Limite le nombre de niveaux de dossiers pour la catégorie |
+| **Ignorer dossier racine** | Si le ZIP contient un seul dossier racine, l'ignorer |
+
+### Traitement
+
+- Les fichiers sont traités en **arrière-plan** via la queue Laravel
+- Chaque document est automatiquement extrait et indexé
+- Consultez la liste des documents pour suivre la progression
+
+---
+
+## 3. Gestion des Chunks
+
+**URL** : `/admin/documents/{id}/chunks`
+
+Permet de gérer finement les chunks d'un document après extraction.
+
+### Fonctionnalités
+
+| Action | Description |
+|--------|-------------|
+| **Édition inline** | Modifier le contenu d'un chunk directement |
+| **Supprimer** | Supprime le chunk (et son vecteur dans Qdrant) |
+| **Sélection multiple** | Cochez plusieurs chunks pour les fusionner |
+| **Fusionner** | Combine les chunks sélectionnés en un seul |
+| **Ré-indexer tout** | Régénère les embeddings de tous les chunks |
+| **Ré-indexer un** | Régénère l'embedding d'un chunk modifié |
+
+### Cas d'usage
+
+- **Correction OCR** : Corriger les erreurs d'extraction sur les images
+- **Fusion** : Regrouper des chunks trop petits pour plus de contexte
+- **Nettoyage** : Supprimer les chunks non pertinents (en-têtes, pieds de page)
+
+---
+
+## 4. Formulaire d'Édition
 
 ### Onglet "Informations"
 
@@ -61,7 +141,7 @@ La gestion des Documents RAG permet d'importer, indexer et rechercher des docume
 #### Section "Fichier actuel"
 Affiche les informations du fichier actuel :
 - Nom du fichier
-- Type (PDF, TXT, etc.)
+- Type (PDF, TXT, images, etc.)
 - Statut (présent/manquant)
 - Taille
 - Date d'ajout
@@ -69,7 +149,7 @@ Affiche les informations du fichier actuel :
 
 **Actions** :
 - **Télécharger** : Télécharge le fichier
-- **Voir** : Ouvre le fichier dans le navigateur (PDF uniquement)
+- **Voir** : Ouvre le fichier dans le navigateur (PDF et images)
 
 #### Section "Remplacer le fichier"
 Permet d'uploader un nouveau fichier pour remplacer l'actuel. Le document sera automatiquement retraité après remplacement.
@@ -104,13 +184,13 @@ Liste tous les chunks du document avec :
 
 ---
 
-## 3. Pipeline de Traitement
+## 5. Pipeline de Traitement
 
 ### Étapes
 
 ```
 1. Upload        → Fichier stocké dans storage/app/documents/
-2. Extraction    → Texte extrait via pdftotext ou parsers
+2. Extraction    → Texte extrait via pdftotext, parsers ou OCR
 3. Chunking      → Découpage en morceaux de ~1000 tokens
 4. Embedding     → Génération de vecteurs via Ollama
 5. Indexation    → Stockage dans Qdrant
@@ -126,19 +206,25 @@ Ce job exécute automatiquement toutes les étapes. En cas d'erreur, il retry 3 
 
 ---
 
-## 4. Types de Fichiers Supportés
+## 6. Types de Fichiers Supportés
 
 | Extension | Parser | Notes |
 |-----------|--------|-------|
-| **pdf** | pdftotext (poppler) + smalot/pdfparser | pdftotext en priorité |
+| **pdf** | pdftotext + smalot/pdfparser + OCR fallback | Plusieurs méthodes, meilleur résultat choisi |
 | **txt** | Lecture directe | Encodage UTF-8 requis |
 | **md** | Lecture directe | Markdown |
 | **docx** | ZipArchive + XML | Format Office moderne |
 | **doc** | Extraction basique | Format ancien, résultats variables |
+| **jpg, jpeg** | Tesseract OCR | Extraction texte via OCR |
+| **png** | Tesseract OCR | Extraction texte via OCR |
+| **gif** | Tesseract OCR | Extraction texte via OCR |
+| **bmp** | Tesseract OCR | Extraction texte via OCR |
+| **tiff, tif** | Tesseract OCR | Extraction texte via OCR |
+| **webp** | Tesseract OCR | Extraction texte via OCR |
 
 ### Extraction PDF
 
-Le système essaie **deux méthodes en parallèle** et choisit le meilleur résultat :
+Le système essaie **plusieurs méthodes** et choisit le meilleur résultat :
 
 1. **pdftotext** (poppler-utils)
    - Essaie 3 modes : `-raw`, `-layout`, et défaut
@@ -149,20 +235,43 @@ Le système essaie **deux méthodes en parallèle** et choisit le meilleur résu
    - Parser PHP natif
    - Consomme plus de mémoire mais peut mieux gérer certains encodages
 
+3. **OCR Fallback** (Tesseract)
+   - Si le taux de mots tronqués dépasse 5%, l'OCR est tenté
+   - Convertit les pages PDF en images puis applique Tesseract
+   - Utile pour les PDFs avec problèmes de ligatures ou scannés
+
 **Comparaison automatique** :
-- Les deux méthodes sont exécutées
-- Le système compte les caractères problématiques (U+FFFD, ligatures non décodées)
-- Le résultat avec le moins de caractères problématiques est utilisé
-- En cas d'égalité, le texte le plus long est préféré
+- Les méthodes sont exécutées et comparées
+- Le système compte les caractères problématiques (U+FFFD, mots tronqués)
+- Le résultat avec le moins de problèmes est utilisé
 
 **Gestion des ligatures** :
 Les polices PDF utilisent parfois des ligatures typographiques (ff, fi, fl, ffi, ffl, st) qui peuvent causer des caractères manquants. Le système :
 - Remplace automatiquement les ligatures Unicode par leurs caractères composants
 - Supprime les caractères de remplacement (U+FFFD) résiduels
+- Détecte les patterns de mots tronqués (ex: "rénovaon" → "rénovation")
+
+### Extraction Images (OCR)
+
+Pour les fichiers images (JPG, PNG, etc.), le système utilise **Tesseract OCR** :
+
+```
+Image → Tesseract OCR → Texte brut → Chunking → Indexation
+```
+
+**Configuration Tesseract** :
+- Langues : Français (fra) + Anglais (eng) comme fallback
+- Mode de segmentation : Automatique (PSM 3)
+- Moteur : LSTM + Legacy (OEM 3)
+
+**Limitations** :
+- Qualité dépend de la résolution de l'image (300 DPI recommandé)
+- Texte manuscrit mal reconnu
+- Tableaux et mise en page complexes peuvent être mal interprétés
 
 ---
 
-## 5. Configuration
+## 7. Configuration
 
 ### Variables d'environnement
 
@@ -177,6 +286,9 @@ RAG_CHUNK_OVERLAP=100         # Tokens de chevauchement
 # Indexation
 RAG_MAX_RESULTS=5             # Résultats max par recherche
 RAG_MIN_SCORE=0.5             # Score minimum (0-1)
+
+# OCR (optionnel)
+TESSERACT_PATH=/usr/bin/tesseract  # Chemin vers le binaire
 ```
 
 ### PHP (docker/app/php.ini)
@@ -188,21 +300,35 @@ upload_max_filesize = 50M
 post_max_size = 100M
 ```
 
+### Docker (packages requis)
+
+```dockerfile
+# Dans docker/app/Dockerfile
+RUN apk add --no-cache \
+    poppler-utils \           # pdftotext, pdftoppm
+    tesseract-ocr \           # OCR
+    tesseract-ocr-data-fra \  # Données françaises
+    tesseract-ocr-data-eng    # Données anglaises
+```
+
 ---
 
-## 6. Architecture Technique
+## 8. Architecture Technique
 
 ### Fichiers principaux
 
 ```
 app/Filament/Resources/DocumentResource.php          # CRUD Filament
 app/Filament/Resources/DocumentResource/Pages/
-  ├── ListDocuments.php                              # Liste
+  ├── ListDocuments.php                              # Liste + bouton import
   ├── CreateDocument.php                             # Création
-  └── EditDocument.php                               # Édition + remplacement
+  ├── EditDocument.php                               # Édition + remplacement
+  ├── ManageChunks.php                               # Gestion des chunks
+  └── BulkImportDocuments.php                        # Import en masse
 app/Http/Controllers/Admin/DocumentController.php    # Download/View
 app/Jobs/ProcessDocumentJob.php                      # Pipeline de traitement
-app/Services/DocumentExtractorService.php            # Extraction texte
+app/Jobs/ProcessBulkImportJob.php                    # Import en masse
+app/Services/DocumentExtractorService.php            # Extraction texte + OCR
 app/Services/DocumentChunkerService.php              # Découpage
 ```
 
@@ -212,13 +338,19 @@ app/Services/DocumentChunkerService.php              # Découpage
 // Téléchargement
 GET /admin/documents/{document}/download
 
-// Visualisation (PDF)
+// Visualisation (PDF et images)
 GET /admin/documents/{document}/view
+
+// Gestion des chunks
+GET /admin/documents/{document}/chunks
+
+// Import en masse
+GET /admin/documents/bulk-import
 ```
 
 ---
 
-## 7. Dépannage
+## 9. Dépannage
 
 ### Erreur "Allowed memory size exhausted"
 
@@ -238,19 +370,32 @@ docker compose up -d
 ### Document avec 0 chunks
 
 1. Vérifier le texte extrait dans l'onglet "Extraction"
-2. Si vide ou très court : le PDF est probablement un scan (image)
-3. Solution : convertir en PDF textuel ou utiliser OCR
+2. Si vide ou très court : le document est probablement un scan (image)
+3. Solution : le système tentera automatiquement l'OCR si le texte est insuffisant
+
+### Erreur OCR "Tesseract not found"
+
+1. Vérifier que Tesseract est installé dans le conteneur **queue** (pas juste app) :
+```bash
+docker exec aim_queue tesseract --version
+```
+
+2. Si non installé, rebuilder tous les containers :
+```bash
+docker compose build --no-cache app scheduler queue
+docker compose up -d
+```
 
 ### Caractères manquants dans le texte extrait
 
-Si certains mots ont des lettres manquantes (ex: "mé�er" au lieu de "métier") :
+Si certains mots ont des lettres manquantes (ex: "rénovaon" au lieu de "rénovation") :
 
 1. **Cause probable** : le PDF utilise des ligatures typographiques (ti, fi, fl, etc.)
-2. **Vérifier les logs** : `docker compose logs queue | grep "PDF extraction comparison"`
-3. **Solutions** :
+2. **Le système tente automatiquement l'OCR** si trop de mots tronqués sont détectés
+3. **Vérifier les logs** : `docker compose logs queue | grep "OCR"`
+4. **Solutions alternatives** :
    - Réexporter le PDF source avec une police sans ligatures
-   - Utiliser un outil de conversion PDF qui décompose les ligatures
-   - Essayer de convertir le PDF en texte avec Adobe Acrobat ou un outil similaire
+   - Utiliser la page "Gérer les chunks" pour corriger manuellement
 
 ### Indexation échoue
 
@@ -266,11 +411,12 @@ Le fichier a été supprimé du storage. Options :
 
 ---
 
-## 8. Bonnes Pratiques
+## 10. Bonnes Pratiques
 
 ### Préparation des documents
 
-- **PDFs** : Utiliser des PDFs textuels, pas des scans
+- **PDFs** : Utiliser des PDFs textuels quand possible, le système gère les scans via OCR
+- **Images** : Résolution de 300 DPI minimum pour une bonne reconnaissance OCR
 - **Taille** : Éviter les documents > 10MB (long à traiter)
 - **Structure** : Les documents bien structurés (titres, paragraphes) donnent de meilleurs chunks
 
@@ -279,3 +425,9 @@ Le fichier a été supprimé du storage. Options :
 - **Catégoriser** les documents (documentation, FAQ, support)
 - **Utiliser des titres descriptifs** pour faciliter le debugging
 - **Un agent = une thématique** : ne pas mélanger les domaines
+
+### Import en masse
+
+- **Organiser les dossiers** dans le ZIP pour avoir des catégories cohérentes
+- **Limiter la profondeur** à 2-3 niveaux pour des catégories lisibles
+- **Vérifier les fichiers** avant import (pas de doublons, formats corrects)

@@ -179,11 +179,18 @@ app/
     'temperature' => 0.7,
     'max_tokens' => 2048,
 
-    // Configuration RAG
+    // Configuration RAG (globale)
     'retrieval_mode' => 'SQL_HYDRATION', // ou TEXT_ONLY
     'qdrant_collection' => 'agent_btp_ouvrages',
     'similarity_threshold' => 0.75,
     'max_results' => 5,
+
+    // Configuration RAG avancée (par agent, avec fallback sur config globale)
+    'min_rag_score' => 0.5,          // Score minimum pour inclure un document RAG
+    'max_learned_responses' => 3,     // Nombre max de réponses apprises à inclure
+    'learned_min_score' => 0.75,      // Score minimum pour les réponses apprises
+    'context_token_limit' => 4000,    // Limite de tokens pour le contexte RAG
+    'strict_mode' => false,           // Si true, l'agent ne répond QU'avec les infos du contexte
 
     // Configuration visuelle
     'avatar' => '...', // Upload image
@@ -191,6 +198,13 @@ app/
     'placeholder' => 'Posez votre question...',
 ]
 ```
+
+**Mode Strict (strict_mode)** :
+Quand activé, l'agent ajoute des garde-fous dans son prompt pour :
+- Ne répondre QU'avec les informations présentes dans le contexte fourni
+- Dire "Je n'ai pas cette information" si la réponse n'est pas dans le contexte
+- Ne jamais inventer ou extrapoler d'informations
+- Citer les sources utilisées pour chaque affirmation
 
 **Actions spéciales :**
 - **Tester l'agent** : Ouvrir une interface de chat pour tester
