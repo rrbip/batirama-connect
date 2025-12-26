@@ -414,11 +414,33 @@ class CrawlUrlJob implements ShouldQueue
      */
     private function checkCrawlCompletion(): void
     {
+        // Rafraîchir le crawl pour avoir les stats à jour
+        $this->crawl->refresh();
+
+        // Ne pas compléter si le crawl n'est pas en cours
+        if ($this->crawl->status !== 'running') {
+            return;
+        }
+
         $pendingCount = WebCrawlUrlCrawl::where('crawl_id', $this->crawl->id)
             ->whereIn('status', ['pending', 'fetching'])
             ->count();
 
-        if ($pendingCount === 0) {
+        // Vérifier aussi qu'il y a des jobs en queue pour ce crawl
+        $queuedJobsCount = \Illuminate\Support\Facades\DB::table('jobs')
+            ->where('payload', 'like', '%CrawlUrlJob%')
+            ->where('payload', 'like', '%"crawl_id":' . $this->crawl->id . '%')
+            ->count();
+
+        Log::debug('Checking crawl completion', [
+            'crawl_id' => $this->crawl->id,
+            'pending_entries' => $pendingCount,
+            'queued_jobs' => $queuedJobsCount,
+            'pages_discovered' => $this->crawl->pages_discovered,
+            'pages_crawled' => $this->crawl->pages_crawled,
+        ]);
+
+        if ($pendingCount === 0 && $queuedJobsCount === 0) {
             $this->crawl->update([
                 'status' => 'completed',
                 'completed_at' => now(),
