@@ -18,6 +18,7 @@
         "laravel/tinker": "^2.10",
         "livewire/livewire": "^3.6",
         "smalot/pdfparser": "^2.12",
+        "symfony/dom-crawler": "^7.0",
         "thiagoalessio/tesseract_ocr": "^2.13"
     },
     "require-dev": {
