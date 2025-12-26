@@ -156,15 +156,22 @@ class LearningService
     }
 
     /**
-     * Valide un message sans apprentissage
+     * Valide un message ET l'ajoute à la base d'apprentissage
+     * (la réponse originale est considérée comme correcte)
      */
     public function validate(AiMessage $message, int $validatorId): bool
     {
-        return $message->update([
-            'validation_status' => 'validated',
-            'validated_by' => $validatorId,
-            'validated_at' => now(),
-        ]);
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
+            ]);
+        }
+
+        // Valider ET apprendre (sans correction = réponse originale)
+        return $this->validateAndLearn($message, $validator, null);
     }
 
     /**

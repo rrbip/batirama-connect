@@ -148,7 +148,7 @@
                         <div>
                             <p class="font-semibold text-success-600 dark:text-success-400">Valider</p>
                             <p class="text-gray-500 dark:text-gray-400">
-                                Marque la reponse comme correcte. Utile pour le suivi qualite mais n'impacte pas les futures reponses.
+                                Marque la reponse comme correcte et l'indexe pour l'apprentissage. Les futures questions similaires beneficieront de cette reponse validee.
                             </p>
                         </div>
                     </div>
@@ -186,7 +186,7 @@
                     {{-- Info supplementaire --}}
                     <div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
                         <p class="text-gray-400 dark:text-gray-500 italic">
-                            Seul "Corriger" ameliore les futures reponses de l'agent en indexant la correction dans la base vectorielle.
+                            "Valider" et "Corriger" ameliorent les futures reponses en indexant dans la base vectorielle d'apprentissage.
                         </p>
                     </div>
                 </div>
