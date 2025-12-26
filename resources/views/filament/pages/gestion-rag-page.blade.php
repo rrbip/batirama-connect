@@ -178,7 +178,8 @@
 
                     <div class="mt-4 text-sm text-gray-500 dark:text-gray-400">
                         <strong>Commande worker :</strong>
-                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=llm-chunking</code>
+                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=default,llm-chunking</code>
+                        <div class="mt-1 text-xs">💡 Les messages IA (default) sont prioritaires sur le chunking LLM</div>
                     </div>
                 </x-filament::section>
 

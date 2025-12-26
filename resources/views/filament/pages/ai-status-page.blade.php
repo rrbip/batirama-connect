@@ -116,11 +116,13 @@
                         <div class="flex items-start gap-2">
                             <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
                             <div class="text-sm text-warning-700 dark:text-warning-300">
-                                <strong>Driver database actif.</strong> Assurez-vous que les workers sont en cours d'exécution:
+                                <strong>Driver database actif.</strong> Assurez-vous qu'un worker est en cours d'exécution:
                                 <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-php artisan queue:work --queue=default
-php artisan queue:work --queue=llm-chunking
+php artisan queue:work --queue=default,llm-chunking
                                 </code>
+                                <div class="mt-2 text-xs text-gray-500">
+                                    💡 L'ordre des queues définit la priorité : les messages IA (default) passent avant le chunking LLM.
+                                </div>
                             </div>
                         </div>
                     </div>
