@@ -412,6 +412,55 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'error' => 'Erreur',
                     ]),
 
+                Tables\Filters\SelectFilter::make('http_status')
+                    ->label('HTTP')
+                    ->options([
+                        '2xx' => '2xx (Succès)',
+                        '3xx' => '3xx (Redirection)',
+                        '4xx' => '4xx (Erreur client)',
+                        '5xx' => '5xx (Erreur serveur)',
+                    ])
+                    ->query(function ($query, array $data) {
+                        if (empty($data['value'])) {
+                            return $query;
+                        }
+                        $range = match ($data['value']) {
+                            '2xx' => [200, 299],
+                            '3xx' => [300, 399],
+                            '4xx' => [400, 499],
+                            '5xx' => [500, 599],
+                            default => null,
+                        };
+                        if ($range) {
+                            return $query->whereHas('url', fn ($q) => $q->whereBetween('http_status', $range));
+                        }
+                        return $query;
+                    }),
+
+                Tables\Filters\SelectFilter::make('content_type')
+                    ->label('Type')
+                    ->options([
+                        'html' => 'HTML',
+                        'pdf' => 'PDF',
+                        'image' => 'Image',
+                        'other' => 'Autre',
+                    ])
+                    ->query(function ($query, array $data) {
+                        if (empty($data['value'])) {
+                            return $query;
+                        }
+                        return $query->whereHas('url', function ($q) use ($data) {
+                            match ($data['value']) {
+                                'html' => $q->where('content_type', 'like', '%text/html%'),
+                                'pdf' => $q->where('content_type', 'like', '%pdf%'),
+                                'image' => $q->where('content_type', 'like', 'image/%'),
+                                'other' => $q->where('content_type', 'not like', '%text/html%')
+                                    ->where('content_type', 'not like', '%pdf%')
+                                    ->where('content_type', 'not like', 'image/%'),
+                            };
+                        });
+                    }),
+
                 Tables\Filters\SelectFilter::make('depth')
                     ->label('Profondeur')
                     ->options(fn () => collect(range(0, 10))->mapWithKeys(fn ($d) => [$d => "Niveau $d"])->toArray()),
@@ -426,19 +475,16 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->modalContent(function ($record) {
                         $content = Storage::disk('local')->get($record->url->storage_path);
                         $contentType = $record->url->content_type ?? 'text/plain';
+                        $url = $record->url->url;
 
-                        // Si c'est du HTML, l'afficher proprement
-                        if (str_contains($contentType, 'text/html')) {
-                            return view('filament.components.cached-html-viewer', [
-                                'content' => $content,
-                                'url' => $record->url->url,
-                            ]);
-                        }
-
-                        // Sinon afficher en texte brut
+                        // Viewer unifié avec switch aperçu/code
                         return view('filament.components.cached-content-viewer', [
                             'content' => $content,
                             'contentType' => $contentType,
+                            'url' => $url,
+                            'isHtml' => str_contains($contentType, 'text/html'),
+                            'isImage' => str_starts_with($contentType, 'image/'),
+                            'isPdf' => str_contains($contentType, 'pdf'),
                         ]);
                     })
                     ->modalWidth('7xl')
