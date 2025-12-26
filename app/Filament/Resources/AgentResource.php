@@ -223,6 +223,32 @@ class AgentResource extends Resource
                                             ->columnSpanFull(),
                                     ]),
 
+                                Forms\Components\Section::make('Traitement des documents')
+                                    ->description('Paramètres par défaut pour les nouveaux documents et le crawler')
+                                    ->schema([
+                                        Forms\Components\Select::make('default_extraction_method')
+                                            ->label('Méthode d\'extraction PDF')
+                                            ->options([
+                                                'auto' => 'Automatique (texte si disponible, sinon OCR)',
+                                                'text' => 'Texte uniquement (pdftotext)',
+                                                'ocr' => 'OCR forcé (Tesseract)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Méthode utilisée pour extraire le texte des PDFs'),
+
+                                        Forms\Components\Select::make('default_chunk_strategy')
+                                            ->label('Stratégie de découpage')
+                                            ->options([
+                                                'sentence' => 'Par phrases (recommandé)',
+                                                'paragraph' => 'Par paragraphes',
+                                                'fixed' => 'Taille fixe (500 tokens)',
+                                                'semantic' => 'Sémantique (expérimental)',
+                                            ])
+                                            ->default('sentence')
+                                            ->helperText('Méthode de découpage du texte en chunks pour l\'indexation'),
+                                    ])
+                                    ->columns(2),
+
                                 Forms\Components\Section::make('Configuration Hydratation')
                                     ->schema([
                                         Forms\Components\KeyValue::make('hydration_config')
