@@ -37,6 +37,66 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('reset')
+                ->label('Tout supprimer')
+                ->icon('heroicon-o-trash')
+                ->color('danger')
+                ->requiresConfirmation()
+                ->modalHeading('Supprimer toutes les données et recommencer')
+                ->modalDescription('Cette action va supprimer toutes les URLs crawlées, les documents créés et les fichiers en cache. Le crawl redémarrera de zéro.')
+                ->modalSubmitActionLabel('Oui, tout supprimer')
+                ->action(function () {
+                    // Supprimer les fichiers en cache
+                    foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
+                        if ($entry->url?->storage_path && Storage::disk('local')->exists($entry->url->storage_path)) {
+                            Storage::disk('local')->delete($entry->url->storage_path);
+                        }
+                    }
+
+                    // Supprimer les documents créés par ce crawl
+                    $this->record->documents()->delete();
+
+                    // Supprimer toutes les entrées d'URLs
+                    $this->record->urlEntries()->delete();
+
+                    // Réinitialiser les compteurs
+                    $this->record->update([
+                        'status' => 'pending',
+                        'pages_discovered' => 0,
+                        'pages_crawled' => 0,
+                        'pages_indexed' => 0,
+                        'pages_skipped' => 0,
+                        'pages_error' => 0,
+                        'documents_found' => 0,
+                        'images_found' => 0,
+                        'total_size_bytes' => 0,
+                        'started_at' => null,
+                        'completed_at' => null,
+                        'paused_at' => null,
+                    ]);
+
+                    Notification::make()
+                        ->title('Données supprimées')
+                        ->body('Toutes les données ont été supprimées. Vous pouvez maintenant relancer le crawl.')
+                        ->success()
+                        ->send();
+                }),
+
+            Actions\Action::make('start_crawl')
+                ->label('Lancer le crawl')
+                ->icon('heroicon-o-play')
+                ->color('success')
+                ->visible(fn () => $this->record->status === 'pending' && $this->record->urlEntries()->count() === 0)
+                ->action(function () {
+                    StartWebCrawlJob::dispatch($this->record);
+
+                    Notification::make()
+                        ->title('Crawl lancé')
+                        ->body('Le crawl a démarré.')
+                        ->success()
+                        ->send();
+                }),
+
             Actions\Action::make('recrawl')
                 ->label('Relancer le crawl')
                 ->icon('heroicon-o-arrow-path')
