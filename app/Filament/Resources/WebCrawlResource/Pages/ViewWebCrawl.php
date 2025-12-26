@@ -7,12 +7,17 @@ namespace App\Filament\Resources\WebCrawlResource\Pages;
 use App\Filament\Resources\DocumentResource;
 use App\Filament\Resources\WebCrawlResource;
 use App\Jobs\Crawler\CrawlUrlJob;
+use App\Jobs\Crawler\IndexAgentUrlJob;
 use App\Jobs\Crawler\StartWebCrawlJob;
+use App\Models\Agent;
+use App\Models\AgentWebCrawl;
 use App\Models\WebCrawlUrl;
 use App\Models\WebCrawlUrlCrawl;
 use App\Services\Crawler\UrlNormalizer;
 use Filament\Actions;
+use Filament\Forms;
 use Filament\Infolists\Components\Grid;
+use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
@@ -40,13 +45,90 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('add_agent')
+                ->label('Ajouter un agent')
+                ->icon('heroicon-o-plus')
+                ->color('primary')
+                ->form([
+                    Forms\Components\Select::make('agent_id')
+                        ->label('Agent')
+                        ->options(
+                            Agent::whereNotIn('id', $this->record->agents->pluck('id'))
+                                ->pluck('name', 'id')
+                        )
+                        ->required()
+                        ->searchable(),
+
+                    Forms\Components\Radio::make('url_filter_mode')
+                        ->label('Mode de filtrage')
+                        ->options([
+                            'exclude' => 'Exclure les patterns (indexe tout sauf les URLs matchant)',
+                            'include' => 'Inclure uniquement (indexe seulement les URLs matchant)',
+                        ])
+                        ->default('exclude'),
+
+                    Forms\Components\Textarea::make('url_patterns')
+                        ->label('Patterns d\'URLs')
+                        ->placeholder("/blog/*\n/products/*.html")
+                        ->helperText('Un pattern par ligne. Vide = tout indexer')
+                        ->rows(3),
+
+                    Forms\Components\CheckboxList::make('content_types')
+                        ->label('Types de contenu à indexer')
+                        ->options([
+                            'html' => 'HTML',
+                            'pdf' => 'PDF',
+                            'image' => 'Images',
+                            'document' => 'Documents (Word, texte...)',
+                        ])
+                        ->default(['html', 'pdf', 'image', 'document']),
+
+                    Forms\Components\Select::make('chunk_strategy')
+                        ->label('Stratégie de chunking')
+                        ->options([
+                            '' => 'Par défaut de l\'agent',
+                            'simple' => 'Simple (découpage par taille)',
+                            'html_semantic' => 'HTML Sémantique (balises)',
+                            'llm_assisted' => 'LLM (découpage intelligent)',
+                        ])
+                        ->default(''),
+                ])
+                ->action(function (array $data) {
+                    // Convertir les patterns
+                    $patterns = $data['url_patterns']
+                        ? array_filter(array_map('trim', explode("\n", $data['url_patterns'])))
+                        : [];
+
+                    // Créer la configuration agent-crawl
+                    $agentConfig = AgentWebCrawl::create([
+                        'agent_id' => $data['agent_id'],
+                        'web_crawl_id' => $this->record->id,
+                        'url_filter_mode' => $data['url_filter_mode'],
+                        'url_patterns' => $patterns,
+                        'content_types' => $data['content_types'],
+                        'chunk_strategy' => $data['chunk_strategy'] ?: null,
+                        'index_status' => 'pending',
+                    ]);
+
+                    // Si le crawl est terminé, lancer l'indexation pour cet agent
+                    if ($this->record->status === 'completed') {
+                        $this->startAgentIndexation($agentConfig);
+                    }
+
+                    Notification::make()
+                        ->title('Agent ajouté')
+                        ->body('L\'agent a été lié au crawl. L\'indexation démarrera après le crawl.')
+                        ->success()
+                        ->send();
+                }),
+
             Actions\Action::make('reset')
                 ->label('Tout supprimer')
                 ->icon('heroicon-o-trash')
                 ->color('danger')
                 ->requiresConfirmation()
                 ->modalHeading('Supprimer toutes les données et recommencer')
-                ->modalDescription('Cette action va supprimer toutes les URLs crawlées, les documents créés et les fichiers en cache. Le crawl redémarrera de zéro.')
+                ->modalDescription('Cette action va supprimer toutes les URLs crawlées, les documents de tous les agents et les fichiers en cache.')
                 ->modalSubmitActionLabel('Oui, tout supprimer')
                 ->action(function () {
                     // Supprimer les fichiers en cache
@@ -56,14 +138,25 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         }
                     }
 
-                    // Supprimer les documents créés par ce crawl (un par un pour déclencher l'Observer)
-                    // L'Observer supprime automatiquement les vecteurs de Qdrant et les chunks
+                    // Supprimer les documents de tous les agents
                     foreach ($this->record->documents()->with('chunks')->get() as $document) {
-                        $document->chunks()->delete(); // Supprimer les chunks d'abord
-                        $document->forceDelete(); // Force delete pour déclencher forceDeleting et bypasser SoftDelete
+                        $document->chunks()->delete();
+                        $document->forceDelete();
                     }
 
-                    // Supprimer toutes les entrées d'URLs
+                    // Supprimer les entrées d'indexation par agent
+                    foreach ($this->record->agentConfigs as $agentConfig) {
+                        $agentConfig->urlEntries()->delete();
+                        $agentConfig->update([
+                            'index_status' => 'pending',
+                            'pages_indexed' => 0,
+                            'pages_skipped' => 0,
+                            'pages_error' => 0,
+                            'last_indexed_at' => null,
+                        ]);
+                    }
+
+                    // Supprimer toutes les entrées d'URLs du cache
                     $this->record->urlEntries()->delete();
 
                     // Réinitialiser les compteurs
@@ -71,11 +164,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'status' => 'pending',
                         'pages_discovered' => 0,
                         'pages_crawled' => 0,
-                        'pages_indexed' => 0,
-                        'pages_skipped' => 0,
-                        'pages_error' => 0,
-                        'documents_found' => 0,
-                        'images_found' => 0,
                         'total_size_bytes' => 0,
                         'started_at' => null,
                         'completed_at' => null,
@@ -95,6 +183,16 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->color('success')
                 ->visible(fn () => $this->record->status === 'pending' && $this->record->urlEntries()->count() === 0)
                 ->action(function () {
+                    if ($this->record->agentConfigs()->count() === 0) {
+                        Notification::make()
+                            ->title('Aucun agent')
+                            ->body('Ajoutez au moins un agent avant de lancer le crawl.')
+                            ->warning()
+                            ->send();
+
+                        return;
+                    }
+
                     StartWebCrawlJob::dispatch($this->record);
 
                     Notification::make()
@@ -111,34 +209,37 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->visible(fn () => $this->record->isCompleted())
                 ->requiresConfirmation()
                 ->modalHeading('Relancer le crawl du site')
-                ->modalDescription('Cette action va re-crawler tout le site, mettre à jour les pages existantes et découvrir les nouvelles pages.')
+                ->modalDescription('Re-crawler le site, mettre à jour les pages existantes et réindexer tous les agents.')
                 ->action(function () {
-                    // Réinitialiser les compteurs pour un nouveau crawl
                     $this->record->update([
                         'status' => 'pending',
                         'pages_crawled' => 0,
-                        'pages_discovered' => $this->record->urlCrawls()->count(),
-                        'pages_indexed' => 0,
-                        'pages_skipped' => 0,
-                        'pages_error' => 0,
+                        'pages_discovered' => $this->record->urlEntries()->count(),
                         'started_at' => null,
                         'completed_at' => null,
-                        'error_message' => null,
                     ]);
 
-                    // Remettre toutes les URLs en attente
-                    $this->record->urlCrawls()->update([
+                    $this->record->urlEntries()->update([
                         'status' => 'pending',
                         'error_message' => null,
                         'retry_count' => 0,
                     ]);
 
-                    // Lancer le job de crawl
+                    // Réinitialiser les stats des agents
+                    foreach ($this->record->agentConfigs as $agentConfig) {
+                        $agentConfig->update([
+                            'index_status' => 'pending',
+                            'pages_indexed' => 0,
+                            'pages_skipped' => 0,
+                            'pages_error' => 0,
+                        ]);
+                    }
+
                     StartWebCrawlJob::dispatch($this->record);
 
                     Notification::make()
                         ->title('Crawl relancé')
-                        ->body('Le site va être re-crawlé. Les nouvelles pages seront ajoutées.')
+                        ->body('Le site va être re-crawlé et tous les agents réindexés.')
                         ->success()
                         ->send();
                 }),
@@ -166,7 +267,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'status' => 'running',
                         'paused_at' => null,
                     ]);
-                    // Redémarrer le crawl
                     StartWebCrawlJob::dispatch($this->record);
                     Notification::make()->title('Crawl repris')->success()->send();
                 }),
@@ -208,8 +308,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                                     ->url(fn ($record) => $record->start_url)
                                     ->openUrlInNewTab(),
 
-                                TextEntry::make('agent.name')
-                                    ->label('Agent IA'),
+                                TextEntry::make('domain')
+                                    ->label('Domaine'),
 
                                 TextEntry::make('status')
                                     ->label('Statut')
@@ -234,9 +334,10 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                             ]),
                     ]),
 
-                Section::make('Statistiques')
+                Section::make('Cache')
+                    ->description('Statistiques du cache partagé')
                     ->schema([
-                        Grid::make(5)
+                        Grid::make(4)
                             ->schema([
                                 TextEntry::make('pages_discovered')
                                     ->label('Découvertes')
@@ -244,32 +345,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
 
                                 TextEntry::make('pages_crawled')
                                     ->label('Crawlées')
-                                    ->numeric(),
-
-                                TextEntry::make('pages_indexed')
-                                    ->label('Indexées')
-                                    ->numeric()
-                                    ->color('success'),
-
-                                TextEntry::make('pages_skipped')
-                                    ->label('Ignorées')
-                                    ->numeric()
-                                    ->color('warning'),
-
-                                TextEntry::make('pages_error')
-                                    ->label('Erreurs')
-                                    ->numeric()
-                                    ->color('danger'),
-                            ]),
-
-                        Grid::make(4)
-                            ->schema([
-                                TextEntry::make('images_found')
-                                    ->label('Images')
-                                    ->numeric(),
-
-                                TextEntry::make('documents_found')
-                                    ->label('Documents')
                                     ->numeric(),
 
                                 TextEntry::make('total_size_for_humans')
@@ -280,6 +355,62 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                                     ->suffix('%'),
                             ]),
                     ]),
+
+                Section::make('Agents liés')
+                    ->description('Chaque agent a sa propre configuration d\'indexation')
+                    ->schema([
+                        RepeatableEntry::make('agentConfigs')
+                            ->label('')
+                            ->schema([
+                                Grid::make(6)
+                                    ->schema([
+                                        TextEntry::make('agent.name')
+                                            ->label('Agent')
+                                            ->weight('bold'),
+
+                                        TextEntry::make('index_status')
+                                            ->label('Statut')
+                                            ->badge()
+                                            ->color(fn ($state) => match ($state) {
+                                                'pending' => 'gray',
+                                                'indexing' => 'warning',
+                                                'indexed' => 'success',
+                                                'error' => 'danger',
+                                                default => 'gray',
+                                            })
+                                            ->formatStateUsing(fn ($state) => match ($state) {
+                                                'pending' => 'En attente',
+                                                'indexing' => 'En cours',
+                                                'indexed' => 'Indexé',
+                                                'error' => 'Erreur',
+                                                default => $state,
+                                            }),
+
+                                        TextEntry::make('pages_indexed')
+                                            ->label('Indexées')
+                                            ->color('success'),
+
+                                        TextEntry::make('pages_skipped')
+                                            ->label('Ignorées')
+                                            ->color('warning'),
+
+                                        TextEntry::make('pages_error')
+                                            ->label('Erreurs')
+                                            ->color('danger'),
+
+                                        TextEntry::make('effective_chunk_strategy')
+                                            ->label('Chunking')
+                                            ->formatStateUsing(fn ($state) => match ($state) {
+                                                'simple' => 'Simple',
+                                                'html_semantic' => 'HTML',
+                                                'llm_assisted' => 'LLM',
+                                                default => $state,
+                                            }),
+                                    ]),
+                            ])
+                            ->contained(false),
+                    ])
+                    ->visible(fn () => $this->record->agentConfigs()->count() > 0),
 
                 Section::make('Configuration')
                     ->collapsed()
@@ -297,17 +428,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
 
                                 TextEntry::make('user_agent')
                                     ->label('User-Agent'),
-                            ]),
-
-                        Grid::make(2)
-                            ->schema([
-                                TextEntry::make('url_filter_mode')
-                                    ->label('Mode filtrage')
-                                    ->formatStateUsing(fn ($state) => $state === 'include' ? 'Inclusion' : 'Exclusion'),
-
-                                TextEntry::make('url_patterns')
-                                    ->label('Patterns')
-                                    ->formatStateUsing(fn ($state) => is_array($state) ? implode(', ', $state) : '-'),
                             ]),
                     ]),
 
@@ -328,8 +448,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                                     ->label('Terminé le')
                                     ->dateTime('d/m/Y H:i'),
 
-                                TextEntry::make('last_crawled_at')
-                                    ->label('Dernier crawl')
+                                TextEntry::make('paused_at')
+                                    ->label('Pausé le')
                                     ->dateTime('d/m/Y H:i'),
                             ]),
                     ]),
@@ -342,7 +462,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             ->query(
                 WebCrawlUrlCrawl::query()
                     ->where('crawl_id', $this->record->id)
-                    ->with(['url', 'document'])
+                    ->with(['url'])
             )
             ->columns([
                 Tables\Columns\TextColumn::make('url.url')
@@ -360,20 +480,17 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->sortable(),
 
                 Tables\Columns\BadgeColumn::make('status')
-                    ->label('Statut')
+                    ->label('Cache')
                     ->colors([
                         'secondary' => 'pending',
-                        'warning' => fn ($state) => in_array($state, ['fetching', 'fetched']),
-                        'success' => 'indexed',
-                        'info' => 'skipped',
+                        'warning' => fn ($state) => in_array($state, ['fetching']),
+                        'success' => 'fetched',
                         'danger' => 'error',
                     ])
                     ->formatStateUsing(fn ($state) => match ($state) {
                         'pending' => 'En attente',
                         'fetching' => 'Téléchargement',
-                        'fetched' => 'Téléchargé',
-                        'indexed' => 'Indexé',
-                        'skipped' => 'Ignoré',
+                        'fetched' => 'OK',
                         'error' => 'Erreur',
                         default => $state,
                     }),
@@ -387,20 +504,9 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         default => null,
                     }),
 
-                Tables\Columns\TextColumn::make('skip_reason_label')
-                    ->label('Raison')
-                    ->placeholder('-'),
-
                 Tables\Columns\TextColumn::make('url.content_type')
                     ->label('Type')
                     ->limit(20),
-
-                Tables\Columns\TextColumn::make('document.title')
-                    ->label('Document')
-                    ->limit(30)
-                    ->url(fn ($record) => $record->document_id
-                        ? DocumentResource::getUrl('edit', ['record' => $record->document_id])
-                        : null),
 
                 Tables\Columns\TextColumn::make('fetched_at')
                     ->label('Crawlé le')
@@ -409,13 +515,11 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->label('Statut')
+                    ->label('Statut cache')
                     ->options([
                         'pending' => 'En attente',
                         'fetching' => 'Téléchargement',
-                        'fetched' => 'Téléchargé',
-                        'indexed' => 'Indexé',
-                        'skipped' => 'Ignoré',
+                        'fetched' => 'OK',
                         'error' => 'Erreur',
                     ]),
 
@@ -441,6 +545,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         if ($range) {
                             return $query->whereHas('url', fn ($q) => $q->whereBetween('http_status', $range));
                         }
+
                         return $query;
                     }),
 
@@ -456,6 +561,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         if (empty($data['value'])) {
                             return $query;
                         }
+
                         return $query->whereHas('url', function ($q) use ($data) {
                             match ($data['value']) {
                                 'html' => $q->where('content_type', 'like', '%text/html%'),
@@ -467,23 +573,18 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                             };
                         });
                     }),
-
-                Tables\Filters\SelectFilter::make('depth')
-                    ->label('Profondeur')
-                    ->options(fn () => collect(range(0, 10))->mapWithKeys(fn ($d) => [$d => "Niveau $d"])->toArray()),
             ])
             ->actions([
                 Tables\Actions\Action::make('view_cache')
                     ->label('Voir')
                     ->icon('heroicon-o-eye')
                     ->color('gray')
-                    ->visible(fn ($record) => !empty($record->url?->storage_path))
+                    ->visible(fn ($record) => ! empty($record->url?->storage_path))
                     ->modalHeading(fn ($record) => 'Aperçu: ' . \Illuminate\Support\Str::limit($record->url?->url, 50))
                     ->modalContent(function ($record) {
                         $storagePath = $record->url->storage_path;
 
-                        // Vérifier si le fichier existe
-                        if (!Storage::disk('local')->exists($storagePath)) {
+                        if (! Storage::disk('local')->exists($storagePath)) {
                             return view('filament.components.cached-content-missing', [
                                 'url' => $record->url->url,
                                 'storagePath' => $storagePath,
@@ -495,7 +596,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         $url = $record->url->url;
                         $isHtml = str_contains($contentType, 'text/html');
 
-                        // Pour le HTML, remplacer les URLs par les versions en cache
                         $cachedResources = [];
                         if ($isHtml) {
                             $cachedResources = $this->getCachedResources($content, $url);
@@ -519,29 +619,23 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Mettre à jour')
                     ->icon('heroicon-o-arrow-path')
                     ->color('primary')
-                    ->visible(fn ($record) => in_array($record->status, ['indexed', 'fetched', 'error', 'skipped']))
+                    ->visible(fn ($record) => in_array($record->status, ['fetched', 'error']))
                     ->requiresConfirmation()
-                    ->modalHeading('Mettre à jour cette page')
-                    ->modalDescription(fn ($record) => "Re-télécharger et ré-indexer: {$record->url?->url}")
                     ->action(function ($record) {
-                        // Si le crawl est terminé, le passer en 'running' pour permettre le re-fetch
                         if ($this->record->isCompleted()) {
                             $this->record->update(['status' => 'running']);
                         }
 
-                        // Remettre en attente
                         $record->update([
                             'status' => 'pending',
                             'error_message' => null,
                             'retry_count' => 0,
                         ]);
 
-                        // Dispatcher le job pour cette URL spécifique
                         CrawlUrlJob::dispatch($this->record, $record);
 
                         Notification::make()
                             ->title('Mise à jour lancée')
-                            ->body('La page sera re-téléchargée et ré-indexée.')
                             ->success()
                             ->send();
                     }),
@@ -550,7 +644,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->label('Ouvrir')
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->color('gray')
-                    ->visible(fn ($record) => empty($record->url?->storage_path)) // Seulement si pas de cache
+                    ->visible(fn ($record) => empty($record->url?->storage_path))
                     ->url(fn ($record) => $record->url?->url)
                     ->openUrlInNewTab(),
             ])
@@ -561,7 +655,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     ->color('primary')
                     ->requiresConfirmation()
                     ->action(function ($records) {
-                        // Si le crawl est terminé, le passer en 'running' pour permettre le re-fetch
                         if ($this->record->isCompleted()) {
                             $this->record->update(['status' => 'running']);
                         }
@@ -578,8 +671,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         }
 
                         Notification::make()
-                            ->title('Mise à jour lancée')
-                            ->body("{$count} page(s) seront re-téléchargées et ré-indexées.")
+                            ->title("{$count} page(s) en mise à jour")
                             ->success()
                             ->send();
                     }),
@@ -589,26 +681,36 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     }
 
     /**
-     * Récupère les ressources en cache (CSS, images) pour une page HTML
+     * Démarre l'indexation pour un agent spécifique.
+     */
+    protected function startAgentIndexation(AgentWebCrawl $agentConfig): void
+    {
+        $agentConfig->update(['index_status' => 'indexing']);
+
+        // Pour chaque URL du cache, créer une entrée et dispatcher le job
+        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
+            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
+                IndexAgentUrlJob::dispatch($agentConfig, $entry->url);
+            }
+        }
+    }
+
+    /**
+     * Récupère les ressources en cache (CSS, images) pour une page HTML.
      */
     protected function getCachedResources(string $html, string $baseUrl): array
     {
         $resources = [];
         $urlNormalizer = app(UrlNormalizer::class);
 
-        // Extraire l'URL de base
         $parsedBase = parse_url($baseUrl);
         $baseScheme = $parsedBase['scheme'] ?? 'https';
         $baseHost = $parsedBase['host'] ?? '';
         $basePath = dirname($parsedBase['path'] ?? '/');
 
-        // Patterns pour trouver les URLs de ressources
         $patterns = [
-            // Images: src="..." ou src='...'
             '/<img[^>]+src=["\']([^"\']+)["\']/i',
-            // CSS: href="..." sur link rel="stylesheet"
             '/<link[^>]+href=["\']([^"\']+)["\'][^>]*>/i',
-            // Background images dans le style
             '/url\(["\']?([^"\')\s]+)["\']?\)/i',
         ];
 
@@ -617,13 +719,11 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         foreach ($patterns as $pattern) {
             if (preg_match_all($pattern, $html, $matches)) {
                 foreach ($matches[1] as $resourceUrl) {
-                    // Ignorer les data URIs et URLs absolues externes
                     if (str_starts_with($resourceUrl, 'data:')) {
                         continue;
                     }
 
-                    // Résoudre l'URL relative
-                    if (!str_starts_with($resourceUrl, 'http')) {
+                    if (! str_starts_with($resourceUrl, 'http')) {
                         if (str_starts_with($resourceUrl, '//')) {
                             $resourceUrl = $baseScheme . ':' . $resourceUrl;
                         } elseif (str_starts_with($resourceUrl, '/')) {
@@ -638,7 +738,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             }
         }
 
-        // Chercher les ressources en cache
         foreach (array_unique($foundUrls) as $resourceUrl) {
             $urlHash = $urlNormalizer->hash($resourceUrl);
 
@@ -648,7 +747,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 $content = Storage::disk('local')->get($cachedUrl->storage_path);
                 $mimeType = $cachedUrl->content_type ?? 'application/octet-stream';
 
-                // Convertir en data URI
                 $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($content);
 
                 $resources[$resourceUrl] = $dataUri;

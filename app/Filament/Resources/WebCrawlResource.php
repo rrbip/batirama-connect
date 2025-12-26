@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\WebCrawlResource\Pages;
-use App\Jobs\Crawler\StartWebCrawlJob;
-use App\Models\Agent;
 use App\Models\WebCrawl;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -14,7 +12,6 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Support\Str;
 
 class WebCrawlResource extends Resource
 {
@@ -42,6 +39,7 @@ class WebCrawlResource extends Resource
                             ->icon('heroicon-o-cog-6-tooth')
                             ->schema([
                                 Forms\Components\Section::make('Site à crawler')
+                                    ->description('Configuration du cache. Les agents sont ajoutés après création.')
                                     ->schema([
                                         Forms\Components\TextInput::make('start_url')
                                             ->label('URL de départ')
@@ -51,23 +49,6 @@ class WebCrawlResource extends Resource
                                             ->helperText('Page d\'accueil du site à crawler')
                                             ->columnSpanFull(),
 
-                                        Forms\Components\Select::make('agent_id')
-                                            ->label('Agent IA cible')
-                                            ->options(Agent::pluck('name', 'id'))
-                                            ->required()
-                                            ->searchable()
-                                            ->helperText('Les documents seront indexés pour cet agent'),
-
-                                        Forms\Components\Select::make('chunk_strategy')
-                                            ->label('Stratégie de chunking')
-                                            ->options([
-                                                'simple' => 'Simple (découpage par taille)',
-                                                'html_semantic' => 'HTML Sémantique (balises HTML)',
-                                                'llm_assisted' => 'LLM (découpage intelligent par IA)',
-                                            ])
-                                            ->default('simple')
-                                            ->helperText('Comment découper le contenu en morceaux pour l\'indexation'),
-
                                         Forms\Components\Textarea::make('allowed_domains')
                                             ->label('Domaines autorisés')
                                             ->placeholder("example.com\nwww.example.com")
@@ -76,7 +57,7 @@ class WebCrawlResource extends Resource
                                             ->dehydrateStateUsing(fn ($state) => $state ? array_filter(array_map('trim', explode("\n", $state))) : [])
                                             ->formatStateUsing(fn ($state) => is_array($state) ? implode("\n", $state) : $state),
                                     ])
-                                    ->columns(2),
+                                    ->columns(1),
 
                                 Forms\Components\Section::make('Limites')
                                     ->schema([
@@ -113,30 +94,6 @@ class WebCrawlResource extends Resource
                                             ->helperText('Minimum 100ms'),
                                     ])
                                     ->columns(4),
-                            ]),
-
-                        Forms\Components\Tabs\Tab::make('Filtres')
-                            ->icon('heroicon-o-funnel')
-                            ->schema([
-                                Forms\Components\Section::make('Filtrage des URLs')
-                                    ->schema([
-                                        Forms\Components\Radio::make('url_filter_mode')
-                                            ->label('Mode de filtrage')
-                                            ->options([
-                                                'exclude' => 'Exclure les patterns (indexe tout sauf les URLs matchant)',
-                                                'include' => 'Inclure uniquement (indexe seulement les URLs matchant)',
-                                            ])
-                                            ->default('exclude')
-                                            ->helperText('Dans les 2 cas, toutes les URLs sont crawlées et stockées.'),
-
-                                        Forms\Components\Textarea::make('url_patterns')
-                                            ->label('Patterns')
-                                            ->placeholder("/blog/*\n/products/*.html\n^/docs/v[0-9]+/.*")
-                                            ->helperText('Un pattern par ligne. Supporte les wildcards (*) et regex (commencez par ^)')
-                                            ->rows(5)
-                                            ->dehydrateStateUsing(fn ($state) => $state ? array_filter(array_map('trim', explode("\n", $state))) : [])
-                                            ->formatStateUsing(fn ($state) => is_array($state) ? implode("\n", $state) : $state),
-                                    ]),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Authentification')
@@ -200,9 +157,11 @@ class WebCrawlResource extends Resource
                     ->tooltip(fn ($record) => $record->start_url)
                     ->searchable(),
 
-                Tables\Columns\TextColumn::make('agent.name')
-                    ->label('Agent')
-                    ->sortable(),
+                Tables\Columns\TextColumn::make('agents_count')
+                    ->label('Agents')
+                    ->counts('agents')
+                    ->badge()
+                    ->color('primary'),
 
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Statut')
@@ -228,14 +187,9 @@ class WebCrawlResource extends Resource
                     ->state(fn ($record) => "{$record->pages_crawled}/{$record->pages_discovered}")
                     ->description(fn ($record) => $record->progress_percent . '%'),
 
-                Tables\Columns\TextColumn::make('pages_indexed')
+                Tables\Columns\TextColumn::make('total_pages_indexed')
                     ->label('Indexées')
                     ->sortable(),
-
-                Tables\Columns\TextColumn::make('pages_error')
-                    ->label('Erreurs')
-                    ->sortable()
-                    ->color(fn ($state) => $state > 0 ? 'danger' : null),
 
                 Tables\Columns\TextColumn::make('total_size_for_humans')
                     ->label('Taille'),
@@ -256,10 +210,6 @@ class WebCrawlResource extends Resource
                         'failed' => 'Échoué',
                         'cancelled' => 'Annulé',
                     ]),
-
-                Tables\Filters\SelectFilter::make('agent_id')
-                    ->label('Agent')
-                    ->options(Agent::pluck('name', 'id')),
             ])
             ->actions([
                 Tables\Actions\Action::make('view')

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Filament\Resources\WebCrawlResource\Pages;
 
 use App\Filament\Resources\WebCrawlResource;
-use App\Jobs\Crawler\StartWebCrawlJob;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Support\Str;
@@ -20,15 +19,15 @@ class CreateWebCrawl extends CreateRecord
         $data['status'] = 'pending';
 
         // Encryption des credentials si présents
-        if (!empty($data['auth_username']) || !empty($data['auth_password']) || !empty($data['auth_cookies'])) {
+        if (! empty($data['auth_username']) || ! empty($data['auth_password']) || ! empty($data['auth_cookies'])) {
             $credentials = [];
-            if (!empty($data['auth_username'])) {
+            if (! empty($data['auth_username'])) {
                 $credentials['username'] = $data['auth_username'];
             }
-            if (!empty($data['auth_password'])) {
+            if (! empty($data['auth_password'])) {
                 $credentials['password'] = $data['auth_password'];
             }
-            if (!empty($data['auth_cookies'])) {
+            if (! empty($data['auth_cookies'])) {
                 $credentials['cookies'] = $data['auth_cookies'];
             }
             $data['auth_credentials'] = encrypt(json_encode($credentials));
@@ -42,13 +41,13 @@ class CreateWebCrawl extends CreateRecord
 
     protected function afterCreate(): void
     {
-        // Dispatcher le job de démarrage du crawl
-        StartWebCrawlJob::dispatch($this->record);
+        // Ne pas démarrer le crawl automatiquement
+        // L'utilisateur doit d'abord ajouter des agents
 
         Notification::make()
-            ->title('Crawl démarré')
-            ->body('Le crawl a été lancé et va commencer à traiter les pages.')
-            ->success()
+            ->title('Crawl créé')
+            ->body('Ajoutez des agents pour commencer l\'indexation, puis lancez le crawl.')
+            ->info()
             ->send();
     }
 
