@@ -62,10 +62,10 @@ class RebuildAgentIndexJob implements ShouldQueue
             // 1. Supprimer et recréer la collection
             $this->resetCollection($qdrantService, $collection);
 
-            // 2. Récupérer tous les chunks de l'agent
+            // 2. Récupérer tous les chunks de l'agent avec leurs relations
             $chunks = DocumentChunk::whereHas('document', function ($query) {
                 $query->where('agent_id', $this->agent->id);
-            })->with('document')->get();
+            })->with(['document', 'category'])->get();
 
             Log::info('RebuildAgentIndexJob: Found chunks to index', [
                 'agent_id' => $this->agent->id,
@@ -126,6 +126,7 @@ class RebuildAgentIndexJob implements ShouldQueue
             'document_id' => 'integer',
             'document_uuid' => 'keyword',
             'category' => 'keyword',
+            'chunk_category' => 'keyword',
             'source_type' => 'keyword',
         ];
 
@@ -183,6 +184,11 @@ class RebuildAgentIndexJob implements ShouldQueue
                     }
                     if (! empty($chunk->keywords)) {
                         $payload['keywords'] = $chunk->keywords;
+                    }
+                    // Ajouter la catégorie du chunk si disponible
+                    if ($chunk->category) {
+                        $payload['chunk_category'] = $chunk->category->name;
+                        $payload['chunk_category_id'] = $chunk->category_id;
                     }
 
                     $points[] = [

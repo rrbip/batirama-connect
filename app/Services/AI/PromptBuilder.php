@@ -128,7 +128,7 @@ class PromptBuilder
     {
         $contextContent = $this->formatRagContext($ragResults, $agent);
 
-        return "## CONTEXTE DOCUMENTAIRE\n\nUtilise les informations suivantes pour répondre à la question. Si l'information n'est pas dans le contexte, indique-le clairement.\n\n{$contextContent}";
+        return "## CONTEXTE DOCUMENTAIRE\n\nUtilise les informations suivantes pour répondre à la question.\n**IMPORTANT:** Privilégie les sources dont la catégorie correspond au sujet de la question. Ignore les sources hors-sujet même si elles ont un score de pertinence élevé.\nSi l'information n'est pas dans le contexte, indique-le clairement.\n\n{$contextContent}";
     }
 
     private function formatRagContext(array $ragResults, Agent $agent): string
@@ -146,7 +146,25 @@ class PromptBuilder
                 $content = $result['payload']['content'] ?? $result['content'] ?? '';
             }
 
-            $contextParts[] = "### Source {$num} (pertinence: {$score}%)\n{$content}";
+            // Extraire les métadonnées utiles du payload
+            $payload = $result['payload'] ?? [];
+            $documentTitle = $payload['document_title'] ?? null;
+            $chunkCategory = $payload['chunk_category'] ?? null;
+
+            // Construire l'en-tête avec les métadonnées
+            $header = "### Source {$num} (pertinence: {$score}%)";
+
+            // Ajouter la catégorie si présente
+            if ($chunkCategory) {
+                $header .= " [Catégorie: {$chunkCategory}]";
+            }
+
+            // Ajouter le titre du document si présent
+            if ($documentTitle) {
+                $header .= "\n**Document:** {$documentTitle}";
+            }
+
+            $contextParts[] = "{$header}\n{$content}";
         }
 
         return implode("\n\n", $contextParts);
