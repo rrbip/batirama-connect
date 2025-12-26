@@ -27,6 +27,9 @@ class DocumentCategoryResource extends Resource
 
     protected static ?int $navigationSort = 4;
 
+    // Masqué - accessible via Gestion RAG
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function form(Form $form): Form
     {
         return $form

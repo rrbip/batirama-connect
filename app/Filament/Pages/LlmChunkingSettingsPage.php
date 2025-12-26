@@ -35,6 +35,9 @@ class LlmChunkingSettingsPage extends Page implements HasForms
 
     protected static ?int $navigationSort = 5;
 
+    // Masqué - accessible via Gestion RAG
+    protected static bool $shouldRegisterNavigation = false;
+
     public ?array $data = [];
 
     public array $queueStats = [];
