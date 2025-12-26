@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\WebCrawlResource\Pages;
 
 use App\Filament\Resources\WebCrawlResource;
+use App\Jobs\Crawler\CrawlUrlJob;
 use App\Jobs\Crawler\StartWebCrawlJob;
 use App\Models\WebCrawlUrlCrawl;
 use Filament\Actions;
@@ -18,6 +19,7 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Storage;
 
 class ViewWebCrawl extends ViewRecord implements HasTable
 {
@@ -35,6 +37,45 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('recrawl')
+                ->label('Relancer le crawl')
+                ->icon('heroicon-o-arrow-path')
+                ->color('primary')
+                ->visible(fn () => $this->record->isCompleted())
+                ->requiresConfirmation()
+                ->modalHeading('Relancer le crawl du site')
+                ->modalDescription('Cette action va re-crawler tout le site, mettre à jour les pages existantes et découvrir les nouvelles pages.')
+                ->action(function () {
+                    // Réinitialiser les compteurs pour un nouveau crawl
+                    $this->record->update([
+                        'status' => 'pending',
+                        'pages_crawled' => 0,
+                        'pages_discovered' => $this->record->urlCrawls()->count(),
+                        'pages_indexed' => 0,
+                        'pages_skipped' => 0,
+                        'pages_error' => 0,
+                        'started_at' => null,
+                        'completed_at' => null,
+                        'error_message' => null,
+                    ]);
+
+                    // Remettre toutes les URLs en attente
+                    $this->record->urlCrawls()->update([
+                        'status' => 'pending',
+                        'error_message' => null,
+                        'retry_count' => 0,
+                    ]);
+
+                    // Lancer le job de crawl
+                    StartWebCrawlJob::dispatch($this->record);
+
+                    Notification::make()
+                        ->title('Crawl relancé')
+                        ->body('Le site va être re-crawlé. Les nouvelles pages seront ajoutées.')
+                        ->success()
+                        ->send();
+                }),
+
             Actions\Action::make('pause')
                 ->label('Pause')
                 ->icon('heroicon-o-pause')
@@ -309,6 +350,103 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 Tables\Filters\SelectFilter::make('depth')
                     ->label('Profondeur')
                     ->options(fn () => collect(range(0, 10))->mapWithKeys(fn ($d) => [$d => "Niveau $d"])->toArray()),
+            ])
+            ->actions([
+                Tables\Actions\Action::make('view_cache')
+                    ->label('Voir')
+                    ->icon('heroicon-o-eye')
+                    ->color('gray')
+                    ->visible(fn ($record) => $record->url?->storage_path && Storage::disk('crawl')->exists($record->url->storage_path))
+                    ->modalHeading(fn ($record) => 'Contenu caché: ' . \Illuminate\Support\Str::limit($record->url?->url, 50))
+                    ->modalContent(function ($record) {
+                        $content = Storage::disk('crawl')->get($record->url->storage_path);
+                        $contentType = $record->url->content_type ?? 'text/plain';
+
+                        // Si c'est du HTML, l'afficher proprement
+                        if (str_contains($contentType, 'text/html')) {
+                            return view('filament.components.cached-html-viewer', [
+                                'content' => $content,
+                                'url' => $record->url->url,
+                            ]);
+                        }
+
+                        // Sinon afficher en texte brut
+                        return view('filament.components.cached-content-viewer', [
+                            'content' => $content,
+                            'contentType' => $contentType,
+                        ]);
+                    })
+                    ->modalWidth('7xl')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Fermer'),
+
+                Tables\Actions\Action::make('refetch')
+                    ->label('Mettre à jour')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('primary')
+                    ->visible(fn ($record) => in_array($record->status, ['indexed', 'fetched', 'error', 'skipped']))
+                    ->requiresConfirmation()
+                    ->modalHeading('Mettre à jour cette page')
+                    ->modalDescription(fn ($record) => "Re-télécharger et ré-indexer: {$record->url?->url}")
+                    ->action(function ($record) {
+                        // Si le crawl est terminé, le passer en 'running' pour permettre le re-fetch
+                        if ($this->record->isCompleted()) {
+                            $this->record->update(['status' => 'running']);
+                        }
+
+                        // Remettre en attente
+                        $record->update([
+                            'status' => 'pending',
+                            'error_message' => null,
+                            'retry_count' => 0,
+                        ]);
+
+                        // Dispatcher le job pour cette URL spécifique
+                        CrawlUrlJob::dispatch($this->record, $record);
+
+                        Notification::make()
+                            ->title('Mise à jour lancée')
+                            ->body('La page sera re-téléchargée et ré-indexée.')
+                            ->success()
+                            ->send();
+                    }),
+
+                Tables\Actions\Action::make('view_url')
+                    ->label('Ouvrir')
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->color('gray')
+                    ->url(fn ($record) => $record->url?->url)
+                    ->openUrlInNewTab(),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkAction::make('refetch_selected')
+                    ->label('Mettre à jour la sélection')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('primary')
+                    ->requiresConfirmation()
+                    ->action(function ($records) {
+                        // Si le crawl est terminé, le passer en 'running' pour permettre le re-fetch
+                        if ($this->record->isCompleted()) {
+                            $this->record->update(['status' => 'running']);
+                        }
+
+                        $count = 0;
+                        foreach ($records as $record) {
+                            $record->update([
+                                'status' => 'pending',
+                                'error_message' => null,
+                                'retry_count' => 0,
+                            ]);
+                            CrawlUrlJob::dispatch($this->record, $record);
+                            $count++;
+                        }
+
+                        Notification::make()
+                            ->title('Mise à jour lancée')
+                            ->body("{$count} page(s) seront re-téléchargées et ré-indexées.")
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->defaultSort('created_at', 'desc')
             ->poll('5s');
