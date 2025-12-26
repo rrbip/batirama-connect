@@ -79,6 +79,46 @@ class AiStatusPage extends Page
     }
 
     /**
+     * Démarre un worker pour une queue spécifique
+     */
+    public function startQueueWorker(string $queue): void
+    {
+        try {
+            $basePath = base_path();
+            $command = "cd {$basePath} && nohup php artisan queue:work --queue={$queue} --stop-when-empty > /dev/null 2>&1 &";
+            exec($command, $output, $returnCode);
+
+            sleep(1);
+            $this->refreshStatus();
+
+            if ($returnCode === 0) {
+                Notification::make()
+                    ->title('Worker démarré')
+                    ->body("Worker lancé pour la queue '{$queue}' (--stop-when-empty)")
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Échec du démarrage')
+                    ->body("Impossible de démarrer le worker pour '{$queue}'")
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to start queue worker', [
+                'queue' => $queue,
+                'error' => $e->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
      * Charge les modèles Ollama installés avec leurs détails
      */
     protected function loadOllamaModels(): void
@@ -913,64 +953,6 @@ class AiStatusPage extends Page
                         Notification::make()
                             ->title('Traitement terminé')
                             ->body("{$count} document(s) traité(s) avec succès")
-                            ->success()
-                            ->send();
-                    }
-                }),
-
-            Action::make('start_queue_workers')
-                ->label('Démarrer les workers')
-                ->icon('heroicon-o-play-circle')
-                ->color('primary')
-                ->visible(fn () => ($this->queueStats['pending'] ?? 0) > 0)
-                ->requiresConfirmation()
-                ->modalHeading('Démarrer les workers de queue')
-                ->modalDescription('Cette action va démarrer des workers en arrière-plan pour traiter les jobs en attente.')
-                ->action(function () {
-                    $queuesWithJobs = array_keys($this->queueStats['by_queue'] ?? []);
-
-                    if (empty($queuesWithJobs)) {
-                        $queuesWithJobs = ['default'];
-                    }
-
-                    $started = [];
-                    $errors = [];
-                    $basePath = base_path();
-
-                    foreach ($queuesWithJobs as $queue) {
-                        try {
-                            // Démarrer un worker en arrière-plan avec nohup
-                            $command = "cd {$basePath} && nohup php artisan queue:work --queue={$queue} --stop-when-empty > /dev/null 2>&1 &";
-                            exec($command, $output, $returnCode);
-
-                            if ($returnCode === 0) {
-                                $started[] = $queue;
-                            } else {
-                                $errors[] = $queue;
-                            }
-                        } catch (\Exception $e) {
-                            $errors[] = $queue;
-                            \Log::error('Failed to start queue worker', [
-                                'queue' => $queue,
-                                'error' => $e->getMessage(),
-                            ]);
-                        }
-                    }
-
-                    // Attendre un peu pour voir l'effet
-                    sleep(1);
-                    $this->refreshStatus();
-
-                    if (!empty($errors)) {
-                        Notification::make()
-                            ->title('Démarrage partiel')
-                            ->body("Workers démarrés: " . implode(', ', $started) . "\nÉchecs: " . implode(', ', $errors))
-                            ->warning()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title('Workers démarrés')
-                            ->body("Workers lancés pour: " . implode(', ', $started) . "\n(--stop-when-empty activé)")
                             ->success()
                             ->send();
                     }

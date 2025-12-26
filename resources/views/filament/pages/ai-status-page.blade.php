@@ -296,9 +296,21 @@ php artisan queue:work --queue=llm-chunking
                                     </div>
                                 @else
                                     <div class="mb-3 p-3 rounded-lg bg-warning-50 dark:bg-warning-900/20 border border-warning-200 dark:border-warning-700">
-                                        <div class="flex items-center gap-2 text-warning-700 dark:text-warning-300">
-                                            <x-heroicon-s-pause-circle class="w-5 h-5" />
-                                            <span class="text-sm font-medium">Aucun worker actif sur cette queue</span>
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2 text-warning-700 dark:text-warning-300">
+                                                <x-heroicon-s-pause-circle class="w-5 h-5" />
+                                                <span class="text-sm font-medium">Aucun worker actif sur cette queue</span>
+                                            </div>
+                                            <button
+                                                wire:click="startQueueWorker('{{ $queue['name'] }}')"
+                                                wire:loading.attr="disabled"
+                                                wire:target="startQueueWorker('{{ $queue['name'] }}')"
+                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50 transition"
+                                            >
+                                                <x-heroicon-o-play class="w-4 h-4" wire:loading.class="hidden" wire:target="startQueueWorker('{{ $queue['name'] }}')" />
+                                                <x-heroicon-o-arrow-path class="w-4 h-4 animate-spin hidden" wire:loading.class.remove="hidden" wire:target="startQueueWorker('{{ $queue['name'] }}')" />
+                                                Démarrer
+                                            </button>
                                         </div>
                                     </div>
                                 @endif
