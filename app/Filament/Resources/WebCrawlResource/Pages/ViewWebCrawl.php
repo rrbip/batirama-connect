@@ -91,13 +91,14 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         }
 
         // Supprimer les documents de cet agent pour ce crawl
+        // Important: forceDelete déclenche l'observer qui supprime de Qdrant
         $documents = $this->record->documents()
             ->where('agent_id', $config->agent_id)
-            ->with('chunks')
             ->get();
 
         foreach ($documents as $document) {
-            $document->chunks()->delete();
+            // L'observer DocumentObserver::forceDeleting supprime de Qdrant
+            // AVANT de supprimer les chunks
             $document->forceDelete();
         }
 
@@ -239,13 +240,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         }
 
         // Supprimer les documents existants de cet agent pour ce crawl
+        // L'observer DocumentObserver gère la suppression de Qdrant et des chunks
         $documents = $this->record->documents()
             ->where('agent_id', $config->agent_id)
-            ->with('chunks')
             ->get();
 
         foreach ($documents as $document) {
-            $document->chunks()->delete();
             $document->forceDelete();
         }
 
@@ -362,8 +362,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     }
 
                     // Supprimer les documents de tous les agents
-                    foreach ($this->record->documents()->with('chunks')->get() as $document) {
-                        $document->chunks()->delete();
+                    // L'observer gère la suppression de Qdrant et des chunks
+                    foreach ($this->record->documents()->get() as $document) {
                         $document->forceDelete();
                     }
 

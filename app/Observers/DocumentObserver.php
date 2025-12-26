@@ -51,20 +51,28 @@ class DocumentObserver
 
     /**
      * Handle the Document "deleting" event.
-     * Desindexe le document de Qdrant avant la suppression.
+     * Desindexe le document de Qdrant et supprime les chunks.
      */
     public function deleting(Document $document): void
     {
+        // 1. Supprimer de Qdrant (avant de supprimer les chunks!)
         $this->removeFromQdrant($document);
+
+        // 2. Supprimer les chunks de la DB
+        $document->chunks()->delete();
     }
 
     /**
      * Handle the Document "force deleting" event.
-     * Desindexe le document de Qdrant avant la suppression definitive.
+     * Desindexe le document de Qdrant et supprime les chunks.
      */
     public function forceDeleting(Document $document): void
     {
+        // 1. Supprimer de Qdrant (avant de supprimer les chunks!)
         $this->removeFromQdrant($document);
+
+        // 2. Supprimer les chunks de la DB
+        $document->chunks()->delete();
     }
 
     /**
