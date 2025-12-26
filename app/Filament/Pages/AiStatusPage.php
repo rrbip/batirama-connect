@@ -373,6 +373,28 @@ class AiStatusPage extends Page
 
                     $waitTime = now()->timestamp - $job->created_at;
 
+                    // Déterminer le vrai statut du job
+                    // reserved_at = timestamp quand un worker a pris le job
+                    $isReserved = !empty($job->reserved_at);
+                    $reservedTime = $isReserved ? (now()->timestamp - $job->reserved_at) : 0;
+
+                    // Si réservé depuis plus de 5 minutes, probablement bloqué
+                    $isStuck = $isReserved && $reservedTime > 300;
+
+                    if ($isStuck) {
+                        $status = 'stuck';
+                        $statusLabel = 'Bloqué';
+                        $statusColor = 'danger';
+                    } elseif ($isReserved) {
+                        $status = 'processing';
+                        $statusLabel = 'En cours';
+                        $statusColor = 'primary';
+                    } else {
+                        $status = 'waiting';
+                        $statusLabel = 'En attente';
+                        $statusColor = 'warning';
+                    }
+
                     return [
                         'id' => $job->id,
                         'name' => class_basename($displayName),
@@ -385,6 +407,11 @@ class AiStatusPage extends Page
                         'wait_time_human' => $waitTime > 60
                             ? gmdate('H:i:s', $waitTime)
                             : "{$waitTime}s",
+                        'status' => $status,
+                        'status_label' => $statusLabel,
+                        'status_color' => $statusColor,
+                        'reserved_at' => $isReserved ? date('H:i:s', $job->reserved_at) : null,
+                        'processing_time' => $isReserved ? ($reservedTime > 60 ? gmdate('H:i:s', $reservedTime) : "{$reservedTime}s") : null,
                     ];
                 })
                 ->toArray();

@@ -225,15 +225,15 @@ php artisan queue:work --queue=llm-chunking
                             <tr>
                                 <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Job</th>
                                 <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Queue</th>
+                                <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Statut</th>
                                 <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Document</th>
-                                <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Créé à</th>
                                 <th class="px-4 py-2 text-left font-medium text-gray-700 dark:text-gray-300">Attente</th>
                                 <th class="px-4 py-2 text-center font-medium text-gray-700 dark:text-gray-300">Essais</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
                             @foreach($pendingJobs as $job)
-                                <tr class="{{ $job['wait_time'] > 300 ? 'bg-warning-50 dark:bg-warning-900/10' : '' }}">
+                                <tr class="{{ $job['status'] === 'stuck' ? 'bg-danger-50 dark:bg-danger-900/10' : ($job['status'] === 'waiting' && $job['wait_time'] > 300 ? 'bg-warning-50 dark:bg-warning-900/10' : '') }}">
                                     <td class="px-4 py-3">
                                         <span class="font-medium text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
                                     </td>
@@ -246,11 +246,29 @@ php artisan queue:work --queue=llm-chunking
                                             {{ $job['queue'] }}
                                         </span>
                                     </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <span class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full {{
+                                            $job['status'] === 'processing' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
+                                            ($job['status'] === 'stuck' ? 'bg-danger-100 text-danger-700 dark:bg-danger-800 dark:text-danger-300' :
+                                            'bg-warning-100 text-warning-700 dark:bg-warning-800 dark:text-warning-300')
+                                        }}">
+                                            @if($job['status'] === 'processing')
+                                                <x-heroicon-s-arrow-path class="w-3 h-3 animate-spin" />
+                                            @elseif($job['status'] === 'stuck')
+                                                <x-heroicon-s-exclamation-triangle class="w-3 h-3" />
+                                            @else
+                                                <x-heroicon-s-clock class="w-3 h-3" />
+                                            @endif
+                                            {{ $job['status_label'] }}
+                                        </span>
+                                        @if($job['processing_time'])
+                                            <div class="text-xs text-gray-500 mt-1">
+                                                Depuis {{ $job['processing_time'] }}
+                                            </div>
+                                        @endif
+                                    </td>
                                     <td class="px-4 py-3 text-gray-500 dark:text-gray-400">
                                         {{ $job['document'] ?? '-' }}
-                                    </td>
-                                    <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                                        {{ $job['created_at'] }}
                                     </td>
                                     <td class="px-4 py-3">
                                         <span class="{{ $job['wait_time'] > 300 ? 'text-warning-600 dark:text-warning-400 font-medium' : 'text-gray-500 dark:text-gray-400' }}">
