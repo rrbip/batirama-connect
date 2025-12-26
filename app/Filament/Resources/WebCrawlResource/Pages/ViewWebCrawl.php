@@ -175,6 +175,96 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         ];
     }
 
+    /**
+     * Lance l'indexation pour un agent spécifique (appelé depuis la vue).
+     */
+    public function startAgentIndexation(int $configId): void
+    {
+        $config = AgentWebCrawl::find($configId);
+
+        if (! $config || $config->web_crawl_id !== $this->record->id) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Configuration non trouvée.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        // Vérifier que le crawl est terminé
+        if ($this->record->status !== 'completed') {
+            Notification::make()
+                ->title('Crawl en cours')
+                ->body('Attendez que le crawl soit terminé avant de lancer l\'indexation.')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
+        $config->update(['index_status' => 'indexing']);
+
+        // Pour chaque URL du cache, dispatcher le job d'indexation
+        $count = 0;
+        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
+            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
+                IndexAgentUrlJob::dispatch($config, $entry->url);
+                $count++;
+            }
+        }
+
+        Notification::make()
+            ->title('Indexation lancée')
+            ->body("{$count} URL(s) vont être indexées pour l'agent {$config->agent->name}.")
+            ->success()
+            ->send();
+    }
+
+    /**
+     * Réindexe un agent (supprime les documents existants et relance l'indexation).
+     */
+    public function reindexAgent(int $configId): void
+    {
+        $config = AgentWebCrawl::find($configId);
+
+        if (! $config || $config->web_crawl_id !== $this->record->id) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Configuration non trouvée.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        // Supprimer les documents existants de cet agent pour ce crawl
+        $documents = $this->record->documents()
+            ->where('agent_id', $config->agent_id)
+            ->with('chunks')
+            ->get();
+
+        foreach ($documents as $document) {
+            $document->chunks()->delete();
+            $document->forceDelete();
+        }
+
+        // Supprimer les entrées d'indexation
+        $config->urlEntries()->delete();
+
+        // Réinitialiser les stats
+        $config->update([
+            'index_status' => 'pending',
+            'pages_indexed' => 0,
+            'pages_skipped' => 0,
+            'pages_error' => 0,
+            'last_indexed_at' => null,
+        ]);
+
+        // Lancer l'indexation
+        $this->startAgentIndexation($configId);
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -762,6 +852,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     }),
             ])
             ->defaultSort('created_at', 'desc')
+            ->paginated([25, 50, 100, 250, 500])
+            ->defaultPaginationPageOption(50)
             ->poll('5s');
     }
 
