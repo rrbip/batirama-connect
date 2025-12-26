@@ -59,6 +59,11 @@ class IndexAgentUrlJob implements ShouldQueue
             'agent_id' => $agent->id,
             'agent_name' => $agent->name,
             'url' => $url,
+            'storage_path' => $this->crawlUrl->storage_path,
+            'content_type' => $this->crawlUrl->content_type,
+            'url_filter_mode' => $this->agentConfig->url_filter_mode,
+            'url_patterns' => $this->agentConfig->url_patterns,
+            'content_types' => $this->agentConfig->content_types,
         ]);
 
         // Créer ou récupérer l'entrée AgentWebCrawlUrl
@@ -74,6 +79,10 @@ class IndexAgentUrlJob implements ShouldQueue
             // Vérifier si le contenu existe
             $storagePath = $this->crawlUrl->storage_path;
             if (! $storagePath) {
+                Log::warning('URL has no storage_path', [
+                    'url' => $url,
+                    'crawl_url_id' => $this->crawlUrl->id,
+                ]);
                 $this->markSkipped($urlEntry, 'no_content');
 
                 return;
@@ -83,6 +92,11 @@ class IndexAgentUrlJob implements ShouldQueue
 
             // Vérifier le type de contenu
             if (! $this->agentConfig->shouldIndexContentType($contentType)) {
+                Log::debug('Content type not accepted', [
+                    'url' => $url,
+                    'content_type' => $contentType,
+                    'allowed_types' => $this->agentConfig->content_types,
+                ]);
                 $this->markSkipped($urlEntry, 'content_type');
 
                 return;
@@ -94,6 +108,13 @@ class IndexAgentUrlJob implements ShouldQueue
                 $skipReason = $this->agentConfig->url_filter_mode === 'exclude'
                     ? 'pattern_exclude'
                     : 'pattern_not_include';
+
+                Log::debug('URL pattern not matched', [
+                    'url' => $url,
+                    'filter_mode' => $this->agentConfig->url_filter_mode,
+                    'patterns' => $this->agentConfig->url_patterns,
+                    'skip_reason' => $skipReason,
+                ]);
 
                 $this->markSkipped($urlEntry, $skipReason, $matchedPattern);
 

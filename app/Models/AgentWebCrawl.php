@@ -131,6 +131,11 @@ class AgentWebCrawl extends Model
             return $this->url_filter_mode === 'exclude';
         }
 
+        // Pattern spécial "*" = tout matcher
+        if (in_array('*', $patterns, true)) {
+            return true;
+        }
+
         $path = parse_url($url, PHP_URL_PATH) ?? '/';
 
         foreach ($patterns as $pattern) {
