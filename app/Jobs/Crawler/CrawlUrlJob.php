@@ -292,9 +292,16 @@ class CrawlUrlJob implements ShouldQueue
         UrlNormalizer $urlNormalizer,
         array $allowedDomains
     ): void {
+        // Rafraîchir le crawl pour avoir les vraies stats (plusieurs jobs en parallèle)
+        $this->crawl->refresh();
+
         // Vérifier les limites (0 = illimité)
         if ($this->crawl->max_pages > 0 && $this->crawl->pages_discovered >= $this->crawl->max_pages) {
-            Log::info('Max pages limit reached', ['crawl_id' => $this->crawl->id]);
+            Log::info('Max pages limit reached', [
+                'crawl_id' => $this->crawl->id,
+                'pages_discovered' => $this->crawl->pages_discovered,
+                'max_pages' => $this->crawl->max_pages,
+            ]);
 
             return;
         }
@@ -317,6 +324,7 @@ class CrawlUrlJob implements ShouldQueue
             'depth' => $this->urlEntry->depth,
             'links_found' => count($links),
             'pages_discovered' => $this->crawl->pages_discovered,
+            'max_pages' => $this->crawl->max_pages,
         ]);
 
         $addedCount = 0;
@@ -325,7 +333,16 @@ class CrawlUrlJob implements ShouldQueue
 
         foreach ($links as $link) {
             // Vérifier si on a atteint la limite (0 = illimité)
+            // Rafraîchir périodiquement pour avoir le vrai compteur
+            if ($addedCount > 0 && $addedCount % 10 === 0) {
+                $this->crawl->refresh();
+            }
+
             if ($this->crawl->max_pages > 0 && $this->crawl->pages_discovered >= $this->crawl->max_pages) {
+                Log::info('Max pages limit reached during link processing', [
+                    'crawl_id' => $this->crawl->id,
+                    'pages_discovered' => $this->crawl->pages_discovered,
+                ]);
                 break;
             }
 
