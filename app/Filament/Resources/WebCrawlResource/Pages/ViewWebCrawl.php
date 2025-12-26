@@ -8,7 +8,9 @@ use App\Filament\Resources\DocumentResource;
 use App\Filament\Resources\WebCrawlResource;
 use App\Jobs\Crawler\CrawlUrlJob;
 use App\Jobs\Crawler\StartWebCrawlJob;
+use App\Models\WebCrawlUrl;
 use App\Models\WebCrawlUrlCrawl;
+use App\Services\Crawler\UrlNormalizer;
 use Filament\Actions;
 use Filament\Infolists\Components\Grid;
 use Filament\Infolists\Components\Section;
@@ -476,15 +478,22 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         $content = Storage::disk('local')->get($record->url->storage_path);
                         $contentType = $record->url->content_type ?? 'text/plain';
                         $url = $record->url->url;
+                        $isHtml = str_contains($contentType, 'text/html');
 
-                        // Viewer unifié avec switch aperçu/code
+                        // Pour le HTML, remplacer les URLs par les versions en cache
+                        $cachedResources = [];
+                        if ($isHtml) {
+                            $cachedResources = $this->getCachedResources($content, $url);
+                        }
+
                         return view('filament.components.cached-content-viewer', [
                             'content' => $content,
                             'contentType' => $contentType,
                             'url' => $url,
-                            'isHtml' => str_contains($contentType, 'text/html'),
+                            'isHtml' => $isHtml,
                             'isImage' => str_starts_with($contentType, 'image/'),
                             'isPdf' => str_contains($contentType, 'pdf'),
+                            'cachedResources' => $cachedResources,
                         ]);
                     })
                     ->modalWidth('7xl')
@@ -561,5 +570,75 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             ])
             ->defaultSort('created_at', 'desc')
             ->poll('5s');
+    }
+
+    /**
+     * Récupère les ressources en cache (CSS, images) pour une page HTML
+     */
+    protected function getCachedResources(string $html, string $baseUrl): array
+    {
+        $resources = [];
+        $urlNormalizer = app(UrlNormalizer::class);
+
+        // Extraire l'URL de base
+        $parsedBase = parse_url($baseUrl);
+        $baseScheme = $parsedBase['scheme'] ?? 'https';
+        $baseHost = $parsedBase['host'] ?? '';
+        $basePath = dirname($parsedBase['path'] ?? '/');
+
+        // Patterns pour trouver les URLs de ressources
+        $patterns = [
+            // Images: src="..." ou src='...'
+            '/<img[^>]+src=["\']([^"\']+)["\']/i',
+            // CSS: href="..." sur link rel="stylesheet"
+            '/<link[^>]+href=["\']([^"\']+)["\'][^>]*>/i',
+            // Background images dans le style
+            '/url\(["\']?([^"\')\s]+)["\']?\)/i',
+        ];
+
+        $foundUrls = [];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $html, $matches)) {
+                foreach ($matches[1] as $resourceUrl) {
+                    // Ignorer les data URIs et URLs absolues externes
+                    if (str_starts_with($resourceUrl, 'data:')) {
+                        continue;
+                    }
+
+                    // Résoudre l'URL relative
+                    if (!str_starts_with($resourceUrl, 'http')) {
+                        if (str_starts_with($resourceUrl, '//')) {
+                            $resourceUrl = $baseScheme . ':' . $resourceUrl;
+                        } elseif (str_starts_with($resourceUrl, '/')) {
+                            $resourceUrl = $baseScheme . '://' . $baseHost . $resourceUrl;
+                        } else {
+                            $resourceUrl = $baseScheme . '://' . $baseHost . $basePath . '/' . $resourceUrl;
+                        }
+                    }
+
+                    $foundUrls[] = $resourceUrl;
+                }
+            }
+        }
+
+        // Chercher les ressources en cache
+        foreach (array_unique($foundUrls) as $resourceUrl) {
+            $urlHash = $urlNormalizer->hash($resourceUrl);
+
+            $cachedUrl = WebCrawlUrl::where('url_hash', $urlHash)->first();
+
+            if ($cachedUrl && $cachedUrl->storage_path && Storage::disk('local')->exists($cachedUrl->storage_path)) {
+                $content = Storage::disk('local')->get($cachedUrl->storage_path);
+                $mimeType = $cachedUrl->content_type ?? 'application/octet-stream';
+
+                // Convertir en data URI
+                $dataUri = 'data:' . $mimeType . ';base64,' . base64_encode($content);
+
+                $resources[$resourceUrl] = $dataUri;
+            }
+        }
+
+        return $resources;
     }
 }
