@@ -185,6 +185,11 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     Notification::make()->title('Crawl annulé')->warning()->send();
                 }),
 
+            Actions\Action::make('edit')
+                ->label('Modifier')
+                ->icon('heroicon-o-pencil')
+                ->url(fn () => $this->getResource()::getUrl('edit', ['record' => $this->record])),
+
             Actions\DeleteAction::make()
                 ->visible(fn () => $this->record->isCompleted()),
         ];

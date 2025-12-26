@@ -21,6 +21,7 @@ class WebCrawl extends Model
         'allowed_domains',
         'url_filter_mode',
         'url_patterns',
+        'chunk_strategy',
         'max_depth',
         'max_pages',
         'max_disk_mb',

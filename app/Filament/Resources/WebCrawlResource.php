@@ -58,6 +58,16 @@ class WebCrawlResource extends Resource
                                             ->searchable()
                                             ->helperText('Les documents seront indexés pour cet agent'),
 
+                                        Forms\Components\Select::make('chunk_strategy')
+                                            ->label('Stratégie de chunking')
+                                            ->options([
+                                                'simple' => 'Simple (découpage par taille)',
+                                                'html_semantic' => 'HTML Sémantique (balises HTML)',
+                                                'llm_assisted' => 'LLM (découpage intelligent par IA)',
+                                            ])
+                                            ->default('simple')
+                                            ->helperText('Comment découper le contenu en morceaux pour l\'indexation'),
+
                                         Forms\Components\Textarea::make('allowed_domains')
                                             ->label('Domaines autorisés')
                                             ->placeholder("example.com\nwww.example.com")
@@ -257,6 +267,11 @@ class WebCrawlResource extends Resource
                     ->icon('heroicon-o-eye')
                     ->url(fn ($record) => static::getUrl('view', ['record' => $record])),
 
+                Tables\Actions\Action::make('edit')
+                    ->label('Modifier')
+                    ->icon('heroicon-o-pencil')
+                    ->url(fn ($record) => static::getUrl('edit', ['record' => $record])),
+
                 Tables\Actions\Action::make('pause')
                     ->label('Pause')
                     ->icon('heroicon-o-pause')
@@ -305,6 +320,7 @@ class WebCrawlResource extends Resource
             'index' => Pages\ListWebCrawls::route('/'),
             'create' => Pages\CreateWebCrawl::route('/create'),
             'view' => Pages\ViewWebCrawl::route('/{record}'),
+            'edit' => Pages\EditWebCrawl::route('/{record}/edit'),
         ];
     }
 }
