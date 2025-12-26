@@ -155,6 +155,7 @@ class IndexAgentUrlJob implements ShouldQueue
                     'chunk_strategy' => $chunkStrategy,
                     'file_size' => $this->crawlUrl->content_length ?? 0,
                     'file_hash' => $this->crawlUrl->content_hash,
+                    'web_crawl_id' => $webCrawl->id, // S'assurer que c'est toujours défini
                 ]);
 
                 // Re-traiter le document

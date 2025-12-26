@@ -90,10 +90,21 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             return;
         }
 
+        // Collecter les IDs des URLs du cache pour ce crawl
+        $crawlUrlIds = $this->record->urlEntries()
+            ->pluck('crawl_url_id')
+            ->filter()
+            ->toArray();
+
         // Supprimer les documents de cet agent pour ce crawl
+        // 1. Via web_crawl_id (relation directe)
+        // 2. Via crawl_url_id (fallback pour anciens documents sans web_crawl_id)
         // Important: forceDelete déclenche l'observer qui supprime de Qdrant
-        $documents = $this->record->documents()
-            ->where('agent_id', $config->agent_id)
+        $documents = \App\Models\Document::where('agent_id', $config->agent_id)
+            ->where(function ($query) use ($crawlUrlIds) {
+                $query->where('web_crawl_id', $this->record->id)
+                    ->orWhereIn('crawl_url_id', $crawlUrlIds);
+            })
             ->get();
 
         foreach ($documents as $document) {
@@ -239,10 +250,21 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             return;
         }
 
+        // Collecter les IDs des URLs du cache pour ce crawl
+        $crawlUrlIds = $this->record->urlEntries()
+            ->pluck('crawl_url_id')
+            ->filter()
+            ->toArray();
+
         // Supprimer les documents existants de cet agent pour ce crawl
+        // 1. Via web_crawl_id (relation directe)
+        // 2. Via crawl_url_id (fallback pour anciens documents sans web_crawl_id)
         // L'observer DocumentObserver gère la suppression de Qdrant et des chunks
-        $documents = $this->record->documents()
-            ->where('agent_id', $config->agent_id)
+        $documents = \App\Models\Document::where('agent_id', $config->agent_id)
+            ->where(function ($query) use ($crawlUrlIds) {
+                $query->where('web_crawl_id', $this->record->id)
+                    ->orWhereIn('crawl_url_id', $crawlUrlIds);
+            })
             ->get();
 
         foreach ($documents as $document) {
@@ -354,6 +376,14 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->modalDescription('Cette action va supprimer toutes les URLs crawlées, les documents de tous les agents et les fichiers en cache.')
                 ->modalSubmitActionLabel('Oui, tout supprimer')
                 ->action(function () {
+                    // Collecter les IDs des URLs du cache pour ce crawl
+                    $crawlUrlIds = $this->record->urlEntries()
+                        ->with('url')
+                        ->get()
+                        ->pluck('url.id')
+                        ->filter()
+                        ->toArray();
+
                     // Supprimer les fichiers en cache
                     foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
                         if ($entry->url?->storage_path && Storage::disk('local')->exists($entry->url->storage_path)) {
@@ -362,8 +392,14 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                     }
 
                     // Supprimer les documents de tous les agents
+                    // 1. Via web_crawl_id (relation directe)
+                    // 2. Via crawl_url_id (fallback pour anciens documents sans web_crawl_id)
                     // L'observer gère la suppression de Qdrant et des chunks
-                    foreach ($this->record->documents()->get() as $document) {
+                    $documents = \App\Models\Document::where('web_crawl_id', $this->record->id)
+                        ->orWhereIn('crawl_url_id', $crawlUrlIds)
+                        ->get();
+
+                    foreach ($documents as $document) {
                         $document->forceDelete();
                     }
 
