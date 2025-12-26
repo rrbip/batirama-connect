@@ -44,6 +44,8 @@ class Agent extends Model
         'allow_public_access',
         'default_token_expiry_hours',
         'is_active',
+        'default_extraction_method',
+        'default_chunk_strategy',
     ];
 
     protected $casts = [
@@ -81,6 +83,11 @@ class Agent extends Model
     public function documents(): HasMany
     {
         return $this->hasMany(Document::class);
+    }
+
+    public function webCrawls(): HasMany
+    {
+        return $this->hasMany(WebCrawl::class);
     }
 
     public function getOllamaUrl(): string
@@ -153,5 +160,21 @@ class Agent extends Model
 - Si plusieurs sources se contredisent, signale cette incohérence
 
 GUARDRAILS;
+    }
+
+    /**
+     * Retourne la méthode d'extraction par défaut pour les PDFs
+     */
+    public function getDefaultExtractionMethod(): string
+    {
+        return $this->default_extraction_method ?? 'auto';
+    }
+
+    /**
+     * Retourne la stratégie de chunking par défaut
+     */
+    public function getDefaultChunkStrategy(): string
+    {
+        return $this->default_chunk_strategy ?? 'sentence';
     }
 }
