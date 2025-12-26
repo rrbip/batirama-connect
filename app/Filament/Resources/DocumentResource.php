@@ -292,6 +292,13 @@ class DocumentResource extends Resource
                             ->icon('heroicon-o-squares-2x2')
                             ->schema([
                                 Forms\Components\Section::make('Chunks indexés')
+                                    ->headerActions([
+                                        Forms\Components\Actions\Action::make('manage_chunks')
+                                            ->label('Gérer les chunks')
+                                            ->icon('heroicon-o-pencil-square')
+                                            ->color('primary')
+                                            ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
+                                    ])
                                     ->schema([
                                         Forms\Components\Placeholder::make('chunks_list')
                                             ->label('')
@@ -300,16 +307,36 @@ class DocumentResource extends Resource
                                                     return 'Aucun chunk disponible';
                                                 }
 
+                                                // Charger les chunks avec leur catégorie
+                                                $chunks = $record->chunks()->with('category')->orderBy('chunk_index')->get();
+
                                                 $html = '<div class="space-y-4">';
-                                                foreach ($record->chunks as $index => $chunk) {
+                                                foreach ($chunks as $chunk) {
                                                     $status = $chunk->is_indexed ? '✓ Indexé' : '✗ Non indexé';
                                                     $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
                                                     $tokens = $chunk->token_count ?? 0;
 
+                                                    // Badge de catégorie
+                                                    $categoryBadge = '';
+                                                    if ($chunk->category) {
+                                                        $color = $chunk->category->color ?? '#6B7280';
+                                                        $categoryBadge = sprintf(
+                                                            '<span class="text-xs px-2 py-0.5 rounded" style="background-color: %s20; color: %s;">%s</span>',
+                                                            $color,
+                                                            $color,
+                                                            e($chunk->category->name)
+                                                        );
+                                                    } else {
+                                                        $categoryBadge = '<span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Sans catégorie</span>';
+                                                    }
+
                                                     $html .= sprintf(
                                                         '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
                                                             <div class="flex justify-between items-center mb-2">
-                                                                <span class="font-semibold">Chunk #%d</span>
+                                                                <div class="flex items-center gap-2">
+                                                                    <span class="font-semibold">Chunk #%d</span>
+                                                                    %s
+                                                                </div>
                                                                 <div class="flex items-center gap-3">
                                                                     <span class="text-xs text-gray-500">%d tokens</span>
                                                                     <span class="text-xs %s">%s</span>
@@ -317,7 +344,8 @@ class DocumentResource extends Resource
                                                             </div>
                                                             <div class="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">%s</div>
                                                         </div>',
-                                                        $index,
+                                                        $chunk->chunk_index,
+                                                        $categoryBadge,
                                                         $tokens,
                                                         $statusColor,
                                                         $status,
