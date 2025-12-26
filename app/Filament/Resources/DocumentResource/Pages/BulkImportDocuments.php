@@ -79,9 +79,10 @@ class BulkImportDocuments extends Page
                                 'paragraph' => 'Par paragraphe',
                                 'fixed_size' => 'Taille fixe',
                                 'recursive' => 'Récursif',
+                                'llm_assisted' => 'Assisté par LLM',
                             ])
                             ->default('sentence')
-                            ->helperText('Par phrase est recommandé pour une meilleure précision.'),
+                            ->helperText('Par phrase est recommandé. Assisté par LLM offre la meilleure qualité mais est plus lent.'),
                     ])
                     ->columns(3),
 

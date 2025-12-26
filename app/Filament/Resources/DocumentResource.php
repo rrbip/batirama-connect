@@ -277,6 +277,7 @@ class DocumentResource extends Resource
                                                 'paragraph' => 'Par paragraphe',
                                                 'fixed_size' => 'Taille fixe',
                                                 'recursive' => 'Récursif',
+                                                'llm_assisted' => 'Assisté par LLM',
                                             ])
                                             ->default('sentence'),
                                     ])

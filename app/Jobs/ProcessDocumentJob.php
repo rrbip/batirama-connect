@@ -67,6 +67,18 @@ class ProcessDocumentJob implements ShouldQueue
             ]);
 
             // 3. Découper en chunks
+            // Si stratégie LLM, dispatcher vers le job dédié
+            if ($this->document->chunk_strategy === 'llm_assisted') {
+                Log::info('Dispatching to LLM chunking', [
+                    'document_id' => $this->document->id,
+                ]);
+
+                ProcessLlmChunkingJob::dispatch($this->document, reindex: true);
+
+                // Le job LLM s'occupera du chunking et de l'indexation
+                return;
+            }
+
             $chunks = $chunker->chunk($this->document);
 
             Log::info('Document chunked', [

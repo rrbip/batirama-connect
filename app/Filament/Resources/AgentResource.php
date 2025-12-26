@@ -242,7 +242,7 @@ class AgentResource extends Resource
                                                 'sentence' => 'Par phrases (recommandé)',
                                                 'paragraph' => 'Par paragraphes',
                                                 'fixed' => 'Taille fixe (500 tokens)',
-                                                'semantic' => 'Sémantique (expérimental)',
+                                                'llm_assisted' => 'Assisté par LLM (qualité premium)',
                                             ])
                                             ->default('sentence')
                                             ->helperText('Méthode de découpage du texte en chunks pour l\'indexation'),
