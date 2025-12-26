@@ -273,12 +273,12 @@ class DocumentResource extends Resource
                                         Forms\Components\Select::make('chunk_strategy')
                                             ->label('Stratégie de chunking')
                                             ->options([
-                                                'fixed_size' => 'Taille fixe',
                                                 'sentence' => 'Par phrase',
                                                 'paragraph' => 'Par paragraphe',
+                                                'fixed_size' => 'Taille fixe',
                                                 'recursive' => 'Récursif',
                                             ])
-                                            ->default('recursive'),
+                                            ->default('sentence'),
                                     ])
                                     ->columns(3),
                             ])

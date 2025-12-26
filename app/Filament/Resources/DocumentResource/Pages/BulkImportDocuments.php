@@ -70,9 +70,20 @@ class BulkImportDocuments extends Page
                                 'ocr' => 'OCR (Tesseract)',
                             ])
                             ->default('auto')
-                            ->helperText('OCR : convertit les pages PDF en images puis applique Tesseract. Utile pour les PDFs avec problèmes de ligatures.'),
+                            ->helperText('OCR : convertit les pages PDF en images puis applique Tesseract.'),
+
+                        Forms\Components\Select::make('chunk_strategy')
+                            ->label('Stratégie de chunking')
+                            ->options([
+                                'sentence' => 'Par phrase',
+                                'paragraph' => 'Par paragraphe',
+                                'fixed_size' => 'Taille fixe',
+                                'recursive' => 'Récursif',
+                            ])
+                            ->default('sentence')
+                            ->helperText('Par phrase est recommandé pour une meilleure précision.'),
                     ])
-                    ->columns(4),
+                    ->columns(3),
 
                 Forms\Components\Tabs::make('Import')
                     ->tabs([
@@ -146,6 +157,7 @@ class BulkImportDocuments extends Page
         $maxDepth = (int) ($data['max_depth'] ?? 2);
         $skipRootFolder = $data['skip_root_folder'] ?? true;
         $extractionMethod = $data['extraction_method'] ?? 'auto';
+        $chunkStrategy = $data['chunk_strategy'] ?? 'sentence';
 
         $filesToProcess = [];
 
@@ -185,7 +197,16 @@ class BulkImportDocuments extends Page
         }
 
         // Dispatcher le job de traitement
-        ProcessBulkImportJob::dispatch($agentId, $filesToProcess, $extractionMethod);
+        \Illuminate\Support\Facades\Log::info('Dispatching ProcessBulkImportJob', [
+            'agent_id' => $agentId,
+            'file_count' => count($filesToProcess),
+            'extraction_method' => $extractionMethod,
+            'chunk_strategy' => $chunkStrategy,
+        ]);
+
+        ProcessBulkImportJob::dispatch($agentId, $filesToProcess, $extractionMethod, $chunkStrategy);
+
+        \Illuminate\Support\Facades\Log::info('ProcessBulkImportJob dispatched successfully');
 
         Notification::make()
             ->title('Import lancé')

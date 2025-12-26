@@ -32,12 +32,17 @@ class ProcessBulkImportJob implements ShouldQueue
      * @param int $agentId
      * @param array<array{path: string, original_name: string, category: ?string}> $files
      * @param string $extractionMethod Méthode d'extraction: 'auto', 'text', ou 'ocr'
+     * @param string $chunkStrategy Stratégie de chunking: 'sentence', 'paragraph', 'fixed_size', 'recursive'
      */
     public function __construct(
         public int $agentId,
         public array $files,
-        public string $extractionMethod = 'auto'
-    ) {}
+        public string $extractionMethod = 'auto',
+        public string $chunkStrategy = 'sentence'
+    ) {
+        // Forcer l'utilisation de la queue 'default'
+        $this->onQueue('default');
+    }
 
     public function handle(): void
     {
@@ -108,15 +113,21 @@ class ProcessBulkImportJob implements ShouldQueue
         // Extraire le titre du nom de fichier (sans extension)
         $title = $this->cleanFileName($originalName);
 
+        // Déterminer le type MIME
+        $mimeType = $this->getMimeType($extension);
+
         // Créer le document
         $document = Document::create([
+            'uuid' => (string) Str::uuid(),
             'agent_id' => $this->agentId,
             'storage_path' => $storagePath,
             'original_name' => $originalName,
             'title' => $title,
             'document_type' => $extension,
+            'mime_type' => $mimeType,
             'category' => $category,
             'extraction_method' => $this->extractionMethod,
+            'chunk_strategy' => $this->chunkStrategy,
             'file_size' => strlen($content),
             'extraction_status' => 'pending',
             'is_indexed' => false,
@@ -153,5 +164,26 @@ class ProcessBulkImportJob implements ShouldQueue
         $name = mb_convert_case(trim($name), MB_CASE_TITLE, 'UTF-8');
 
         return $name;
+    }
+
+    /**
+     * Détermine le type MIME à partir de l'extension
+     */
+    private function getMimeType(string $extension): string
+    {
+        return match (strtolower($extension)) {
+            'pdf' => 'application/pdf',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'txt' => 'text/plain',
+            'md' => 'text/markdown',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'bmp' => 'image/bmp',
+            'tiff', 'tif' => 'image/tiff',
+            'webp' => 'image/webp',
+            default => 'application/octet-stream',
+        };
     }
 }

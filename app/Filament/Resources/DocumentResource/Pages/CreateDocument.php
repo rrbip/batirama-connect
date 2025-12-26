@@ -21,6 +21,7 @@ class CreateDocument extends CreateRecord
         $data['uuid'] = (string) Str::uuid();
         $data['uploaded_by'] = auth()->id();
         $data['extraction_status'] = 'pending';
+        $data['chunk_strategy'] = $data['chunk_strategy'] ?? 'sentence';
 
         // Extraire le nom original et le type du fichier uploadé
         if (isset($data['storage_path'])) {
