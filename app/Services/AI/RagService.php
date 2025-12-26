@@ -268,13 +268,21 @@ class RagService
 
             $filteredCount = count($results);
 
-            // Si pas assez de résultats avec le filtre, refaire une recherche sans filtre
-            if (!empty($categoryFilter) && count($results) < 2) {
+            // Fallback: seulement si confiance faible ET pas assez de résultats
+            // Avec confiance élevée (>= 70%), on garde UNIQUEMENT les résultats de la catégorie
+            $confidenceThreshold = 0.70;
+            $confidence = $categoryDetection['confidence'] ?? 0;
+            $shouldUseFallback = !empty($categoryFilter)
+                && count($results) < 2
+                && $confidence < $confidenceThreshold;
+
+            if ($shouldUseFallback) {
                 $usedFallback = true;
 
-                Log::info('RAG fallback: not enough filtered results, searching without filter', [
+                Log::info('RAG fallback: low confidence category detection, searching without filter', [
                     'agent' => $agent->slug,
                     'filtered_count' => count($results),
+                    'confidence' => $confidence,
                 ]);
 
                 $unfilteredResults = $this->qdrantService->search(
@@ -293,6 +301,14 @@ class RagService
                     ->toArray();
 
                 $results = array_merge($results, $additionalResults);
+            } elseif (!empty($categoryFilter) && count($results) < 2 && $confidence >= $confidenceThreshold) {
+                // Confiance élevée mais peu de résultats : on garde le filtrage strict
+                Log::info('RAG strict filtering: high confidence, keeping category-only results', [
+                    'agent' => $agent->slug,
+                    'filtered_count' => count($results),
+                    'confidence' => $confidence,
+                    'detected_categories' => collect($categoryDetection['categories'] ?? [])->pluck('name')->toArray(),
+                ]);
             }
 
             // Ajouter les infos de fallback à la détection
