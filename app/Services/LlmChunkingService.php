@@ -147,14 +147,12 @@ class LlmChunkingService
             ]),
         ]);
 
-        // Fusionner les chunks consécutifs de même catégorie
-        $mergedCount = $this->mergeConsecutiveChunks($document);
+        // Note: On ne fusionne plus automatiquement les chunks car cela fait perdre les summaries
+        // La fusion reste disponible manuellement via ManageChunks si nécessaire
 
         Log::info('LLM Chunking completed', [
             'document_id' => $document->id,
             'total_chunks' => count($allChunks),
-            'merged_chunks' => $mergedCount,
-            'final_chunks' => $document->fresh()->chunk_count,
             'errors' => count($errors),
         ]);
 
@@ -162,7 +160,6 @@ class LlmChunkingService
             'chunks' => $document->chunks()->orderBy('chunk_index')->get()->all(),
             'chunk_count' => $document->fresh()->chunk_count,
             'window_count' => count($windows),
-            'merged_count' => $mergedCount,
             'errors' => $errors,
         ];
     }
