@@ -21,7 +21,14 @@ class CreateDocument extends CreateRecord
         $data['uuid'] = (string) Str::uuid();
         $data['uploaded_by'] = auth()->id();
         $data['extraction_status'] = 'pending';
-        $data['chunk_strategy'] = $data['chunk_strategy'] ?? 'sentence';
+
+        // Utiliser la stratégie de chunking de l'agent si non spécifiée
+        if (empty($data['chunk_strategy']) && !empty($data['agent_id'])) {
+            $agent = \App\Models\Agent::find($data['agent_id']);
+            $data['chunk_strategy'] = $agent?->getDefaultChunkStrategy() ?? 'sentence';
+        } else {
+            $data['chunk_strategy'] = $data['chunk_strategy'] ?? 'sentence';
+        }
 
         // Extraire le nom original et le type du fichier uploadé
         if (isset($data['storage_path'])) {

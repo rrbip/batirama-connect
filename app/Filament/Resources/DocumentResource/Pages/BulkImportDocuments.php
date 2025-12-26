@@ -43,6 +43,16 @@ class BulkImportDocuments extends Page
                             ->options(Agent::pluck('name', 'id'))
                             ->required()
                             ->searchable()
+                            ->live()
+                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
+                                if ($state) {
+                                    $agent = Agent::find($state);
+                                    if ($agent) {
+                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
+                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
+                                    }
+                                }
+                            })
                             ->helperText('Tous les documents importés seront associés à cet agent.'),
 
                         Forms\Components\TextInput::make('category_prefix')
@@ -82,7 +92,7 @@ class BulkImportDocuments extends Page
                                 'llm_assisted' => 'Assisté par LLM',
                             ])
                             ->default('sentence')
-                            ->helperText('Par phrase est recommandé. Assisté par LLM offre la meilleure qualité mais est plus lent.'),
+                            ->helperText('Automatiquement défini selon l\'agent. Vous pouvez modifier si besoin.'),
                     ])
                     ->columns(3),
 

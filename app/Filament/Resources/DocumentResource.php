@@ -49,7 +49,17 @@ class DocumentResource extends Resource
                                             ->relationship('agent', 'name')
                                             ->required()
                                             ->searchable()
-                                            ->preload(),
+                                            ->preload()
+                                            ->live()
+                                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
+                                                if ($state) {
+                                                    $agent = \App\Models\Agent::find($state);
+                                                    if ($agent) {
+                                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
+                                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
+                                                    }
+                                                }
+                                            }),
 
                                         // Upload pour nouveau document
                                         Forms\Components\FileUpload::make('storage_path')
