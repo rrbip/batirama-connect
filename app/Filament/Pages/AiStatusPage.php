@@ -302,7 +302,7 @@ class AiStatusPage extends Page
                         ? "Jobs en attente depuis " . gmdate('H:i:s', $age) . " - Worker probablement arrêté"
                         : "Worker actif (driver: {$queueConnection})",
                     'restartable' => true,
-                    'restart_command' => 'supervisorctl restart laravel-worker:*',
+                    'restart_command' => 'php artisan queue:restart',
                 ];
             } else {
                 $services['queue'] = [
@@ -310,7 +310,7 @@ class AiStatusPage extends Page
                     'status' => 'unknown',
                     'details' => "Aucun job en file (driver: {$queueConnection})",
                     'restartable' => true,
-                    'restart_command' => 'supervisorctl restart laravel-worker:*',
+                    'restart_command' => 'php artisan queue:restart',
                 ];
             }
         }
