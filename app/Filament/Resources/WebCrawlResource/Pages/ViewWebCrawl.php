@@ -53,8 +53,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         }
                     }
 
-                    // Supprimer les documents créés par ce crawl
-                    $this->record->documents()->delete();
+                    // Supprimer les documents créés par ce crawl (un par un pour déclencher l'Observer)
+                    // L'Observer supprime automatiquement les vecteurs de Qdrant et les chunks
+                    foreach ($this->record->documents()->with('chunks')->get() as $document) {
+                        $document->chunks()->delete(); // Supprimer les chunks d'abord
+                        $document->forceDelete(); // Force delete pour déclencher forceDeleting et bypasser SoftDelete
+                    }
 
                     // Supprimer toutes les entrées d'URLs
                     $this->record->urlEntries()->delete();
