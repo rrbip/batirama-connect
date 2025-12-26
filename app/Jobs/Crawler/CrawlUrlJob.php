@@ -145,10 +145,56 @@ class CrawlUrlJob implements ShouldQueue
                 return;
             }
 
-            // Gérer les redirections
+            // Gérer les redirections - suivre automatiquement
             if ($result['status'] >= 300 && $result['status'] < 400) {
-                // TODO: Suivre la redirection
-                $this->markError('redirect');
+                $redirectUrl = $result['headers']['Location'][0] ?? $result['headers']['location'][0] ?? null;
+                if ($redirectUrl) {
+                    Log::info('Following redirect', [
+                        'crawl_id' => $this->crawl->id,
+                        'from' => $url,
+                        'to' => $redirectUrl,
+                    ]);
+
+                    // Résoudre l'URL relative
+                    if (!str_starts_with($redirectUrl, 'http')) {
+                        $redirectUrl = $urlNormalizer->resolve($redirectUrl, $url);
+                    }
+
+                    // Ajouter l'URL de redirection au crawl si pas déjà présente
+                    $redirectHash = $urlNormalizer->hash($redirectUrl);
+                    $redirectCrawlUrl = WebCrawlUrl::firstOrCreate(
+                        ['url_hash' => $redirectHash],
+                        ['url' => $urlNormalizer->normalize($redirectUrl)]
+                    );
+
+                    $existingEntry = WebCrawlUrlCrawl::where('crawl_id', $this->crawl->id)
+                        ->where('crawl_url_id', $redirectCrawlUrl->id)
+                        ->first();
+
+                    if (!$existingEntry) {
+                        $newEntry = WebCrawlUrlCrawl::create([
+                            'crawl_id' => $this->crawl->id,
+                            'crawl_url_id' => $redirectCrawlUrl->id,
+                            'parent_id' => $this->urlEntry->id,
+                            'depth' => $this->urlEntry->depth,
+                            'status' => 'pending',
+                        ]);
+
+                        $this->crawl->increment('pages_discovered');
+
+                        CrawlUrlJob::dispatch($this->crawl, $newEntry)
+                            ->delay(now()->addMilliseconds($crawler->getCrawlDelay($this->crawl)));
+                    }
+                }
+
+                // Marquer cette URL comme redirection (pas une erreur)
+                $this->urlEntry->update([
+                    'status' => 'fetched',
+                    'fetched_at' => now(),
+                    'error_message' => 'redirect:' . ($redirectUrl ?? 'unknown'),
+                ]);
+                $this->crawl->increment('pages_crawled');
+                $this->checkCrawlCompletion();
 
                 return;
             }
@@ -259,6 +305,18 @@ class CrawlUrlJob implements ShouldQueue
         // Extraire les liens
         $links = $crawler->extractLinks($html, $baseUrl);
 
+        Log::info('Links extracted from page', [
+            'crawl_id' => $this->crawl->id,
+            'url' => $baseUrl,
+            'depth' => $this->urlEntry->depth,
+            'links_found' => count($links),
+            'pages_discovered' => $this->crawl->pages_discovered,
+        ]);
+
+        $addedCount = 0;
+        $filteredCount = 0;
+        $existingCount = 0;
+
         foreach ($links as $link) {
             // Vérifier si on a atteint la limite (0 = illimité)
             if ($this->crawl->max_pages > 0 && $this->crawl->pages_discovered >= $this->crawl->max_pages) {
@@ -267,6 +325,7 @@ class CrawlUrlJob implements ShouldQueue
 
             // Vérifier le domaine
             if (! $urlNormalizer->isAllowedDomain($link, $allowedDomains)) {
+                $filteredCount++;
                 continue;
             }
 
@@ -286,6 +345,7 @@ class CrawlUrlJob implements ShouldQueue
                 ->first();
 
             if ($existingEntry) {
+                $existingCount++;
                 continue;
             }
 
@@ -299,10 +359,21 @@ class CrawlUrlJob implements ShouldQueue
             ]);
 
             $this->crawl->increment('pages_discovered');
+            $addedCount++;
 
             // Dispatcher le job de crawl pour cette URL
             CrawlUrlJob::dispatch($this->crawl, $newEntry)
                 ->delay(now()->addMilliseconds($crawler->getCrawlDelay($this->crawl)));
+        }
+
+        if (count($links) > 0) {
+            Log::info('Links processing summary', [
+                'crawl_id' => $this->crawl->id,
+                'url' => $baseUrl,
+                'added' => $addedCount,
+                'filtered_domain' => $filteredCount,
+                'already_exists' => $existingCount,
+            ]);
         }
     }
 
