@@ -98,7 +98,12 @@ class IndexDocumentChunksJob implements ShouldQueue
 
         foreach ($chunks as $chunk) {
             try {
-                $vector = $embeddingService->embed($chunk->content);
+                // Inclure la catégorie dans le texte pour améliorer la recherche sémantique
+                $textToEmbed = $chunk->content;
+                if ($chunk->category) {
+                    $textToEmbed = "[{$chunk->category->name}] " . $textToEmbed;
+                }
+                $vector = $embeddingService->embed($textToEmbed);
 
                 $pointId = Uuid::uuid5(
                     Uuid::NAMESPACE_DNS,

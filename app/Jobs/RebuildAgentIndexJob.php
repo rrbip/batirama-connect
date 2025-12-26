@@ -157,8 +157,12 @@ class RebuildAgentIndexJob implements ShouldQueue
 
             foreach ($batch as $chunk) {
                 try {
-                    // Générer l'embedding
-                    $vector = $embeddingService->embed($chunk->content);
+                    // Inclure la catégorie dans le texte pour améliorer la recherche sémantique
+                    $textToEmbed = $chunk->content;
+                    if ($chunk->category) {
+                        $textToEmbed = "[{$chunk->category->name}] " . $textToEmbed;
+                    }
+                    $vector = $embeddingService->embed($textToEmbed);
 
                     // Générer un ID déterministe
                     $pointId = Uuid::uuid5(

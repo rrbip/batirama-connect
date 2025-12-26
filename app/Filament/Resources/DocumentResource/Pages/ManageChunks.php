@@ -422,8 +422,12 @@ class ManageChunks extends Page
 
         foreach ($this->chunks as $chunk) {
             try {
-                // Generate embedding
-                $vector = $embedding->embed($chunk->content);
+                // Inclure la catégorie dans le texte pour améliorer la recherche sémantique
+                $textToEmbed = $chunk->content;
+                if ($chunk->category) {
+                    $textToEmbed = "[{$chunk->category->name}] " . $textToEmbed;
+                }
+                $vector = $embedding->embed($textToEmbed);
 
                 // Generate deterministic point ID
                 $pointId = Uuid::uuid5(
@@ -503,8 +507,12 @@ class ManageChunks extends Page
         }
 
         try {
-            // Generate embedding
-            $vector = $embedding->embed($chunk->content);
+            // Inclure la catégorie dans le texte pour améliorer la recherche sémantique
+            $textToEmbed = $chunk->content;
+            if ($chunk->category) {
+                $textToEmbed = "[{$chunk->category->name}] " . $textToEmbed;
+            }
+            $vector = $embedding->embed($textToEmbed);
 
             // Generate deterministic point ID
             $pointId = Uuid::uuid5(
