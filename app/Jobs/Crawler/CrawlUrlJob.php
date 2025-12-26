@@ -100,9 +100,21 @@ class CrawlUrlJob implements ShouldQueue
                 return;
             }
 
-            // Contenu non modifié (304)
+            // Contenu non modifié (304) - garder le contenu existant
             if ($result['not_modified']) {
-                $this->markSkipped('not_modified');
+                // Le contenu n'a pas changé, on garde l'ancien cache
+                // Mettre à jour le statut HTTP mais garder le storage_path existant
+                $crawlUrl->update(['http_status' => 304]);
+
+                // Si le contenu était déjà indexé, marquer comme indexé
+                // Sinon comme fetched pour que le bouton "Voir" fonctionne
+                $newStatus = $crawlUrl->storage_path ? 'indexed' : 'skipped';
+                $this->urlEntry->update([
+                    'status' => $newStatus,
+                    'skip_reason' => 'not_modified',
+                    'fetched_at' => now(),
+                ]);
+
                 $this->crawl->increment('pages_crawled');
                 return;
             }
