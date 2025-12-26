@@ -335,7 +335,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
 
                     // Si le crawl est terminé, lancer l'indexation pour cet agent
                     if ($this->record->status === 'completed') {
-                        $this->startAgentIndexation($agentConfig);
+                        $this->dispatchAgentIndexation($agentConfig);
                     }
 
                     Notification::make()
@@ -858,9 +858,9 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     }
 
     /**
-     * Démarre l'indexation pour un agent spécifique.
+     * Démarre l'indexation pour un agent config (appelé après ajout d'agent).
      */
-    protected function startAgentIndexation(AgentWebCrawl $agentConfig): void
+    protected function dispatchAgentIndexation(AgentWebCrawl $agentConfig): void
     {
         $agentConfig->update(['index_status' => 'indexing']);
 
