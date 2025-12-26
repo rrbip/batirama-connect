@@ -91,6 +91,22 @@
                                     <x-heroicon-o-clock class="w-3 h-3 inline" /> Non indexé
                                 </span>
                             @endif
+
+                            {{-- Category badge/selector --}}
+                            @if($editingChunkId !== $chunk->id)
+                                <select
+                                    wire:change="updateChunkCategory({{ $chunk->id }}, $event.target.value ? parseInt($event.target.value) : null)"
+                                    class="text-xs px-2 py-1 rounded border-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 focus:ring-1 focus:ring-primary-500"
+                                    style="{{ $chunk->category ? 'background-color: ' . $chunk->category->color . '20; color: ' . $chunk->category->color . ';' : '' }}"
+                                >
+                                    <option value="">Sans catégorie</option>
+                                    @foreach($this->categories as $cat)
+                                        <option value="{{ $cat->id }}" {{ $chunk->category_id === $cat->id ? 'selected' : '' }}>
+                                            {{ $cat->name }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            @endif
                         </div>
 
                         <div class="flex items-center gap-2">
@@ -129,6 +145,20 @@
                     @if($editingChunkId === $chunk->id)
                         {{-- Edit mode --}}
                         <div class="space-y-3">
+                            {{-- Category selector in edit mode --}}
+                            <div class="flex items-center gap-3">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Catégorie :</label>
+                                <select
+                                    wire:model="editingCategoryId"
+                                    class="text-sm px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                >
+                                    <option value="">Sans catégorie</option>
+                                    @foreach($this->categories as $cat)
+                                        <option value="{{ $cat->id }}">{{ $cat->name }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+
                             <x-filament::input.wrapper>
                                 <textarea
                                     wire:model="editingContent"

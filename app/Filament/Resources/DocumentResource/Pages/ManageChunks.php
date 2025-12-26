@@ -6,6 +6,7 @@ namespace App\Filament\Resources\DocumentResource\Pages;
 
 use App\Filament\Resources\DocumentResource;
 use App\Models\Document;
+use App\Models\DocumentCategory;
 use App\Models\DocumentChunk;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\QdrantService;
@@ -34,6 +35,14 @@ class ManageChunks extends Page
 
     public string $editingContent = '';
 
+    public ?int $editingCategoryId = null;
+
+    #[Computed]
+    public function categories(): Collection
+    {
+        return DocumentCategory::orderBy('name')->get();
+    }
+
     public function mount(int|string|Document $record): void
     {
         if ($record instanceof Document) {
@@ -56,7 +65,7 @@ class ManageChunks extends Page
     #[Computed]
     public function chunks(): Collection
     {
-        return $this->record->chunks()->orderBy('chunk_index')->get();
+        return $this->record->chunks()->with('category')->orderBy('chunk_index')->get();
     }
 
     protected function getHeaderActions(): array
@@ -126,6 +135,7 @@ class ManageChunks extends Page
         if ($chunk) {
             $this->editingChunkId = $chunkId;
             $this->editingContent = $chunk->content;
+            $this->editingCategoryId = $chunk->category_id;
         }
     }
 
@@ -136,6 +146,46 @@ class ManageChunks extends Page
     {
         $this->editingChunkId = null;
         $this->editingContent = '';
+        $this->editingCategoryId = null;
+    }
+
+    /**
+     * Update chunk category (quick update without full edit)
+     */
+    public function updateChunkCategory(int $chunkId, ?int $categoryId): void
+    {
+        $chunk = DocumentChunk::find($chunkId);
+        if (!$chunk) {
+            return;
+        }
+
+        $oldCategoryId = $chunk->category_id;
+
+        $chunk->update([
+            'category_id' => $categoryId,
+            'is_indexed' => false, // Mark for re-indexation to update Qdrant
+            'indexed_at' => null,
+        ]);
+
+        // Update usage counters
+        if ($oldCategoryId) {
+            DocumentCategory::find($oldCategoryId)?->decrementUsage();
+        }
+        if ($categoryId) {
+            DocumentCategory::find($categoryId)?->incrementUsage();
+        }
+
+        $categoryName = $categoryId
+            ? DocumentCategory::find($categoryId)?->name ?? 'Inconnue'
+            : 'Aucune';
+
+        Notification::make()
+            ->title('Catégorie mise à jour')
+            ->body("Chunk #{$chunk->chunk_index} → {$categoryName}")
+            ->success()
+            ->send();
+
+        unset($this->chunks);
     }
 
     /**
@@ -153,6 +203,8 @@ class ManageChunks extends Page
             return;
         }
 
+        $oldCategoryId = $chunk->category_id;
+
         // Update chunk content
         $extractor = app(DocumentExtractorService::class);
         $newTokenCount = $extractor->estimateTokenCount($this->editingContent);
@@ -161,14 +213,26 @@ class ManageChunks extends Page
             'content' => $this->editingContent,
             'content_hash' => md5($this->editingContent),
             'token_count' => $newTokenCount,
+            'category_id' => $this->editingCategoryId,
             'is_indexed' => false, // Mark as needing re-indexation
             'indexed_at' => null,
         ]);
+
+        // Update category usage counters
+        if ($oldCategoryId !== $this->editingCategoryId) {
+            if ($oldCategoryId) {
+                DocumentCategory::find($oldCategoryId)?->decrementUsage();
+            }
+            if ($this->editingCategoryId) {
+                DocumentCategory::find($this->editingCategoryId)?->incrementUsage();
+            }
+        }
 
         Log::info('Chunk content updated', [
             'chunk_id' => $chunk->id,
             'document_id' => $this->record->id,
             'new_token_count' => $newTokenCount,
+            'category_id' => $this->editingCategoryId,
         ]);
 
         Notification::make()
@@ -377,6 +441,7 @@ class ManageChunks extends Page
                         'content' => $chunk->content,
                         'document_title' => $this->record->title ?? $this->record->original_name,
                         'category' => $this->record->category,
+                        'chunk_category' => $chunk->category?->name,
                         'agent_slug' => $this->record->agent?->slug,
                     ],
                 ]]);
@@ -419,7 +484,7 @@ class ManageChunks extends Page
      */
     public function reindexChunk(int $chunkId): void
     {
-        $chunk = DocumentChunk::find($chunkId);
+        $chunk = DocumentChunk::with('category')->find($chunkId);
         if (!$chunk) {
             return;
         }
@@ -457,6 +522,7 @@ class ManageChunks extends Page
                     'content' => $chunk->content,
                     'document_title' => $this->record->title ?? $this->record->original_name,
                     'category' => $this->record->category,
+                    'chunk_category' => $chunk->category?->name,
                     'agent_slug' => $this->record->agent?->slug,
                 ],
             ]]);
