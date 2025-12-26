@@ -46,18 +46,22 @@ class LlmChunkingSetting extends Model
 
     /**
      * Retourne le modèle à utiliser (celui configuré ou celui de l'agent)
+     * Priorité: settings explicite > modèle de l'agent > config par défaut
      */
     public function getModelFor(?Agent $agent = null): string
     {
+        // 1. Modèle explicitement configuré dans les settings LLM Chunking
         if (!empty($this->model)) {
             return $this->model;
         }
 
+        // 2. Modèle de l'agent associé au document
         if ($agent && !empty($agent->model)) {
             return $agent->model;
         }
 
-        return 'llama3.2';
+        // 3. Modèle par défaut de la config Ollama
+        return config('ai.ollama.default_model', 'mistral:7b');
     }
 
     /**
