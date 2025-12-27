@@ -888,28 +888,149 @@ class ClientObserver
      - Widget iframe isolé (Same-Origin Policy)
      - Résultats via Webhook signé vers serveur client
 
-### À Décider
-
 4. **Gestion des documents RAG par client ?**
-   - Option A : Upload via admin uniquement
-   - Option B : API upload pour clients
-   - **Recommandation** : Option A pour MVP
+   - ✅ **Option hybride : Admin (tous) + Client (ses deployments)**
+   - Admin : Accès à tous les RAG, gestion des docs communs (master)
+   - Client : Accès limité à ses agents via portail Filament + API upload pour clients techniques
+   - Documents uploadés par client → collection dédiée du deployment
+
+5. **Architecture Agent partagé entre clients ?**
+   - ✅ **Option hybride : Master + Deployment**
+   - Un seul Agent Master à maintenir (prompt, modèle)
+   - N collections dédiées (1 par deployment client)
+   - Docs communs dans collection master, docs spécifiques dans collection client
+   - Pas de duplication d'agent, pas de filtrage tenant_id → isolation native Qdrant
 
 ---
 
-## 12. Risques et Mitigations
+## 12. Architecture Master / Deployment
+
+### 12.1 Principe
+
+```
+Agent Master (Expert BTP)          AgentDeployment (LogicielX)
+┌─────────────────────────┐        ┌─────────────────────────┐
+│ system_prompt (base)    │───────►│ config_overlay:         │
+│ model: mistral:7b       │        │   prompt_append: "..."  │
+│ temperature: 0.7        │        │   temperature: 0.6      │
+│ collection: btp_common  │        │ dedicated_collection:   │
+│                         │        │   btp_logicielx         │
+└─────────────────────────┘        └─────────────────────────┘
+                                              │
+                                              ▼
+                                   Config Résolue à l'exécution
+                                   • prompt = base + append
+                                   • collections = [common, dedicated]
+```
+
+### 12.2 Répartition Master vs Deployment
+
+| Composant | Champ(s) | Master | Deployment | Notes |
+|-----------|----------|:------:|:----------:|-------|
+| **IDENTITÉ** | | | | |
+| Nom affiché | `name` | ✅ | 🔄 Override | Marque blanche |
+| Slug | `slug` | ✅ | ❌ | Identifiant technique interne |
+| Description | `description` | ✅ | 🔄 Override | |
+| Branding | `icon`, `color` | ✅ | 🔄 Override | Via config branding |
+| **PROMPT** | | | | |
+| System Prompt | `system_prompt` | ✅ | 🔄 3 modes | Inherit / Append / Replace |
+| **CONFIG IA** | | | | |
+| Modèle LLM | `model` | ✅ | 🔄 Override | |
+| Fallback Model | `fallback_model` | ✅ | 🔄 Override | |
+| Température | `temperature` | ✅ | 🔄 Override | |
+| Max Tokens | `max_tokens` | ✅ | 🔄 Override | |
+| Context Window | `context_window_size` | ✅ | 🔄 Override | |
+| **INFRA** | | | | |
+| Ollama Host | `ollama_host` | ✅ | 🔄 Override | Répartition charge |
+| Ollama Port | `ollama_port` | ✅ | 🔄 Override | |
+| **RAG** | | | | |
+| Collection Master | `qdrant_collection` | ✅ | Read-only | Docs partagés |
+| Collection Dédiée | `dedicated_collection` | ❌ | ✅ Own | Docs client |
+| **DOCUMENTS** | | | | |
+| Docs Communs | via collection master | ✅ | Read-only | Admin upload |
+| Docs Client | via collection dédiée | ❌ | ✅ Own | Client upload |
+| **APPRENTISSAGE** | | | | |
+| Learned Master | `learned_responses` | ✅ | Read-only | Bénéficie à tous |
+| Learned Client | `learned_responses` | ❌ | ✅ Own | Spécifique, promotable |
+| **SESSIONS** | | | | |
+| Sessions | `ai_sessions` | ❌ | ✅ Own | Isolées par deployment |
+| Messages | `ai_messages` | ❌ | ✅ Own | Via sessions |
+| **LIMITES** | | | | |
+| Minimums système | rate_limit, temp... | ✅ Impose | ❌ | Non négociable |
+| Quotas client | sessions/mois... | ❌ | ✅ | Selon plan |
+| Quotas deployment | sessions/jour... | ❌ | ✅ | Répartition interne |
+
+**Légende** : ✅ Géré | ❌ Pas géré | 🔄 Override possible | ✅ Own = Propre et isolé
+
+### 12.3 Modes de personnalisation Prompt
+
+| Mode | Usage | Résultat |
+|------|-------|----------|
+| **Inherit** | Agent générique sans modif | `prompt = master.system_prompt` |
+| **Append** | Ajout d'instructions spécifiques | `prompt = master + "\n\n" + overlay.append` |
+| **Replace** | Agent 100% personnalisé | `prompt = overlay.replace` |
+
+### 12.4 Promotion Learned Responses
+
+```
+Correction sur Deployment LogicielX
+         │
+         ▼
+Sauvegarde locale (deployment_id = dpl_xxx)
+         │
+         ▼
+Admin voit la correction
+         │
+         ▼
+Clique "Promouvoir vers Master"
+         │
+         ▼
+Anonymisation (suppression références client)
+         │
+         ▼
+Création dans Master (deployment_id = NULL)
+         │
+         ▼
+Tous les deployments en bénéficient
+```
+
+### 12.5 Système de Limites (3 niveaux)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ NIVEAU 1 : Master (minimums imposés)                            │
+│ • min_rate_limit_per_ip: 30 req/min                            │
+│ • temperature: 0.1 - 1.5                                        │
+│ • max_context_window: 20                                        │
+├─────────────────────────────────────────────────────────────────┤
+│ NIVEAU 2 : Client (plan souscrit)                               │
+│ • max_sessions_month: 10,000                                    │
+│ • max_messages_month: 100,000                                   │
+│ • max_deployments: 5                                            │
+│ • max_documents_storage: 5 GB                                   │
+├─────────────────────────────────────────────────────────────────┤
+│ NIVEAU 3 : Deployment (répartition interne)                     │
+│ • max_sessions_day: 500                                         │
+│ • max_messages_day: 5,000                                       │
+│ • rate_limit_per_ip: 60                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13. Risques et Mitigations
 
 | Risque | Impact | Probabilité | Mitigation |
 |--------|--------|-------------|------------|
 | Usurpation de domaine | Haut | Moyenne | Logging + alertes + blocage IP |
 | Dépassement quotas massif | Moyen | Faible | Hard limit + suspension auto |
-| Fuite de données entre clients | Critique | Faible | Isolation stricte des collections |
-| Widget incompatible (conflits JS) | Moyen | Moyenne | Shadow DOM + namespace isolé |
-| Performance sous charge | Moyen | Moyenne | Cache + CDN pour widget |
+| Fuite de données entre clients | Critique | Faible | Isolation stricte des collections Qdrant |
+| Performance Ollama sous charge | Moyen | Moyenne | Override ollama_host par deployment |
+| Prompt injection via client | Haut | Faible | Validation + sanitization des overlays |
 
 ---
 
-## Annexes
+## 14. Annexes
 
 ### A. Exemple de Code d'Intégration Complet
 
