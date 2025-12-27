@@ -380,9 +380,10 @@ class LlmChunkingService
 
             $chunks[] = [
                 'content' => trim($chunk['content']),
-                'keywords' => $chunk['keywords'] ?? [],
-                'summary' => $chunk['summary'] ?? null,
-                'category' => $chunk['category'] ?? null,
+                // Accepter 'keywords' ou 'tags' (mistral utilise parfois 'tags')
+                'keywords' => $chunk['keywords'] ?? $chunk['tags'] ?? [],
+                'summary' => $chunk['summary'] ?? $chunk['resume'] ?? null,
+                'category' => $chunk['category'] ?? $chunk['categorie'] ?? null,
             ];
         }
 
