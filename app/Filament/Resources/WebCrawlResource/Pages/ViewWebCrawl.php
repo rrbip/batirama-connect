@@ -442,21 +442,16 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->color('success')
                 ->visible(fn () => $this->record->status === 'pending' && $this->record->urlEntries()->count() === 0)
                 ->action(function () {
-                    if ($this->record->agentConfigs()->count() === 0) {
-                        Notification::make()
-                            ->title('Aucun agent')
-                            ->body('Ajoutez au moins un agent avant de lancer le crawl.')
-                            ->warning()
-                            ->send();
-
-                        return;
-                    }
-
                     StartWebCrawlJob::dispatch($this->record);
+
+                    $message = 'Le crawl a démarré.';
+                    if ($this->record->agentConfigs()->count() === 0) {
+                        $message .= ' Vous pourrez ajouter des agents après le crawl pour indexer le contenu.';
+                    }
 
                     Notification::make()
                         ->title('Crawl lancé')
-                        ->body('Le crawl a démarré.')
+                        ->body($message)
                         ->success()
                         ->send();
                 }),
