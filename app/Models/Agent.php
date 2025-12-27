@@ -30,6 +30,14 @@ class Agent extends Model
             if (empty($agent->color)) {
                 $agent->color = 'primary';
             }
+            // Generate qdrant_collection from slug if not set
+            if (empty($agent->qdrant_collection) && !empty($agent->slug)) {
+                $agent->qdrant_collection = 'agent_' . $agent->slug;
+            }
+            // Default system prompt
+            if (empty($agent->system_prompt)) {
+                $agent->system_prompt = 'Tu es un assistant IA. Réponds aux questions de manière claire et concise.';
+            }
         });
     }
 
