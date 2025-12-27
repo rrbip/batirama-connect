@@ -383,7 +383,7 @@ class FabricantCatalogResource extends Resource
                         $record->markAsCrawling();
 
                         // Dispatch crawl job
-                        \App\Jobs\StartWebCrawlJob::dispatch($crawl);
+                        \App\Jobs\Crawler\StartWebCrawlJob::dispatch($crawl);
 
                         Notification::make()
                             ->title('Crawl démarré')
