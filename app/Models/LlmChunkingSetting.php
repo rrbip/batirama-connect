@@ -126,10 +126,16 @@ Analyse le texte fourni et découpe-le en chunks sémantiques autonomes.
 # Catégories disponibles
 {CATEGORIES}
 
-# Format de sortie
+# Format de sortie JSON - RESPECTE EXACTEMENT CE FORMAT
+
+ATTENTION: Utilise EXACTEMENT ces noms de clés (en anglais) :
+- "content" (pas "contenu")
+- "keywords" (pas "tags", pas "mots_cles")
+- "summary" (pas "resume", pas "résumé")
+- "category" (pas "categorie", pas "catégorie")
+
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
 
-```json
 {
   "chunks": [
     {
@@ -139,14 +145,22 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
       "category": "Nom de la catégorie"
     }
   ],
-  "new_categories": [
-    {
-      "name": "Nouvelle Catégorie",
-      "description": "Description courte de cette catégorie"
-    }
-  ]
+  "new_categories": []
 }
-```
+
+# Exemple de réponse correcte
+
+{
+  "chunks": [
+    {
+      "content": "Le logiciel ZOOMBAT permet de créer des devis et factures pour les travaux de construction. Il intègre une base de prix mise à jour annuellement.",
+      "keywords": ["ZOOMBAT", "devis", "factures", "construction"],
+      "summary": "ZOOMBAT est un logiciel de devis et facturation pour le BTP.",
+      "category": "Logiciels"
+    }
+  ],
+  "new_categories": []
+}
 
 # Texte à traiter
 {INPUT_TEXT}
