@@ -211,7 +211,7 @@ services:
   # ===========================================
   # FLARESOLVERR - BYPASS CLOUDFLARE
   # ===========================================
-  # Service optionnel pour contourner les protections Cloudflare
+  # Service pour contourner les protections Cloudflare
   # lors du crawl de sites web protégés.
   # Utilise Selenium/Chrome headless pour résoudre les challenges JS.
   flaresolverr:
@@ -225,8 +225,6 @@ services:
       - "${FLARESOLVERR_PORT:-8191}:8191"
     networks:
       - ai_network
-    profiles:
-      - with-flaresolverr
 
 # ===========================================
 # VOLUMES PERSISTANTS
