@@ -28,6 +28,7 @@ class Document extends Model
         'file_hash',
         'document_type',
         'category',
+        'extraction_method',
         'extraction_status',
         'extracted_text',
         'extraction_metadata',
@@ -41,6 +42,8 @@ class Document extends Model
         'description',
         'source_url',
         'uploaded_by',
+        'web_crawl_id',
+        'crawl_url_id',
     ];
 
     protected $casts = [
@@ -68,6 +71,30 @@ class Document extends Model
     public function chunks(): HasMany
     {
         return $this->hasMany(DocumentChunk::class);
+    }
+
+    /**
+     * Le crawl web source (si provient d'un crawl)
+     */
+    public function webCrawl(): BelongsTo
+    {
+        return $this->belongsTo(WebCrawl::class);
+    }
+
+    /**
+     * L'URL crawlée source (pour le partage de contenu)
+     */
+    public function crawlUrl(): BelongsTo
+    {
+        return $this->belongsTo(WebCrawlUrl::class, 'crawl_url_id');
+    }
+
+    /**
+     * Vérifie si le document provient d'un crawl web
+     */
+    public function isFromCrawl(): bool
+    {
+        return $this->web_crawl_id !== null;
     }
 
     public function isPending(): bool

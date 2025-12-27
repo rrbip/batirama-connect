@@ -58,14 +58,15 @@ app/Services/AI/
 │   ├── LLMServiceInterface.php
 │   ├── VectorStoreInterface.php
 │   └── RagServiceInterface.php
-├── OllamaService.php          # Client HTTP pour Ollama
-├── QdrantService.php          # Client HTTP pour Qdrant
-├── EmbeddingService.php       # Génération d'embeddings
-├── PromptBuilder.php          # Construction des prompts
-├── RagService.php             # Orchestration RAG complète
-├── DispatcherService.php      # Routage vers les agents
-├── LearningService.php        # Boucle d'apprentissage
-└── HydrationService.php       # Enrichissement SQL
+├── OllamaService.php              # Client HTTP pour Ollama
+├── QdrantService.php              # Client HTTP pour Qdrant
+├── EmbeddingService.php           # Génération d'embeddings
+├── PromptBuilder.php              # Construction des prompts
+├── RagService.php                 # Orchestration RAG complète
+├── CategoryDetectionService.php   # Détection catégorie pour filtrage RAG
+├── DispatcherService.php          # Routage vers les agents
+├── LearningService.php            # Boucle d'apprentissage
+└── HydrationService.php           # Enrichissement SQL
 ```
 
 ---
@@ -1174,6 +1175,79 @@ readonly class RagResponse
 
 ---
 
+## 6b. CategoryDetectionService
+
+Service de détection de catégorie pour le pré-filtrage RAG.
+
+### Objectif
+
+Détecter automatiquement la catégorie d'une question utilisateur pour filtrer les résultats RAG et améliorer la pertinence.
+
+### Méthodes de détection
+
+1. **Keyword matching** (prioritaire, confiance 90%)
+   - Cherche le nom de la catégorie dans la question
+   - Rapide, pas d'appel API
+
+2. **Embedding similarity** (fallback)
+   - Compare l'embedding de la question aux embeddings des catégories
+   - Seuil minimum : 45%
+
+### Interface
+
+```php
+<?php
+
+namespace App\Services\AI;
+
+class CategoryDetectionService
+{
+    /**
+     * Détecte la catégorie d'une question
+     * @return array{categories: Collection, confidence: float, method: string}
+     */
+    public function detect(string $question, ?Agent $agent = null): array;
+
+    /**
+     * Construit le filtre Qdrant pour les catégories détectées
+     */
+    public function buildQdrantFilter(Collection $categories): array;
+}
+```
+
+### Intégration avec RagService
+
+```php
+// Dans RagService::retrieveContextWithDetection()
+if ($agent->use_category_filtering) {
+    $detection = $this->categoryDetectionService->detect($question, $agent);
+
+    if ($detection['categories']->isNotEmpty()) {
+        $categoryFilter = $this->categoryDetectionService->buildQdrantFilter(
+            $detection['categories']
+        );
+    }
+}
+
+// Recherche Qdrant avec filtre
+$results = $this->qdrantService->search(
+    vector: $queryVector,
+    collection: $agent->qdrant_collection,
+    limit: $limit,
+    filter: $categoryFilter,
+    scoreThreshold: $minScore
+);
+```
+
+### Comportement de fallback
+
+| Confiance | Comportement |
+|-----------|--------------|
+| ≥ 70% | Filtrage strict - Seuls les chunks de la catégorie |
+| < 70% | Fallback - Complète avec résultats non filtrés si < 2 résultats |
+
+---
+
 ## 7. Dispatcher Service
 
 ### Implémentation
@@ -1400,15 +1474,24 @@ class LearningService
     }
 
     /**
-     * Valide une réponse sans correction
+     * Valide une réponse ET l'indexe pour l'apprentissage
+     * (la réponse originale est considérée comme correcte)
+     *
+     * @since Décembre 2025 - Valider indexe maintenant aussi dans Qdrant
      */
     public function validate(AiMessage $message, int $validatorId): bool
     {
-        return $message->update([
-            'validation_status' => 'validated',
-            'validated_by' => $validatorId,
-            'validated_at' => now(),
-        ]);
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
+            ]);
+        }
+
+        // Valider ET apprendre (sans correction = réponse originale)
+        return $this->validateAndLearn($message, $validator, null);
     }
 
     /**

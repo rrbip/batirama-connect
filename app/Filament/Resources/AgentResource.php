@@ -174,9 +174,82 @@ class AgentResource extends Resource
                                             ->numeric()
                                             ->default(5),
 
+                                        Forms\Components\TextInput::make('min_rag_score')
+                                            ->label('Score minimum RAG')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->placeholder('0.5')
+                                            ->helperText('0.5 = permissif, 0.8 = strict'),
+
                                         Forms\Components\Toggle::make('allow_iterative_search')
                                             ->label('Recherche itérative')
                                             ->helperText('Permet plusieurs requêtes de recherche'),
+
+                                        Forms\Components\Toggle::make('use_category_filtering')
+                                            ->label('Filtrage par catégorie')
+                                            ->helperText('Détecte la catégorie de la question pour filtrer les résultats RAG. Améliore la précision quand les chunks ont des catégories.'),
+                                    ])
+                                    ->columns(2),
+
+                                Forms\Components\Section::make('Réponses apprises')
+                                    ->description('Configuration du système d\'apprentissage continu')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('max_learned_responses')
+                                            ->label('Max réponses apprises')
+                                            ->numeric()
+                                            ->placeholder('3')
+                                            ->helperText('Nombre de cas similaires à inclure'),
+
+                                        Forms\Components\TextInput::make('learned_min_score')
+                                            ->label('Score minimum')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->placeholder('0.75')
+                                            ->helperText('Score minimum pour les réponses apprises'),
+
+                                        Forms\Components\TextInput::make('context_token_limit')
+                                            ->label('Limite tokens contexte')
+                                            ->numeric()
+                                            ->placeholder('4000')
+                                            ->helperText('Limite de tokens pour le contexte documentaire'),
+                                    ])
+                                    ->columns(3),
+
+                                Forms\Components\Section::make('Mode de fonctionnement')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('strict_mode')
+                                            ->label('Mode strict')
+                                            ->helperText('Ajoute automatiquement des garde-fous contre les hallucinations. Recommandé pour les agents factuels (support, BTP, médical).')
+                                            ->columnSpanFull(),
+                                    ]),
+
+                                Forms\Components\Section::make('Traitement des documents')
+                                    ->description('Paramètres par défaut pour les nouveaux documents et le crawler')
+                                    ->schema([
+                                        Forms\Components\Select::make('default_extraction_method')
+                                            ->label('Méthode d\'extraction PDF')
+                                            ->options([
+                                                'auto' => 'Automatique (texte si disponible, sinon OCR)',
+                                                'text' => 'Texte uniquement (pdftotext)',
+                                                'ocr' => 'OCR forcé (Tesseract)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Méthode utilisée pour extraire le texte des PDFs'),
+
+                                        Forms\Components\Select::make('default_chunk_strategy')
+                                            ->label('Stratégie de découpage')
+                                            ->options([
+                                                'sentence' => 'Par phrases (recommandé)',
+                                                'paragraph' => 'Par paragraphes',
+                                                'fixed' => 'Taille fixe (500 tokens)',
+                                                'llm_assisted' => 'Assisté par LLM (qualité premium)',
+                                            ])
+                                            ->default('sentence')
+                                            ->helperText('Méthode de découpage du texte en chunks pour l\'indexation'),
                                     ])
                                     ->columns(2),
 

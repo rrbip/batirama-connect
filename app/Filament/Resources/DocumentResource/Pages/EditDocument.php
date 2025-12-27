@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Resources\DocumentResource\Pages;
 
 use App\Filament\Resources\DocumentResource;
+use App\Jobs\IndexDocumentChunksJob;
 use App\Jobs\ProcessDocumentJob;
+use App\Jobs\ProcessLlmChunkingJob;
+use App\Services\DocumentChunkerService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -18,6 +21,13 @@ class EditDocument extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('chunks')
+                ->label('Gérer les chunks')
+                ->icon('heroicon-o-squares-2x2')
+                ->color('info')
+                ->visible(fn () => $this->record->chunk_count > 0)
+                ->url(fn () => DocumentResource::getUrl('chunks', ['record' => $this->record])),
+
             Actions\Action::make('reprocess')
                 ->label('Retraiter')
                 ->icon('heroicon-o-arrow-path')
@@ -39,6 +49,76 @@ class EditDocument extends EditRecord
                         ->body('Le document est en cours de retraitement.')
                         ->success()
                         ->send();
+                }),
+
+            Actions\Action::make('rechunk')
+                ->label('Re-chunker')
+                ->icon('heroicon-o-scissors')
+                ->color('success')
+                ->visible(fn () => !empty($this->record->extracted_text))
+                ->requiresConfirmation()
+                ->modalHeading('Re-découper le document')
+                ->modalDescription(fn () => $this->record->chunk_strategy === 'llm_assisted'
+                    ? 'Le texte extrait sera re-découpé par le LLM (catégories, résumés, mots-clés). Les chunks existants seront supprimés.'
+                    : 'Le texte extrait sera re-découpé selon la stratégie configurée. Les chunks existants seront supprimés.')
+                ->action(function () {
+                    // Sauvegarder d'abord les changements du formulaire (texte extrait modifié)
+                    $this->record->save();
+
+                    // Supprimer les anciens chunks
+                    $this->record->chunks()->delete();
+
+                    // Réinitialiser les flags d'indexation
+                    $this->record->update([
+                        'is_indexed' => false,
+                        'indexed_at' => null,
+                        'chunk_count' => 0,
+                        'extraction_status' => 'chunking',
+                    ]);
+
+                    $strategy = $this->record->chunk_strategy ?? 'sentence';
+
+                    if ($strategy === 'llm_assisted') {
+                        // Utiliser le job LLM dédié
+                        ProcessLlmChunkingJob::dispatch($this->record, reindex: true);
+
+                        Notification::make()
+                            ->title('Chunking LLM lancé')
+                            ->body('Le document sera re-découpé par le LLM puis ré-indexé. Consultez la queue llm-chunking.')
+                            ->success()
+                            ->send();
+                    } else {
+                        // Utiliser le chunker classique directement
+                        try {
+                            $chunker = app(DocumentChunkerService::class);
+                            $chunks = $chunker->chunk($this->record);
+
+                            $this->record->update([
+                                'chunk_count' => count($chunks),
+                                'extraction_status' => 'completed',
+                            ]);
+
+                            // Dispatcher l'indexation
+                            IndexDocumentChunksJob::dispatch($this->record);
+
+                            Notification::make()
+                                ->title('Re-chunking terminé')
+                                ->body(count($chunks) . ' chunks créés. Indexation en cours...')
+                                ->success()
+                                ->send();
+                        } catch (\Exception $e) {
+                            $this->record->update([
+                                'extraction_status' => 'failed',
+                                'extraction_error' => 'Erreur chunking: ' . $e->getMessage(),
+                            ]);
+
+                            Notification::make()
+                                ->title('Erreur de chunking')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }
                 }),
 
             Actions\DeleteAction::make(),

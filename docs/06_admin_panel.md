@@ -179,11 +179,18 @@ app/
     'temperature' => 0.7,
     'max_tokens' => 2048,
 
-    // Configuration RAG
+    // Configuration RAG (globale)
     'retrieval_mode' => 'SQL_HYDRATION', // ou TEXT_ONLY
     'qdrant_collection' => 'agent_btp_ouvrages',
     'similarity_threshold' => 0.75,
     'max_results' => 5,
+
+    // Configuration RAG avancée (par agent, avec fallback sur config globale)
+    'min_rag_score' => 0.5,          // Score minimum pour inclure un document RAG
+    'max_learned_responses' => 3,     // Nombre max de réponses apprises à inclure
+    'learned_min_score' => 0.75,      // Score minimum pour les réponses apprises
+    'context_token_limit' => 4000,    // Limite de tokens pour le contexte RAG
+    'strict_mode' => false,           // Si true, l'agent ne répond QU'avec les infos du contexte
 
     // Configuration visuelle
     'avatar' => '...', // Upload image
@@ -191,6 +198,13 @@ app/
     'placeholder' => 'Posez votre question...',
 ]
 ```
+
+**Mode Strict (strict_mode)** :
+Quand activé, l'agent ajoute des garde-fous dans son prompt pour :
+- Ne répondre QU'avec les informations présentes dans le contexte fourni
+- Dire "Je n'ai pas cette information" si la réponse n'est pas dans le contexte
+- Ne jamais inventer ou extrapoler d'informations
+- Citer les sources utilisées pour chaque affirmation
 
 **Actions spéciales :**
 - **Tester l'agent** : Ouvrir une interface de chat pour tester
@@ -657,6 +671,158 @@ app/
 
 ---
 
+## 12. Fonctionnalités Avancées (Décembre 2025)
+
+### 12.1 Test d'Agent avec Analyse RAG
+
+La page `/admin/agents/{id}/test` a été enrichie avec :
+
+#### Section "Filtrage par catégorie"
+- **Méthode de détection** : keyword ou embedding
+- **Confiance** : pourcentage de confiance de la détection
+- **Catégories détectées** : liste des catégories identifiées
+- **Résultats filtrés/total** : nombre de chunks correspondant à la catégorie
+- **Fallback utilisé** : indique si le système a dû compléter avec des résultats non filtrés
+
+#### Section "Rapport pour analyse"
+Génère un rapport complet copiable pour debug/analyse :
+- Question posée
+- Agent utilisé et ses paramètres RAG
+- Détails du filtrage par catégorie
+- Sources RAG avec scores, catégories, résumés et contenus
+
+### 12.2 Gestion des Chunks
+
+La page `/admin/documents/{id}/chunks` permet maintenant :
+- **Affichage des catégories** avec badges colorés
+- **Modification de catégorie** pour chaque chunk
+- **Affichage des résumés et mots-clés** générés par le LLM
+- **Ré-indexation** après modification de catégorie
+
+### 12.3 Configuration Agent RAG
+
+L'onglet "Paramètres RAG" dans `AgentResource` inclut :
+
+| Option | Description |
+|--------|-------------|
+| `use_category_filtering` | Active le filtrage par catégorie |
+| `default_chunk_strategy` | Stratégie de chunking par défaut (incl. `llm_assisted`) |
+| `min_rag_score` | Score minimum pour les résultats RAG |
+
+### 12.4 Page de Statut IA
+
+La page `/admin/ai-status-page` affiche maintenant :
+- **Queues séparées** : `ai-messages` et `llm-chunking`
+- **Bouton Stop/Cancel** pour annuler un job en cours
+- **Bouton Delete** pour supprimer un message en échec
+- **Navigation par clic** sur les lignes des datatables
+
+### 12.5 Gestion RAG Globale
+
+La page `/admin/gestion-rag` inclut :
+- **Navigation cliquable** vers les documents et agents
+- **Actions de masse** : tout supprimer avec confirmation
+- **Filtrage par agent** et statut d'indexation
+
+### 12.6 Page FAQs - Gestion des Réponses Apprises
+
+**Route** : `/admin/faqs`
+**Menu** : Intelligence Artificielle → FAQs
+
+La page FAQs permet de gérer les questions/réponses stockées dans la collection Qdrant `learned_responses`. Ces FAQ sont utilisées par l'IA pour améliorer ses réponses.
+
+#### Fonctionnalités
+
+| Fonctionnalité | Description |
+|----------------|-------------|
+| **Sélection d'agent** | Dropdown pour filtrer par agent (actualisation automatique) |
+| **Recherche** | Recherche en temps réel dans les questions et réponses |
+| **Pagination** | Navigation par pages (10 FAQs par page) |
+| **Ajout manuel** | Formulaire pour ajouter une Q&A manuellement (admin) |
+| **Suppression** | Supprimer une FAQ de la base d'apprentissage (admin) |
+
+#### Sources des FAQs
+
+Les FAQs proviennent de trois sources :
+1. **Validation** : Quand un admin valide une réponse IA (badge "Validé")
+2. **Correction** : Quand un admin corrige une réponse IA (badge "Validé")
+3. **Manuel** : Ajout direct depuis la page FAQs (badge "Manuel")
+
+#### Interface
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  FAQs - Questions/Réponses                                       │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────┐  ┌─────────────────────────┐      │
+│  │ Agent: [Assistant ▼]    │  │ + Ajouter une FAQ       │      │
+│  └──────────────────────────┘  └─────────────────────────┘      │
+├─────────────────────────────────────────────────────────────────┤
+│  🔍 [Rechercher dans les questions et réponses...]              │
+├─────────────────────────────────────────────────────────────────┤
+│  Questions/Réponses apprises - Assistant          12 / 45 FAQs  │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Q: Comment fonctionne le parrainage ?        [Manuel] 🗑│    │
+│  ├─────────────────────────────────────────────────────────┤    │
+│  │ R: Le parrainage permet de bénéficier de...             │    │
+│  │    Ajoutée le 27/12/2025 14:30                          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│  ...                                                             │
+├─────────────────────────────────────────────────────────────────┤
+│  Affichage de 1 à 10 sur 12 FAQs                                │
+│  [← Précédent] [1] [2] [Suivant →]                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Code source
+
+- **Page** : `App\Filament\Pages\FaqsPage`
+- **Vue** : `resources/views/filament/pages/faqs-page.blade.php`
+- **Collection Qdrant** : `learned_responses`
+
+### 12.7 Validation = Apprentissage
+
+**Important** : L'action "Valider" dans les sessions IA indexe maintenant automatiquement la réponse dans la base d'apprentissage.
+
+Avant (ancienne logique) :
+- "Valider" → Marque comme `validated` (pas d'impact sur les futures réponses)
+- "Corriger" → Marque comme `learned` + indexe dans Qdrant
+
+Après (nouvelle logique) :
+- "Valider" → Marque comme `learned` + indexe la réponse originale dans Qdrant
+- "Corriger" → Marque comme `learned` + indexe la version corrigée dans Qdrant
+- "Rejeter" → Marque comme `rejected` (pas d'apprentissage)
+
+Le `LearningService::validate()` appelle maintenant `validateAndLearn()` pour indexer la réponse validée.
+
+### 12.8 Texte Extrait Éditable
+
+La page d'édition d'un document (`/admin/documents/{id}/edit`) permet maintenant :
+
+#### Édition du texte extrait
+- Le champ "Texte extrait" est maintenant **éditable**
+- Permet de nettoyer le texte avant le chunking
+- Utile pour corriger les erreurs d'OCR ou supprimer du contenu non pertinent
+
+#### Action "Re-chunker"
+Bouton disponible quand le document a du texte extrait :
+- **Re-découpe** le texte sans ré-extraire le document
+- Supprime les anciens chunks
+- Crée de nouveaux chunks selon la stratégie configurée
+- Lance la ré-indexation automatique
+
+Comportement selon la stratégie :
+| Stratégie | Comportement |
+|-----------|--------------|
+| `sentence`, `paragraph`, `fixed` | Chunking synchrone immédiat |
+| `llm_assisted` | Job asynchrone sur queue `llm-chunking` |
+
+Workflow typique :
+1. Importer un document PDF
+2. Vérifier le texte extrait
+3. Nettoyer si nécessaire (supprimer headers, footers, etc.)
+4. Cliquer sur "Re-chunker" pour appliquer les modifications
 ## 12. Page État des Services IA (AiStatusPage)
 
 > **Statut** : ✅ IMPLÉMENTÉE

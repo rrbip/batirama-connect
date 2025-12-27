@@ -35,6 +35,7 @@ class AiStatusPage extends Page
 
     public array $services = [];
     public array $queueStats = [];
+    public array $pendingJobs = [];
     public array $documentStats = [];
     public array $failedDocuments = [];
     public array $failedJobs = [];
@@ -61,6 +62,7 @@ class AiStatusPage extends Page
     {
         $this->services = $this->checkServices();
         $this->queueStats = $this->getQueueStats();
+        $this->pendingJobs = $this->getPendingJobs();
         $this->documentStats = $this->getDocumentStats();
         $this->failedDocuments = $this->getFailedDocuments();
         $this->failedJobs = $this->getFailedJobs();
@@ -74,6 +76,98 @@ class AiStatusPage extends Page
         $this->loadOllamaModels();
         $this->availableModels = $this->getAvailableModels();
         $this->lastSyncInfo = $this->getLastSyncInfo();
+    }
+
+    /**
+     * Démarre un worker pour une queue spécifique
+     */
+    public function startQueueWorker(string $queue): void
+    {
+        try {
+            $basePath = base_path();
+            $command = "cd {$basePath} && nohup php artisan queue:work --queue={$queue} --stop-when-empty > /dev/null 2>&1 &";
+            exec($command, $output, $returnCode);
+
+            sleep(1);
+            $this->refreshStatus();
+
+            if ($returnCode === 0) {
+                Notification::make()
+                    ->title('Worker démarré')
+                    ->body("Worker lancé pour la queue '{$queue}' (--stop-when-empty)")
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Échec du démarrage')
+                    ->body("Impossible de démarrer le worker pour '{$queue}'")
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Exception $e) {
+            \Log::error('Failed to start queue worker', [
+                'queue' => $queue,
+                'error' => $e->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Annule un job en cours ou en attente
+     */
+    public function cancelJob(int $jobId): void
+    {
+        try {
+            $job = DB::table('jobs')->where('id', $jobId)->first();
+
+            if (!$job) {
+                Notification::make()
+                    ->title('Job non trouvé')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
+            // Extraire l'info du document si possible
+            $payload = json_decode($job->payload, true);
+            $data = $payload['data']['command'] ?? '';
+
+            // Si c'est un job de document, remettre le statut du document
+            if (preg_match('/document[";:\s]+[{]?[^}]*?"id";i:(\d+)/', $data, $matches) ||
+                preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                $documentId = (int) $matches[1];
+                $document = Document::find($documentId);
+                if ($document) {
+                    $document->update([
+                        'extraction_status' => 'pending',
+                        'extraction_error' => 'Job annulé manuellement',
+                    ]);
+                }
+            }
+
+            // Supprimer le job
+            DB::table('jobs')->where('id', $jobId)->delete();
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Job annulé')
+                ->body('Le job a été supprimé de la file d\'attente.')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
     }
 
     /**
@@ -300,7 +394,7 @@ class AiStatusPage extends Page
                         ? "Jobs en attente depuis " . gmdate('H:i:s', $age) . " - Worker probablement arrêté"
                         : "Worker actif (driver: {$queueConnection})",
                     'restartable' => true,
-                    'restart_command' => 'supervisorctl restart laravel-worker:*',
+                    'restart_command' => 'php artisan queue:restart',
                 ];
             } else {
                 $services['queue'] = [
@@ -308,7 +402,7 @@ class AiStatusPage extends Page
                     'status' => 'unknown',
                     'details' => "Aucun job en file (driver: {$queueConnection})",
                     'restartable' => true,
-                    'restart_command' => 'supervisorctl restart laravel-worker:*',
+                    'restart_command' => 'php artisan queue:restart',
                 ];
             }
         }
@@ -322,18 +416,115 @@ class AiStatusPage extends Page
             $pending = DB::table('jobs')->count();
             $failed = DB::table('failed_jobs')->count();
 
+            // Stats par queue
+            $byQueue = DB::table('jobs')
+                ->select('queue', DB::raw('count(*) as count'))
+                ->groupBy('queue')
+                ->pluck('count', 'queue')
+                ->toArray();
+
             return [
                 'pending' => $pending,
                 'failed' => $failed,
                 'connection' => config('queue.default'),
+                'by_queue' => $byQueue,
             ];
         } catch (\Exception $e) {
             return [
                 'pending' => 0,
                 'failed' => 0,
                 'connection' => config('queue.default'),
+                'by_queue' => [],
                 'error' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Récupère les détails des jobs par queue
+     */
+    protected function getPendingJobs(): array
+    {
+        try {
+            $jobs = DB::table('jobs')->orderBy('created_at')->get();
+
+            // Grouper par queue
+            $queues = [];
+
+            foreach ($jobs as $job) {
+                $queue = $job->queue;
+
+                if (!isset($queues[$queue])) {
+                    $queues[$queue] = [
+                        'name' => $queue,
+                        'total' => 0,
+                        'processing' => null,
+                        'waiting' => [],
+                        'status' => 'waiting', // waiting, processing, stuck
+                        'status_label' => 'En attente',
+                    ];
+                }
+
+                $queues[$queue]['total']++;
+
+                $payload = json_decode($job->payload, true);
+                $displayName = $payload['displayName'] ?? 'Job inconnu';
+
+                // Extraire info document
+                $data = $payload['data']['command'] ?? null;
+                $documentInfo = null;
+                if ($data && str_contains($data, 'Document')) {
+                    if (preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                        $documentInfo = "Document #{$matches[1]}";
+                    }
+                }
+
+                $isReserved = !empty($job->reserved_at);
+                $reservedTime = $isReserved ? (now()->timestamp - $job->reserved_at) : 0;
+                $waitTime = now()->timestamp - $job->created_at;
+
+                $jobData = [
+                    'id' => $job->id,
+                    'name' => class_basename($displayName),
+                    'document' => $documentInfo,
+                    'wait_time_human' => $waitTime > 60 ? gmdate('H:i:s', $waitTime) : "{$waitTime}s",
+                    'attempts' => $job->attempts,
+                ];
+
+                if ($isReserved) {
+                    // Job en cours de traitement
+                    // Seuils différents par queue (en secondes)
+                    $stuckThresholds = [
+                        'llm-chunking' => 1800, // 30 minutes - LLM peut être lent
+                        'default' => 600,       // 10 minutes
+                        'ai-messages' => 300,   // 5 minutes
+                    ];
+                    $threshold = $stuckThresholds[$queue] ?? 300;
+                    $isStuck = $reservedTime > $threshold;
+
+                    $queues[$queue]['processing'] = array_merge($jobData, [
+                        'processing_time' => $reservedTime > 60 ? gmdate('H:i:s', $reservedTime) : "{$reservedTime}s",
+                        'is_stuck' => $isStuck,
+                    ]);
+
+                    if ($isStuck) {
+                        $queues[$queue]['status'] = 'stuck';
+                        $queues[$queue]['status_label'] = 'Bloqué';
+                    } else {
+                        $queues[$queue]['status'] = 'processing';
+                        $queues[$queue]['status_label'] = 'En cours';
+                    }
+                } else {
+                    // Job en attente - garder seulement les 5 premiers
+                    if (count($queues[$queue]['waiting']) < 5) {
+                        $queues[$queue]['waiting'][] = $jobData;
+                    }
+                }
+            }
+
+            return array_values($queues);
+        } catch (\Exception $e) {
+            return [];
         }
     }
 
@@ -538,6 +729,31 @@ class AiStatusPage extends Page
         Notification::make()
             ->title('Message relancé')
             ->body("Le message a été remis en file d'attente.")
+            ->success()
+            ->send();
+    }
+
+    /**
+     * Supprime un message IA en échec
+     */
+    public function deleteAiMessage(int $messageId): void
+    {
+        $message = AiMessage::find($messageId);
+
+        if (!$message) {
+            Notification::make()
+                ->title('Message non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $message->delete();
+
+        $this->refreshStatus();
+
+        Notification::make()
+            ->title('Message supprimé')
             ->success()
             ->send();
     }

@@ -9,9 +9,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Smalot\PdfParser\Parser as PdfParser;
+use thiagoalessio\TesseractOCR\TesseractOCR;
 
 class DocumentExtractorService
 {
+    /**
+     * Seuil de mots tronqués pour déclencher l'OCR
+     * Si plus de X% des mots semblent tronqués, on utilise l'OCR
+     */
+    private const OCR_FALLBACK_THRESHOLD = 0.05; // 5%
+
     /**
      * Extrait le texte d'un document
      */
@@ -38,12 +45,16 @@ class DocumentExtractorService
             'file_size' => filesize($fullPath),
         ]);
 
+        // Récupérer la méthode d'extraction (auto, text, ocr)
+        $extractionMethod = $document->extraction_method ?? 'auto';
+
         $text = match ($extension) {
-            'pdf' => $this->extractFromPdf($fullPath),
+            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod),
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
             'doc' => $this->extractFromDoc($fullPath),
             'html', 'htm' => $this->extractFromHtml($fullPath),
+            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath),
             default => throw new \RuntimeException("Type de document non supporté: {$extension}"),
         };
 
@@ -57,9 +68,47 @@ class DocumentExtractorService
 
     /**
      * Extrait le texte d'un fichier PDF
+     *
+     * @param string $path Chemin vers le fichier PDF
+     * @param string $method Méthode d'extraction: 'auto', 'text', ou 'ocr'
      */
-    private function extractFromPdf(string $path): string
+    private function extractFromPdf(string $path, string $method = 'auto'): string
     {
+        Log::info('PDF extraction starting', [
+            'path' => $path,
+            'method' => $method,
+        ]);
+
+        // Mode OCR forcé : convertir le PDF en images et appliquer Tesseract
+        if ($method === 'ocr') {
+            if (!$this->isOcrAvailable()) {
+                throw new \RuntimeException(
+                    "Mode OCR demandé mais Tesseract n'est pas disponible. " .
+                    "Installez tesseract-ocr dans le conteneur Docker."
+                );
+            }
+
+            Log::info('Using forced OCR mode for PDF', ['path' => $path]);
+
+            try {
+                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrClean = $this->cleanText($ocrText);
+
+                if (!empty($ocrClean)) {
+                    Log::info('Forced OCR extraction completed', [
+                        'path' => $path,
+                        'text_length' => strlen($ocrClean),
+                    ]);
+                    return $ocrClean;
+                }
+            } catch (\Exception $e) {
+                throw new \RuntimeException("Erreur OCR: {$e->getMessage()}");
+            }
+
+            throw new \RuntimeException("L'extraction OCR n'a produit aucun texte.");
+        }
+
+        // Mode texte forcé ou auto : essayer les méthodes textuelles
         $pdftotextResult = '';
         $pdfparserResult = '';
 
@@ -83,56 +132,348 @@ class DocumentExtractorService
         $pdftotextClean = $this->cleanText($pdftotextResult);
         $pdfparserClean = $this->cleanText($pdfparserResult);
 
-        // Compter les caractères de remplacement restants (ligatures perdues)
+        // Compter les caractères problématiques et mots tronqués
         $pdftotextBadChars = $this->countProblematicChars($pdftotextClean);
         $pdfparserBadChars = $this->countProblematicChars($pdfparserClean);
+        $pdftotextTruncated = $this->countTruncatedWords($pdftotextClean);
+        $pdfparserTruncated = $this->countTruncatedWords($pdfparserClean);
 
         Log::info('PDF extraction comparison', [
             'path' => $path,
             'pdftotext_length' => strlen($pdftotextClean),
             'pdftotext_bad_chars' => $pdftotextBadChars,
+            'pdftotext_truncated_words' => $pdftotextTruncated,
             'pdfparser_length' => strlen($pdfparserClean),
             'pdfparser_bad_chars' => $pdfparserBadChars,
+            'pdfparser_truncated_words' => $pdfparserTruncated,
         ]);
 
-        // Choisir le résultat avec le moins de caractères problématiques
-        // En cas d'égalité, préférer le plus long
+        // Choisir le meilleur résultat textuel
+        $bestText = '';
+        $bestTruncatedRatio = 1.0;
+
         if (!empty($pdftotextClean) && !empty($pdfparserClean)) {
-            if ($pdftotextBadChars < $pdfparserBadChars) {
-                Log::info('Using pdftotext (fewer bad chars)', ['path' => $path]);
-                return $pdftotextClean;
-            } elseif ($pdfparserBadChars < $pdftotextBadChars) {
-                Log::info('Using pdfparser (fewer bad chars)', ['path' => $path]);
-                return $pdfparserClean;
+            // Calculer le ratio de mots tronqués
+            $pdftotextRatio = $this->getTruncatedRatio($pdftotextClean);
+            $pdfparserRatio = $this->getTruncatedRatio($pdfparserClean);
+
+            if ($pdftotextBadChars + $pdftotextTruncated <= $pdfparserBadChars + $pdfparserTruncated) {
+                $bestText = $pdftotextClean;
+                $bestTruncatedRatio = $pdftotextRatio;
+                Log::info('Selected pdftotext as best text extraction', ['path' => $path]);
             } else {
-                // Égalité: prendre le plus long
-                if (strlen($pdftotextClean) >= strlen($pdfparserClean)) {
-                    Log::info('Using pdftotext (equal quality, longer)', ['path' => $path]);
-                    return $pdftotextClean;
-                } else {
-                    Log::info('Using pdfparser (equal quality, longer)', ['path' => $path]);
-                    return $pdfparserClean;
+                $bestText = $pdfparserClean;
+                $bestTruncatedRatio = $pdfparserRatio;
+                Log::info('Selected pdfparser as best text extraction', ['path' => $path]);
+            }
+        } elseif (!empty($pdftotextClean)) {
+            $bestText = $pdftotextClean;
+            $bestTruncatedRatio = $this->getTruncatedRatio($pdftotextClean);
+        } elseif (!empty($pdfparserClean)) {
+            $bestText = $pdfparserClean;
+            $bestTruncatedRatio = $this->getTruncatedRatio($pdfparserClean);
+        }
+
+        // En mode texte forcé, retourner le résultat même avec des problèmes
+        if ($method === 'text') {
+            if (!empty($bestText)) {
+                Log::info('Using forced text mode result', [
+                    'path' => $path,
+                    'truncated_ratio' => $bestTruncatedRatio,
+                ]);
+                return $bestText;
+            }
+
+            throw new \RuntimeException(
+                "Impossible d'extraire le texte du PDF en mode texte. " .
+                "Essayez le mode OCR pour ce document."
+            );
+        }
+
+        // Mode auto : si le taux de mots tronqués dépasse le seuil, essayer l'OCR
+        if ($bestTruncatedRatio > self::OCR_FALLBACK_THRESHOLD && $this->isOcrAvailable()) {
+            Log::info('Text extraction has too many truncated words, trying OCR fallback', [
+                'path' => $path,
+                'truncated_ratio' => $bestTruncatedRatio,
+                'threshold' => self::OCR_FALLBACK_THRESHOLD,
+            ]);
+
+            try {
+                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrClean = $this->cleanText($ocrText);
+                $ocrTruncatedRatio = $this->getTruncatedRatio($ocrClean);
+
+                Log::info('OCR extraction completed', [
+                    'path' => $path,
+                    'ocr_length' => strlen($ocrClean),
+                    'ocr_truncated_ratio' => $ocrTruncatedRatio,
+                ]);
+
+                // Utiliser l'OCR si meilleur résultat
+                if (!empty($ocrClean) && $ocrTruncatedRatio < $bestTruncatedRatio) {
+                    Log::info('Using OCR result (better quality)', ['path' => $path]);
+                    return $ocrClean;
                 }
+            } catch (\Exception $e) {
+                Log::warning('OCR fallback failed', [
+                    'path' => $path,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 
-        // Sinon, prendre ce qui est disponible
-        if (!empty($pdftotextClean)) {
-            Log::info('Using pdftotext (only option)', ['path' => $path]);
-            return $pdftotextClean;
+        if (!empty($bestText)) {
+            return $bestText;
         }
 
-        if (!empty($pdfparserClean)) {
-            Log::info('Using pdfparser (only option)', ['path' => $path]);
-            return $pdfparserClean;
+        // Si tout échoue, essayer l'OCR en dernier recours
+        if ($this->isOcrAvailable()) {
+            Log::info('All text extraction failed, trying OCR as last resort', ['path' => $path]);
+            try {
+                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrClean = $this->cleanText($ocrText);
+                if (!empty($ocrClean)) {
+                    return $ocrClean;
+                }
+            } catch (\Exception $e) {
+                Log::error('OCR last resort failed', [
+                    'path' => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
-        // Si aucune méthode n'a fonctionné
         throw new \RuntimeException(
             "Impossible d'extraire le texte du PDF. " .
-            "Le fichier est peut-être un scan (image), protégé, ou corrompu. " .
-            "Essayez de convertir le PDF en texte avec un outil OCR."
+            "Le fichier est peut-être protégé ou corrompu."
         );
+    }
+
+    /**
+     * Extrait le texte d'un PDF en utilisant OCR (Tesseract)
+     * Convertit chaque page en image puis applique l'OCR
+     */
+    private function extractFromPdfWithOcr(string $path): string
+    {
+        // Vérifier si pdftoppm est disponible pour convertir PDF en images
+        $checkResult = Process::run('pdftoppm -v 2>&1');
+        if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftoppm')) {
+            throw new \RuntimeException('pdftoppm (poppler-utils) is required for PDF OCR');
+        }
+
+        $tempDir = sys_get_temp_dir() . '/pdf_ocr_' . uniqid();
+        mkdir($tempDir, 0755, true);
+
+        try {
+            // Convertir le PDF en images PNG (une par page)
+            $command = sprintf(
+                'pdftoppm -png -r 300 %s %s/page',
+                escapeshellarg($path),
+                escapeshellarg($tempDir)
+            );
+
+            $result = Process::timeout(300)->run($command);
+            if (!$result->successful()) {
+                throw new \RuntimeException('Failed to convert PDF to images: ' . $result->errorOutput());
+            }
+
+            // Trouver toutes les images générées
+            $images = glob($tempDir . '/page-*.png');
+            if (empty($images)) {
+                // Essayer avec le format sans tiret
+                $images = glob($tempDir . '/page*.png');
+            }
+
+            if (empty($images)) {
+                throw new \RuntimeException('No images generated from PDF');
+            }
+
+            sort($images); // Assurer l'ordre des pages
+
+            // Appliquer l'OCR sur chaque image
+            $fullText = '';
+            foreach ($images as $index => $imagePath) {
+                Log::info('OCR processing page', [
+                    'page' => $index + 1,
+                    'total' => count($images),
+                ]);
+
+                $pageText = $this->extractFromImage($imagePath);
+                $fullText .= $pageText . "\n\n";
+            }
+
+            return trim($fullText);
+
+        } finally {
+            // Nettoyer les fichiers temporaires
+            $files = glob($tempDir . '/*');
+            foreach ($files as $file) {
+                @unlink($file);
+            }
+            @rmdir($tempDir);
+        }
+    }
+
+    /**
+     * Extrait le texte d'une image avec Tesseract OCR
+     * Utilise shell_exec directement car la librairie TesseractOCR a des problèmes
+     * avec proc_open dans certains environnements PHP-FPM
+     */
+    private function extractFromImage(string $path): string
+    {
+        if (!$this->isOcrAvailable()) {
+            throw new \RuntimeException(
+                "Tesseract OCR n'est pas installé ou non détecté. " .
+                "Vérifiez que le package tesseract-ocr est installé dans le conteneur Docker."
+            );
+        }
+
+        Log::info('Extracting text from image with OCR', ['path' => $path]);
+
+        try {
+            $tesseract = $this->findTesseractExecutable();
+            $escapedPath = escapeshellarg($path);
+
+            // Exécuter tesseract directement via shell_exec
+            // -l fra+eng : français + anglais
+            // --psm 3 : segmentation automatique
+            // --oem 3 : LSTM + Legacy engine
+            // stdout : sortie vers stdout au lieu d'un fichier
+            $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
+
+            Log::info('Running OCR command', ['command' => $command]);
+
+            $text = shell_exec($command);
+
+            if ($text === null) {
+                throw new \RuntimeException("La commande tesseract a échoué");
+            }
+
+            // Vérifier si c'est un message d'erreur
+            if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
+                throw new \RuntimeException("Erreur Tesseract: " . trim($text));
+            }
+
+            Log::info('OCR extraction successful', [
+                'path' => $path,
+                'text_length' => strlen($text),
+            ]);
+
+            return $this->cleanText($text);
+
+        } catch (\Exception $e) {
+            Log::error('OCR extraction failed', [
+                'path' => $path,
+                'error' => $e->getMessage(),
+            ]);
+
+            throw new \RuntimeException("Erreur OCR: {$e->getMessage()}");
+        }
+    }
+
+    /**
+     * Vérifie si Tesseract OCR est disponible
+     */
+    private function isOcrAvailable(): bool
+    {
+        static $available = null;
+
+        if ($available === null) {
+            // tesseract --version peut retourner sur stdout ou stderr selon la version
+            // On capture les deux et on vérifie si "tesseract" apparaît dans la sortie
+            $result = Process::run('tesseract --version 2>&1');
+            $output = $result->output();
+
+            // Vérifier si la sortie contient "tesseract" (insensible à la casse)
+            $available = stripos($output, 'tesseract') !== false;
+
+            if ($available) {
+                Log::info('Tesseract OCR available', [
+                    'version' => explode("\n", $output)[0] ?? 'unknown',
+                ]);
+            } else {
+                Log::info('Tesseract OCR not available on this system', [
+                    'output' => $output,
+                    'exit_code' => $result->exitCode(),
+                ]);
+            }
+        }
+
+        return $available;
+    }
+
+    /**
+     * Retourne le chemin du binaire tesseract
+     * Configurable via la variable d'environnement TESSERACT_PATH
+     */
+    private function findTesseractExecutable(): string
+    {
+        // Permet de surcharger via .env si nécessaire
+        return env('TESSERACT_PATH', '/usr/bin/tesseract');
+    }
+
+    /**
+     * Compte les mots qui semblent tronqués (ligatures manquantes)
+     * Détecte les patterns comme "rénovaon" au lieu de "rénovation"
+     */
+    private function countTruncatedWords(string $text): int
+    {
+        // Patterns de mots français courants avec ligatures ti, fi, fl
+        // qui apparaissent tronqués quand la ligature est mal décodée
+        $patterns = [
+            // Mots avec "ti" manquant
+            '/\b\w*aon\b/iu',      // rénovation → rénovaon, information → informaon
+            '/\b\w*ère\b/iu',      // matière → maère (mais attention aux vrais mots)
+            '/\b\w*on\b/iu',       // question → queson (trop large, on vérifie le contexte)
+
+            // Mots avec "fi" manquant
+            '/\b\w*caon\b/iu',     // modification → modication
+            '/\b\w*cher\b/iu',     // fichier → cher (si isolé)
+
+            // Mots avec "fl" manquant
+            '/\b\w*exible\b/iu',   // flexible → exible
+
+            // Pattern général: consonne suivie de voyelle sans transition normale
+            // Ceci détecte les cas où une ligature a été supprimée
+        ];
+
+        $count = 0;
+
+        // Détecter les mots tronqués spécifiques au français
+        $truncatedPatterns = [
+            'aon' => 'ation',      // rénovation
+            'eers' => 'étiers',    // métiers
+            'èes' => 'ètres',      // paramètres
+            'maon' => 'mation',    // information
+            'caon' => 'cation',    // modification
+            'raon' => 'ration',    // configuration
+            'saon' => 'sation',    // organisation
+        ];
+
+        foreach ($truncatedPatterns as $truncated => $full) {
+            $count += substr_count(strtolower($text), $truncated);
+        }
+
+        return $count;
+    }
+
+    /**
+     * Calcule le ratio de mots potentiellement tronqués
+     */
+    private function getTruncatedRatio(string $text): float
+    {
+        if (empty($text)) {
+            return 0.0;
+        }
+
+        $wordCount = str_word_count($text);
+        if ($wordCount === 0) {
+            return 0.0;
+        }
+
+        $truncatedCount = $this->countTruncatedWords($text);
+
+        return $truncatedCount / $wordCount;
     }
 
     /**
@@ -160,8 +501,8 @@ class DocumentExtractorService
     private function extractWithPdfToText(string $path): string
     {
         // Vérifier si pdftotext est disponible
-        $checkResult = Process::run('which pdftotext');
-        if (!$checkResult->successful()) {
+        $checkResult = Process::run('pdftotext -v 2>&1');
+        if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftotext')) {
             Log::info('pdftotext not available on this system');
             return '';
         }
@@ -173,6 +514,9 @@ class DocumentExtractorService
             ['-layout', 'layout mode'],
             ['', 'default mode'],
         ];
+
+        $bestResult = '';
+        $bestBadChars = PHP_INT_MAX;
 
         foreach ($modes as [$option, $modeName]) {
             try {
@@ -186,24 +530,23 @@ class DocumentExtractorService
 
                 if ($result->successful()) {
                     $output = $result->output();
+                    $badChars = substr_count($output, "\xEF\xBF\xBD");
+                    $truncated = $this->countTruncatedWords($output);
+                    $totalBad = $badChars + $truncated;
 
-                    // Vérifier si l'extraction contient des caractères de remplacement (ligatures perdues)
-                    $replacementCount = substr_count($output, "\xEF\xBF\xBD");
-
-                    if ($replacementCount === 0) {
-                        Log::info("pdftotext succeeded with {$modeName}", ['path' => $path]);
-                        return $output;
-                    }
-
-                    Log::info("pdftotext {$modeName} has {$replacementCount} replacement chars, trying next mode", [
+                    Log::info("pdftotext {$modeName}", [
                         'path' => $path,
+                        'bad_chars' => $badChars,
+                        'truncated_words' => $truncated,
                     ]);
 
-                    // Garder le résultat si c'est le dernier mode
-                    if ($option === '') {
-                        Log::warning("pdftotext: using default mode despite {$replacementCount} replacement chars", [
-                            'path' => $path,
-                        ]);
+                    if ($totalBad < $bestBadChars) {
+                        $bestResult = $output;
+                        $bestBadChars = $totalBad;
+                    }
+
+                    // Si parfait, on arrête
+                    if ($totalBad === 0) {
                         return $output;
                     }
                 }
@@ -215,7 +558,7 @@ class DocumentExtractorService
             }
         }
 
-        return '';
+        return $bestResult;
     }
 
     /**

@@ -371,9 +371,28 @@
 [{{ $historyMsg['role'] }}] {{ addslashes($historyMsg['content']) }}
 @endforeach
 
+### Filtrage par categorie
+@php
+    $catDetect = $context['category_detection'] ?? null;
+    $useCatFilter = $stats['use_category_filtering'] ?? false;
+@endphp
+@if(!$useCatFilter)
+- Statut: Desactive pour cet agent
+@elseif($catDetect)
+- Methode de detection: {{ $catDetect['method'] ?? 'N/A' }}
+- Confiance: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%
+- Categories detectees: {{ !empty($catDetect['categories']) ? implode(', ', array_column($catDetect['categories'], 'name')) : 'Aucune' }}
+- Resultats filtres: {{ $catDetect['filtered_results_count'] ?? 0 }}
+- Resultats totaux: {{ $catDetect['total_results_count'] ?? 0 }}
+- Fallback utilise: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui (pas assez de resultats avec le filtre)' : 'Non' }}
+@else
+- Statut: Active mais aucune categorie detectee
+@endif
+
 ### Documents RAG ({{ count($documentSources) }} sources)
 @foreach($documentSources as $doc)
 --- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
+Categorie: {{ $doc['metadata']['chunk_category'] ?? 'Non categorise' }}
 {{ addslashes($doc['content'] ?? '') }}
 @endforeach
 
@@ -388,7 +407,8 @@ R: {{ addslashes($learned['answer'] ?? '') }}
 - Modele: {{ $message['model_used'] ?? 'Non specifie' }}
 - Tokens: {{ $message['tokens'] ?? 'N/A' }}
 - Temps de generation: {{ isset($message['generation_time_ms']) ? number_format($message['generation_time_ms'] / 1000, 1) . 's' : 'N/A' }}
-- Fallback: {{ !empty($message['used_fallback_model']) ? 'Oui' : 'Non' }}`;
+- Fallback: {{ !empty($message['used_fallback_model']) ? 'Oui' : 'Non' }}
+- Filtrage par categorie: {{ $useCatFilter ? 'Active' : 'Desactive' }}`;
                                                 }
                                             }">
                                                 {{-- Bouton d'ouverture --}}
@@ -523,6 +543,107 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                     </div>
                                                                 @endif
 
+                                                                {{-- 2.5 Détection de catégorie --}}
+                                                                @php
+                                                                    $categoryDetection = $context['category_detection'] ?? null;
+                                                                    $useCategoryFiltering = $stats['use_category_filtering'] ?? false;
+                                                                @endphp
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details {{ $categoryDetection ? 'open' : '' }}>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-pink-50 dark:bg-pink-950 border-b border-gray-200 dark:border-gray-600 hover:bg-pink-100 dark:hover:bg-pink-900 transition-colors">
+                                                                            <span class="font-semibold text-pink-700 dark:text-pink-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-funnel class="w-5 h-5" />
+                                                                                2.5 Filtrage par catégorie
+                                                                                @if(!$useCategoryFiltering)
+                                                                                    <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(désactivé)</span>
+                                                                                @elseif($categoryDetection && !empty($categoryDetection['categories']))
+                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
+                                                                                        {{ count($categoryDetection['categories']) }} catégorie(s) détectée(s)
+                                                                                    </span>
+                                                                                @else
+                                                                                    <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(aucune catégorie détectée)</span>
+                                                                                @endif
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 space-y-4">
+                                                                            @if(!$useCategoryFiltering)
+                                                                                <div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                                    <x-heroicon-o-information-circle class="w-5 h-5" />
+                                                                                    <span class="text-sm">Le filtrage par catégorie n'est pas activé pour cet agent.</span>
+                                                                                </div>
+                                                                                <p class="text-xs text-gray-400 dark:text-gray-500">
+                                                                                    Activez cette option dans les paramètres de l'agent pour améliorer la précision des résultats RAG en détectant automatiquement la catégorie de la question.
+                                                                                </p>
+                                                                            @elseif($categoryDetection)
+                                                                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                                                                    <div>
+                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Méthode de détection</p>
+                                                                                        <span class="inline-flex items-center px-2 py-1 rounded text-sm font-medium {{ $categoryDetection['method'] === 'keyword' ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100' : ($categoryDetection['method'] === 'embedding' ? 'bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200') }}">
+                                                                                            @if($categoryDetection['method'] === 'keyword')
+                                                                                                <x-heroicon-o-key class="w-4 h-4 mr-1" /> Mot-clé
+                                                                                            @elseif($categoryDetection['method'] === 'embedding')
+                                                                                                <x-heroicon-o-sparkles class="w-4 h-4 mr-1" /> Embedding
+                                                                                            @else
+                                                                                                Aucune
+                                                                                            @endif
+                                                                                        </span>
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Confiance</p>
+                                                                                        <span class="text-lg font-bold {{ ($categoryDetection['confidence'] ?? 0) >= 0.7 ? 'text-green-600 dark:text-green-400' : (($categoryDetection['confidence'] ?? 0) >= 0.4 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400') }}">
+                                                                                            {{ round(($categoryDetection['confidence'] ?? 0) * 100) }}%
+                                                                                        </span>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                @if(!empty($categoryDetection['categories']))
+                                                                                    <div>
+                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Catégories détectées</p>
+                                                                                        <div class="flex flex-wrap gap-2">
+                                                                                            @foreach($categoryDetection['categories'] as $cat)
+                                                                                                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
+                                                                                                    {{ $cat['name'] ?? 'Inconnu' }}
+                                                                                                </span>
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @endif
+
+                                                                                <div class="grid grid-cols-3 gap-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                                                                                    <div class="text-center">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400">Résultats filtrés</p>
+                                                                                        <p class="text-lg font-bold text-gray-900 dark:text-white">{{ $categoryDetection['filtered_results_count'] ?? 0 }}</p>
+                                                                                    </div>
+                                                                                    <div class="text-center">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400">Résultats totaux</p>
+                                                                                        <p class="text-lg font-bold text-gray-900 dark:text-white">{{ $categoryDetection['total_results_count'] ?? 0 }}</p>
+                                                                                    </div>
+                                                                                    <div class="text-center">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400">Fallback utilisé</p>
+                                                                                        <p class="text-lg font-bold {{ ($categoryDetection['used_fallback'] ?? false) ? 'text-orange-600 dark:text-orange-400' : 'text-green-600 dark:text-green-400' }}">
+                                                                                            {{ ($categoryDetection['used_fallback'] ?? false) ? 'Oui' : 'Non' }}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                @if($categoryDetection['used_fallback'] ?? false)
+                                                                                    <div class="p-3 bg-orange-50 dark:bg-orange-900/30 rounded-lg border border-orange-200 dark:border-orange-700">
+                                                                                        <p class="text-sm text-orange-700 dark:text-orange-300">
+                                                                                            <x-heroicon-o-exclamation-triangle class="w-4 h-4 inline mr-1" />
+                                                                                            Pas assez de résultats avec le filtre catégorie. Une recherche sans filtre a été ajoutée pour compléter.
+                                                                                        </p>
+                                                                                    </div>
+                                                                                @endif
+                                                                            @else
+                                                                                <div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                                    <x-heroicon-o-magnifying-glass class="w-5 h-5" />
+                                                                                    <span class="text-sm">Aucune catégorie n'a pu être détectée dans la question.</span>
+                                                                                </div>
+                                                                            @endif
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+
                                                                 {{-- 3. Documents indexes (RAG) --}}
                                                                 @if(!empty($documentSources))
                                                                     <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
@@ -538,12 +659,17 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                     <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                                                                                         <details>
                                                                                             <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                                <span class="font-medium text-gray-800 dark:text-gray-100">
+                                                                                                <span class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-2">
                                                                                                     Document #{{ $doc['index'] ?? $loop->iteration }}
                                                                                                     @if(isset($doc['metadata']['title']))
                                                                                                         - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
                                                                                                     @elseif(isset($doc['metadata']['filename']))
                                                                                                         - {{ $doc['metadata']['filename'] }}
+                                                                                                    @endif
+                                                                                                    @if(isset($doc['metadata']['chunk_category']))
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
+                                                                                                            {{ $doc['metadata']['chunk_category'] }}
+                                                                                                        </span>
                                                                                                     @endif
                                                                                                 </span>
                                                                                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
@@ -551,6 +677,12 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                 </span>
                                                                                             </summary>
                                                                                             <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
+                                                                                                @if(isset($doc['metadata']['summary']))
+                                                                                                    <div class="mb-3 p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700">
+                                                                                                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mb-1">Résumé</p>
+                                                                                                        <p class="text-sm text-blue-800 dark:text-blue-100">{{ $doc['metadata']['summary'] }}</p>
+                                                                                                    </div>
+                                                                                                @endif
                                                                                                 <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
                                                                                             </div>
                                                                                         </details>

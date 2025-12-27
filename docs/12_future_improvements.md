@@ -305,7 +305,158 @@ Créer un modèle spécialisé BTP par fine-tuning :
 
 ---
 
-## 6. Roadmap d'Implémentation
+## 6. Extraction Vision OCR (Alternative à Tesseract)
+
+### 6.1 Contexte
+
+L'extraction actuelle utilise Tesseract OCR qui fonctionne bien pour le texte simple mais présente des limites :
+
+| Limitation Tesseract | Impact |
+|---------------------|--------|
+| Perte de structure | Tableaux et colonnes mélangés |
+| Texte "plat" | Difficile de savoir quel prix correspond à quel libellé |
+| Pré-traitement requis | Images bruitées = mauvais résultats |
+
+### 6.2 Solution : Modèles Vision Multimodaux
+
+Utiliser un modèle Vision (LLaVA, Llama 3.2 Vision) capable de "voir" et comprendre le document :
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                WORKFLOW VISION OCR                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Document (PDF/Image)                                           │
+│         │                                                       │
+│         ▼                                                       │
+│  ┌─────────────────────────────────────┐                       │
+│  │ Conversion en image (pdftoppm)      │                       │
+│  │ - 300 DPI                           │                       │
+│  │ - Format PNG                        │                       │
+│  └───────────────┬─────────────────────┘                       │
+│                  │                                             │
+│                  ▼                                             │
+│  ┌─────────────────────────────────────┐                       │
+│  │ Ollama Vision Model                 │                       │
+│  │ (llava:13b ou llama3.2-vision)      │                       │
+│  │                                     │                       │
+│  │ Prompt: "Extrais le contenu de ce   │                       │
+│  │ document en Markdown structuré.     │                       │
+│  │ Préserve les tableaux et la mise    │                       │
+│  │ en page."                           │                       │
+│  └───────────────┬─────────────────────┘                       │
+│                  │                                             │
+│                  ▼                                             │
+│  Sortie Markdown structuré:                                    │
+│  - Titres (# ## ###)                                           │
+│  - Tableaux (| col1 | col2 |)                                  │
+│  - Listes (- item)                                             │
+│                  │                                             │
+│                  ▼                                             │
+│  Chunking → Embedding → Qdrant                                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.3 Comparatif des Solutions OCR
+
+| Solution | Intégration Laravel | Qualité Structure | Ressources | Cas d'usage |
+|----------|-------------------|-------------------|------------|-------------|
+| **Tesseract** | ⭐⭐⭐⭐⭐ (PHP natif) | ⭐ (Médiocre) | CPU léger | Texte simple |
+| **Ollama Vision** | ⭐⭐⭐⭐ (API REST) | ⭐⭐⭐⭐⭐ | GPU requis | Documents structurés |
+| **Got-OCR 2.0** | ⭐⭐ (Python) | ⭐⭐⭐⭐ (Markdown) | Moyenne | Archivage |
+| **PaddleOCR** | ⭐⭐ (Python) | ⭐⭐⭐ | Moyenne | Multilingue |
+| **API Cloud** | ⭐⭐⭐⭐ (SDK) | ⭐⭐⭐⭐⭐ | Payant | Zero maintenance |
+
+### 6.4 Implémentation Prévue
+
+```php
+// app/Services/VisionExtractorService.php
+
+class VisionExtractorService
+{
+    public function __construct(
+        private OllamaService $ollama
+    ) {}
+
+    /**
+     * Extrait le texte d'une image via un modèle Vision
+     */
+    public function extractFromImage(string $imagePath): string
+    {
+        $imageBase64 = base64_encode(file_get_contents($imagePath));
+
+        $response = $this->ollama->chat([
+            [
+                'role' => 'user',
+                'content' => $this->getExtractionPrompt(),
+                'images' => [$imageBase64],
+            ],
+        ], [
+            'model' => config('ai.vision.model', 'llava:13b'),
+            'temperature' => 0.1,
+        ]);
+
+        return $response->content;
+    }
+
+    private function getExtractionPrompt(): string
+    {
+        return <<<PROMPT
+Extrais le contenu de ce document en format Markdown structuré.
+
+Instructions:
+- Préserve la hiérarchie (titres, sous-titres)
+- Conserve les tableaux au format Markdown
+- Garde les listes à puces
+- Indique les montants et prix clairement
+- Si c'est une facture/devis, structure les données
+
+Retourne UNIQUEMENT le contenu extrait, pas de commentaires.
+PROMPT;
+    }
+}
+```
+
+### 6.5 Configuration Agent (Future)
+
+Nouveau champ dans la configuration de l'agent :
+
+| Champ | Type | Options | Description |
+|-------|------|---------|-------------|
+| `extraction_mode` | enum | `text`, `ocr`, `vision` | Mode d'extraction des documents |
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Mode d'extraction                                               │
+├─────────────────────────────────────────────────────────────────┤
+│ ○ Texte (pdftotext) - Rapide, CPU uniquement                   │
+│ ○ OCR (Tesseract)   - Pour images et PDFs scannés              │
+│ ● Vision (LLaVA)    - Compréhension structure, GPU requis      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.6 Prérequis Machine
+
+| Ressource | Tesseract | Vision (LLaVA 13B) |
+|-----------|-----------|-------------------|
+| RAM | 2 GB | 16 GB |
+| GPU VRAM | Non requis | 10+ GB |
+| Temps/page | ~1s | ~10-30s |
+| Qualité structure | ⭐ | ⭐⭐⭐⭐⭐ |
+
+### 6.7 Modèles Vision Recommandés
+
+| Modèle | VRAM | Qualité | Commande Ollama |
+|--------|------|---------|-----------------|
+| LLaVA 7B | 5 GB | Bonne | `ollama pull llava:7b` |
+| LLaVA 13B | 10 GB | Très bonne | `ollama pull llava:13b` |
+| Llama 3.2 Vision | 12 GB | Excellente | `ollama pull llama3.2-vision` |
+| BakLLaVA | 8 GB | Bonne | `ollama pull bakllava` |
+
+---
+
+## 7. Roadmap d'Implémentation
 
 ### Phase 1 : Query Rewriting (Priorité Haute)
 

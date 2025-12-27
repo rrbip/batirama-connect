@@ -20,7 +20,8 @@ class RagService
         private OllamaService $ollamaService,
         private HydrationService $hydrationService,
         private PromptBuilder $promptBuilder,
-        private LearningService $learningService
+        private LearningService $learningService,
+        private CategoryDetectionService $categoryDetectionService
     ) {}
 
     /**
@@ -35,12 +36,14 @@ class RagService
         $learnedResponses = $this->learningService->findSimilarLearnedResponses(
             question: $userMessage,
             agentSlug: $agent->slug,
-            limit: config('ai.rag.max_learned_responses', 3),
-            minScore: config('ai.rag.learned_min_score', 0.75)
+            limit: $agent->getMaxLearnedResponses(),
+            minScore: $agent->getLearnedMinScore()
         );
 
-        // 2. Recherche dans la base vectorielle documentaire
-        $ragResults = $this->retrieveContext($agent, $userMessage);
+        // 2. Recherche dans la base vectorielle documentaire (avec détection catégorie)
+        $retrieval = $this->retrieveContextWithDetection($agent, $userMessage);
+        $ragResults = $retrieval['results'];
+        $categoryDetection = $retrieval['category_detection'];
 
         // 3. Hydratation SQL si configurée
         if ($agent->usesHydration() && !empty($ragResults)) {
@@ -59,7 +62,7 @@ class RagService
         // 5. Tronquer si nécessaire pour respecter le contexte
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
-            config('ai.rag.context_size', 4000)
+            $agent->getContextTokenLimit()
         );
 
         // 6. Construire le prompt avec TOUT le contexte et générer la réponse
@@ -85,7 +88,8 @@ class RagService
             messages: $messages,
             learnedResponses: $learnedResponses,
             ragResults: $ragResults,
-            session: $session
+            session: $session,
+            categoryDetection: $categoryDetection
         );
 
         // 8. Ajouter les métadonnées à la réponse
@@ -111,7 +115,8 @@ class RagService
         array $messages,
         array $learnedResponses,
         array $ragResults,
-        ?AiSession $session = null
+        ?AiSession $session = null,
+        ?array $categoryDetection = null
     ): array {
         // Extraire le system prompt envoyé
         $systemPrompt = collect($messages)
@@ -161,6 +166,9 @@ class RagService
                 'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
             ])->values()->toArray(),
 
+            // Détection de catégorie pour le filtrage RAG
+            'category_detection' => $categoryDetection,
+
             // Statistiques
             'stats' => [
                 'learned_count' => count($learnedResponses),
@@ -170,29 +178,75 @@ class RagService
                 'agent_slug' => $agent->slug,
                 'agent_model' => $agent->getModel(),
                 'temperature' => $agent->temperature,
+                'use_category_filtering' => $agent->use_category_filtering ?? false,
             ],
         ];
     }
 
     /**
-     * Recherche les documents pertinents dans Qdrant
+     * Recherche les documents pertinents dans Qdrant (version simple pour rétrocompatibilité)
      */
     public function retrieveContext(Agent $agent, string $query): array
     {
+        return $this->retrieveContextWithDetection($agent, $query)['results'];
+    }
+
+    /**
+     * Recherche les documents pertinents dans Qdrant avec infos de détection de catégorie
+     *
+     * @return array{results: array, category_detection: array|null}
+     */
+    public function retrieveContextWithDetection(Agent $agent, string $query): array
+    {
+        $categoryDetection = null;
+        $usedFallback = false;
+
         try {
             // Vérifier que l'agent a une collection configurée
             if (empty($agent->qdrant_collection)) {
                 Log::info('RAG skipped: No Qdrant collection configured', [
                     'agent' => $agent->slug,
                 ]);
-                return [];
+                return [
+                    'results' => [],
+                    'category_detection' => null,
+                ];
             }
 
             // Générer l'embedding de la requête
             $queryVector = $this->embeddingService->embed($query);
 
-            $minScore = config('ai.rag.min_score', 0.5);
+            $minScore = $agent->getMinRagScore();
             $limit = $agent->max_rag_results ?? config('ai.rag.max_results', 5);
+
+            // Détecter la catégorie de la question pour pré-filtrer
+            $categoryFilter = [];
+
+            if ($agent->use_category_filtering) {
+                $categoryDetection = $this->categoryDetectionService->detect($query, $agent);
+
+                if ($categoryDetection['categories']->isNotEmpty()) {
+                    $categoryFilter = $this->categoryDetectionService->buildQdrantFilter(
+                        $categoryDetection['categories']
+                    );
+
+                    // Convertir les catégories en array sérialisable
+                    $categoryDetection['categories'] = $categoryDetection['categories']->map(fn($c) => [
+                        'id' => $c->id,
+                        'name' => $c->name,
+                        'slug' => $c->slug,
+                    ])->values()->toArray();
+
+                    Log::info('RAG category filter applied', [
+                        'agent' => $agent->slug,
+                        'detected_categories' => collect($categoryDetection['categories'])->pluck('name')->toArray(),
+                        'detection_method' => $categoryDetection['method'],
+                        'confidence' => $categoryDetection['confidence'],
+                    ]);
+                } else {
+                    $categoryDetection['categories'] = [];
+                }
+            }
 
             Log::info('RAG search starting', [
                 'agent' => $agent->slug,
@@ -200,23 +254,81 @@ class RagService
                 'query' => $query,
                 'min_score' => $minScore,
                 'limit' => $limit,
+                'has_category_filter' => !empty($categoryFilter),
             ]);
 
-            // Rechercher dans la collection de l'agent
+            // Rechercher avec filtre de catégorie si disponible
             $results = $this->qdrantService->search(
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
                 limit: $limit,
+                filter: $categoryFilter,
                 scoreThreshold: $minScore
             );
+
+            $filteredCount = count($results);
+
+            // Fallback: seulement si confiance faible ET pas assez de résultats
+            // Avec confiance élevée (>= 70%), on garde UNIQUEMENT les résultats de la catégorie
+            $confidenceThreshold = 0.70;
+            $confidence = $categoryDetection['confidence'] ?? 0;
+            $shouldUseFallback = !empty($categoryFilter)
+                && count($results) < 2
+                && $confidence < $confidenceThreshold;
+
+            if ($shouldUseFallback) {
+                $usedFallback = true;
+
+                Log::info('RAG fallback: low confidence category detection, searching without filter', [
+                    'agent' => $agent->slug,
+                    'filtered_count' => count($results),
+                    'confidence' => $confidence,
+                ]);
+
+                $unfilteredResults = $this->qdrantService->search(
+                    vector: $queryVector,
+                    collection: $agent->qdrant_collection,
+                    limit: $limit,
+                    filter: [],
+                    scoreThreshold: $minScore
+                );
+
+                // Fusionner les résultats en gardant les filtrés en priorité
+                $existingIds = collect($results)->pluck('id')->toArray();
+                $additionalResults = collect($unfilteredResults)
+                    ->filter(fn($r) => !in_array($r['id'], $existingIds))
+                    ->take($limit - count($results))
+                    ->toArray();
+
+                $results = array_merge($results, $additionalResults);
+            } elseif (!empty($categoryFilter) && count($results) < 2 && $confidence >= $confidenceThreshold) {
+                // Confiance élevée mais peu de résultats : on garde le filtrage strict
+                Log::info('RAG strict filtering: high confidence, keeping category-only results', [
+                    'agent' => $agent->slug,
+                    'filtered_count' => count($results),
+                    'confidence' => $confidence,
+                    'detected_categories' => collect($categoryDetection['categories'] ?? [])->pluck('name')->toArray(),
+                ]);
+            }
+
+            // Ajouter les infos de fallback à la détection
+            if ($categoryDetection !== null) {
+                $categoryDetection['used_fallback'] = $usedFallback;
+                $categoryDetection['filtered_results_count'] = $filteredCount;
+                $categoryDetection['total_results_count'] = count($results);
+            }
 
             Log::info('RAG search completed', [
                 'agent' => $agent->slug,
                 'results_count' => count($results),
                 'results_scores' => collect($results)->pluck('score')->toArray(),
+                'results_categories' => collect($results)->pluck('payload.chunk_category')->filter()->toArray(),
             ]);
 
-            return $results;
+            return [
+                'results' => $results,
+                'category_detection' => $categoryDetection,
+            ];
 
         } catch (\Exception $e) {
             Log::error('RAG retrieval failed', [
@@ -225,7 +337,10 @@ class RagService
                 'error' => $e->getMessage()
             ]);
 
-            return [];
+            return [
+                'results' => [],
+                'category_detection' => $categoryDetection,
+            ];
         }
     }
 
@@ -251,7 +366,7 @@ class RagService
                 vector: $queryVector,
                 collection: $agent->qdrant_collection,
                 limit: 3,
-                scoreThreshold: config('ai.rag.min_score', 0.6)
+                scoreThreshold: $agent->getMinRagScore()
             );
 
             // Filtrer les doublons

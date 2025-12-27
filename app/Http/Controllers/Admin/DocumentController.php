@@ -45,6 +45,12 @@ class DocumentController extends Controller
         $mimeType = match ($document->document_type) {
             'pdf' => 'application/pdf',
             'txt', 'md' => 'text/plain',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'gif' => 'image/gif',
+            'bmp' => 'image/bmp',
+            'tiff', 'tif' => 'image/tiff',
+            'webp' => 'image/webp',
             default => 'application/octet-stream',
         };
 

@@ -33,6 +33,10 @@ RUN apk add --no-cache \
     linux-headers \
     bash \
     poppler-utils \
+    # OCR Tesseract pour extraction texte d'images
+    tesseract-ocr \
+    tesseract-ocr-data-fra \
+    tesseract-ocr-data-eng \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP

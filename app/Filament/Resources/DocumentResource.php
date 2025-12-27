@@ -30,6 +30,9 @@ class DocumentResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
+    // Masqué - accessible via Gestion RAG
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function form(Form $form): Form
     {
         return $form
@@ -46,7 +49,17 @@ class DocumentResource extends Resource
                                             ->relationship('agent', 'name')
                                             ->required()
                                             ->searchable()
-                                            ->preload(),
+                                            ->preload()
+                                            ->live()
+                                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
+                                                if ($state) {
+                                                    $agent = \App\Models\Agent::find($state);
+                                                    if ($agent) {
+                                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
+                                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
+                                                    }
+                                                }
+                                            }),
 
                                         // Upload pour nouveau document
                                         Forms\Components\FileUpload::make('storage_path')
@@ -60,6 +73,13 @@ class DocumentResource extends Resource
                                                 'text/markdown',
                                                 'application/msword',
                                                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                                // Images (OCR)
+                                                'image/png',
+                                                'image/jpeg',
+                                                'image/gif',
+                                                'image/bmp',
+                                                'image/tiff',
+                                                'image/webp',
                                             ])
                                             ->maxSize(50 * 1024) // 50MB
                                             ->columnSpanFull()
@@ -90,6 +110,17 @@ class DocumentResource extends Resource
                                                 'legal' => 'Légal',
                                                 'other' => 'Autre',
                                             ]),
+
+                                        Forms\Components\Select::make('extraction_method')
+                                            ->label('Méthode d\'extraction (PDF)')
+                                            ->options([
+                                                'auto' => 'Automatique (recommandé)',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Utilisez OCR si le PDF a des problèmes de ligatures (lettres manquantes).')
+                                            ->columnSpanFull(),
                                     ])
                                     ->columns(2),
 
@@ -148,7 +179,7 @@ class DocumentResource extends Resource
                                                 ->color('gray')
                                                 ->url(fn ($record) => $record ? route('admin.documents.view', $record) : null)
                                                 ->openUrlInNewTab()
-                                                ->visible(fn ($record) => $record && in_array($record->document_type, ['pdf']) && Storage::disk('local')->exists($record->storage_path ?? '')),
+                                                ->visible(fn ($record) => $record && in_array($record->document_type, ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp']) && Storage::disk('local')->exists($record->storage_path ?? '')),
                                         ])->columnSpanFull(),
                                     ])
                                     ->visible(fn ($record) => $record !== null)
@@ -167,6 +198,13 @@ class DocumentResource extends Resource
                                                 'text/markdown',
                                                 'application/msword',
                                                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                                // Images (OCR)
+                                                'image/png',
+                                                'image/jpeg',
+                                                'image/gif',
+                                                'image/bmp',
+                                                'image/tiff',
+                                                'image/webp',
                                             ])
                                             ->maxSize(50 * 1024) // 50MB
                                             ->helperText('Uploadez un nouveau fichier pour remplacer l\'actuel. Le document sera automatiquement retraité.')
@@ -195,6 +233,16 @@ class DocumentResource extends Resource
                                                 default => '-',
                                             }),
 
+                                        Forms\Components\Placeholder::make('extraction_method_display')
+                                            ->label('Méthode utilisée')
+                                            ->content(fn ($record) => match ($record?->extraction_method) {
+                                                'auto' => 'Automatique',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                                null => '-',
+                                                default => $record?->extraction_method,
+                                            }),
+
                                         Forms\Components\Placeholder::make('extracted_at_display')
                                             ->label('Extrait le')
                                             ->content(fn ($record) => $record?->extracted_at?->format('d/m/Y H:i') ?? '-'),
@@ -207,15 +255,16 @@ class DocumentResource extends Resource
                                             ->label('Taille')
                                             ->content(fn ($record) => $record?->getFileSizeForHumans() ?? '-'),
                                     ])
-                                    ->columns(4),
+                                    ->columns(5),
 
                                 Forms\Components\Section::make('Texte extrait')
+                                    ->description('Vous pouvez modifier le texte avant de le re-chunker')
                                     ->schema([
                                         Forms\Components\Textarea::make('extracted_text')
                                             ->label('')
-                                            ->rows(10)
-                                            ->disabled()
-                                            ->columnSpanFull(),
+                                            ->rows(15)
+                                            ->columnSpanFull()
+                                            ->hint('Après modification, utilisez "Re-chunker" pour régénérer les chunks'),
                                     ])
                                     ->collapsed()
                                     ->visible(fn ($record) => $record?->extracted_text),
@@ -248,14 +297,83 @@ class DocumentResource extends Resource
                                         Forms\Components\Select::make('chunk_strategy')
                                             ->label('Stratégie de chunking')
                                             ->options([
-                                                'fixed_size' => 'Taille fixe',
                                                 'sentence' => 'Par phrase',
                                                 'paragraph' => 'Par paragraphe',
+                                                'fixed_size' => 'Taille fixe',
                                                 'recursive' => 'Récursif',
+                                                'llm_assisted' => 'Assisté par LLM',
                                             ])
-                                            ->default('recursive'),
+                                            ->default('sentence'),
                                     ])
                                     ->columns(3),
+
+                                Forms\Components\Section::make('Réponses LLM (données brutes)')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('llm_chunking_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $llmData = $metadata['llm_chunking'] ?? null;
+
+                                                if (!$llmData) {
+                                                    return 'Aucune donnée LLM disponible';
+                                                }
+
+                                                $html = '<div class="space-y-2 mb-4">';
+                                                $html .= '<div class="text-sm"><strong>Modèle:</strong> ' . e($llmData['model'] ?? '-') . '</div>';
+                                                $html .= '<div class="text-sm"><strong>Traité le:</strong> ' . ($llmData['processed_at'] ? \Carbon\Carbon::parse($llmData['processed_at'])->format('d/m/Y H:i') : '-') . '</div>';
+                                                $html .= '<div class="text-sm"><strong>Fenêtres:</strong> ' . ($llmData['window_count'] ?? 0) . '</div>';
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Placeholder::make('llm_raw_responses')
+                                            ->label('Réponses JSON brutes')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $llmData = $metadata['llm_chunking'] ?? null;
+                                                $responses = $llmData['responses'] ?? [];
+
+                                                if (empty($responses)) {
+                                                    return 'Aucune réponse disponible';
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+                                                foreach ($responses as $resp) {
+                                                    $windowIndex = $resp['window_index'] ?? 0;
+                                                    $rawResponse = $resp['raw_response'] ?? '';
+                                                    $parsedChunks = $resp['parsed_chunks'] ?? 0;
+
+                                                    // Formatter le JSON pour l'affichage
+                                                    $formattedJson = $rawResponse;
+                                                    $decoded = json_decode($rawResponse, true);
+                                                    if ($decoded !== null) {
+                                                        $formattedJson = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+                                                    }
+
+                                                    $html .= sprintf(
+                                                        '<div class="border border-gray-200 dark:border-gray-700 rounded-lg">
+                                                            <div class="px-3 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between">
+                                                                <span class="font-medium">Fenêtre #%d</span>
+                                                                <span class="text-sm text-gray-500">%d chunks générés</span>
+                                                            </div>
+                                                            <pre class="p-3 text-xs overflow-x-auto max-h-64 overflow-y-auto bg-gray-900 text-gray-100 rounded-b-lg"><code>%s</code></pre>
+                                                        </div>',
+                                                        $windowIndex,
+                                                        $parsedChunks,
+                                                        e($formattedJson)
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsed()
+                                    ->visible(fn ($record) => $record?->chunk_strategy === 'llm_assisted'),
                             ])
                             ->visible(fn ($record) => $record !== null),
 
@@ -263,6 +381,13 @@ class DocumentResource extends Resource
                             ->icon('heroicon-o-squares-2x2')
                             ->schema([
                                 Forms\Components\Section::make('Chunks indexés')
+                                    ->headerActions([
+                                        Forms\Components\Actions\Action::make('manage_chunks')
+                                            ->label('Gérer les chunks')
+                                            ->icon('heroicon-o-pencil-square')
+                                            ->color('primary')
+                                            ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
+                                    ])
                                     ->schema([
                                         Forms\Components\Placeholder::make('chunks_list')
                                             ->label('')
@@ -271,16 +396,36 @@ class DocumentResource extends Resource
                                                     return 'Aucun chunk disponible';
                                                 }
 
+                                                // Charger les chunks avec leur catégorie
+                                                $chunks = $record->chunks()->with('category')->orderBy('chunk_index')->get();
+
                                                 $html = '<div class="space-y-4">';
-                                                foreach ($record->chunks as $index => $chunk) {
+                                                foreach ($chunks as $chunk) {
                                                     $status = $chunk->is_indexed ? '✓ Indexé' : '✗ Non indexé';
                                                     $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
                                                     $tokens = $chunk->token_count ?? 0;
 
+                                                    // Badge de catégorie
+                                                    $categoryBadge = '';
+                                                    if ($chunk->category) {
+                                                        $color = $chunk->category->color ?? '#6B7280';
+                                                        $categoryBadge = sprintf(
+                                                            '<span class="text-xs px-2 py-0.5 rounded" style="background-color: %s20; color: %s;">%s</span>',
+                                                            $color,
+                                                            $color,
+                                                            e($chunk->category->name)
+                                                        );
+                                                    } else {
+                                                        $categoryBadge = '<span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Sans catégorie</span>';
+                                                    }
+
                                                     $html .= sprintf(
                                                         '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
                                                             <div class="flex justify-between items-center mb-2">
-                                                                <span class="font-semibold">Chunk #%d</span>
+                                                                <div class="flex items-center gap-2">
+                                                                    <span class="font-semibold">Chunk #%d</span>
+                                                                    %s
+                                                                </div>
                                                                 <div class="flex items-center gap-3">
                                                                     <span class="text-xs text-gray-500">%d tokens</span>
                                                                     <span class="text-xs %s">%s</span>
@@ -288,7 +433,8 @@ class DocumentResource extends Resource
                                                             </div>
                                                             <div class="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">%s</div>
                                                         </div>',
-                                                        $index,
+                                                        $chunk->chunk_index,
+                                                        $categoryBadge,
                                                         $tokens,
                                                         $statusColor,
                                                         $status,
@@ -332,6 +478,7 @@ class DocumentResource extends Resource
                         'pdf' => 'danger',
                         'docx', 'doc' => 'info',
                         'txt', 'md' => 'gray',
+                        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => 'success',
                         default => 'gray',
                     }),
 
@@ -447,6 +594,13 @@ class DocumentResource extends Resource
                             ->send();
                     }),
 
+                Tables\Actions\Action::make('chunks')
+                    ->label('Chunks')
+                    ->icon('heroicon-o-squares-2x2')
+                    ->color('info')
+                    ->visible(fn ($record) => $record->chunk_count > 0)
+                    ->url(fn ($record) => static::getUrl('chunks', ['record' => $record])),
+
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])
@@ -515,6 +669,8 @@ class DocumentResource extends Resource
             'index' => Pages\ListDocuments::route('/'),
             'create' => Pages\CreateDocument::route('/create'),
             'edit' => Pages\EditDocument::route('/{record}/edit'),
+            'chunks' => Pages\ManageChunks::route('/{record}/chunks'),
+            'bulk-import' => Pages\BulkImportDocuments::route('/bulk-import'),
         ];
     }
 }
