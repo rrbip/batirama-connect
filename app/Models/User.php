@@ -25,6 +25,20 @@ class User extends Authenticatable implements FilamentUser
      */
     protected array $hiddenFromAudit = ['password', 'remember_token'];
 
+    /**
+     * Boot the model - Auto-generate UUID on creation.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (User $user) {
+            if (empty($user->uuid)) {
+                $user->uuid = (string) Str::uuid();
+            }
+        });
+    }
+
     protected $fillable = [
         'uuid',
         'tenant_id',
