@@ -483,30 +483,40 @@ CREATE TABLE ai_sessions (
     agent_id        BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
     tenant_id       BIGINT REFERENCES tenants(id) ON DELETE SET NULL,
-
-    -- Accès public (si créé via lien public)
-    public_token_id BIGINT REFERENCES public_access_tokens(id) ON DELETE SET NULL,
+    partner_id      BIGINT REFERENCES partners(id) ON DELETE SET NULL,  -- Partenaire API associé
 
     -- Contexte externe (pour intégration écosystème)
     external_session_id VARCHAR(255) NULL,  -- ID session logiciel tiers
+    external_ref        VARCHAR(255) NULL,  -- Référence externe supplémentaire
     external_context    JSONB NULL,         -- Données contextuelles
 
     -- Métadonnées
     title           VARCHAR(255) NULL,      -- Titre auto-généré ou manuel
+    client_data     JSONB NULL,             -- Données client (nom, email, etc.)
+    metadata        JSONB NULL,             -- Métadonnées additionnelles
 
     -- Statistiques
     message_count   INTEGER DEFAULT 0,
 
-    -- Statut
+    -- Statut et timestamps
     status          VARCHAR(20) DEFAULT 'active',
     -- Valeurs : 'active', 'archived', 'deleted'
+    started_at      TIMESTAMP NULL,         -- Début effectif de la session
+    ended_at        TIMESTAMP NULL,         -- Fin de la session
+    last_activity_at TIMESTAMP NULL,        -- Dernière activité
+    closed_at       TIMESTAMP NULL,         -- Date de clôture
 
-    closed_at       TIMESTAMP NULL,
+    -- Lead marketplace
+    is_marketplace_lead BOOLEAN DEFAULT FALSE,
 
     -- Conversion (rempli par callback du partenaire)
     conversion_status   VARCHAR(20) DEFAULT NULL,
     -- Valeurs : 'quoted', 'accepted', 'rejected', 'completed'
-    conversion_amount   DECIMAL(12,2) DEFAULT NULL,  -- Montant final du devis
+    conversion_amount   DECIMAL(12,2) DEFAULT NULL,  -- Montant initial du devis
+    final_amount        DECIMAL(12,2) DEFAULT NULL,  -- Montant final signé
+    quote_ref           VARCHAR(255) NULL,           -- Référence du devis
+    signed_at           TIMESTAMP NULL,              -- Date de signature
+    conversion_notes    TEXT NULL,                   -- Notes sur la conversion
     conversion_at       TIMESTAMP DEFAULT NULL,
 
     -- Commission (pour leads marketplace)
@@ -522,9 +532,12 @@ CREATE TABLE ai_sessions (
 CREATE INDEX idx_ai_sessions_uuid ON ai_sessions(uuid);
 CREATE INDEX idx_ai_sessions_agent ON ai_sessions(agent_id);
 CREATE INDEX idx_ai_sessions_user ON ai_sessions(user_id);
+CREATE INDEX idx_ai_sessions_partner ON ai_sessions(partner_id);
 CREATE INDEX idx_ai_sessions_external ON ai_sessions(external_session_id);
 CREATE INDEX idx_ai_sessions_created ON ai_sessions(created_at DESC);
 ```
+
+> **Note** : La relation avec `public_access_tokens` est inversée - c'est le token qui référence la session via `session_id`, pas l'inverse.
 
 #### Table : `ai_messages`
 
