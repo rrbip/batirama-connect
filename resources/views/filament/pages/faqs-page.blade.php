@@ -96,20 +96,20 @@
             {{-- Barre de recherche --}}
             <div class="mb-4">
                 <div class="relative">
-                    <span class="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+                    <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none">
                         <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
-                    </span>
+                    </div>
                     <input
                         type="text"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Rechercher dans les questions et réponses..."
-                        class="fi-input block w-full rounded-lg border-none bg-white py-2 pl-12 pr-10 text-base text-gray-950 shadow-sm ring-1 ring-gray-950/10 transition duration-75 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500 sm:text-sm sm:leading-6"
+                        class="fi-input block w-full rounded-lg border-none bg-white py-2.5 pl-11 pr-10 text-base text-gray-950 shadow-sm ring-1 ring-gray-950/10 transition duration-75 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500 sm:text-sm sm:leading-6"
                     />
                     @if(!empty($search))
                         <button
                             type="button"
                             wire:click="$set('search', '')"
-                            class="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            class="absolute inset-y-0 right-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                         >
                             <x-heroicon-o-x-mark class="w-5 h-5" />
                         </button>
