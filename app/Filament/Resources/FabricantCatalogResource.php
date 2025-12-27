@@ -373,6 +373,7 @@ class FabricantCatalogResource extends Resource
                             'max_depth' => 0,       // 0 = illimité
                             'max_pages' => 0,       // 0 = illimité
                             'respect_robots_txt' => true,
+                            'use_browser' => true,  // Activer FlareSolverr pour bypass Cloudflare
                             'delay_ms' => 1000,
                             'status' => 'pending',
                         ]);
