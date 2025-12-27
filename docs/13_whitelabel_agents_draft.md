@@ -2438,66 +2438,93 @@ Fichiers modifiés:
 
 ---
 
-#### ☐ PHASE 4 : Structured Output & Validation
+#### ✅ PHASE 4 : Structured Output & Validation
+
+**Implémenté le 27 décembre 2025**
+
+Fichiers créés:
+- `app/Services/StructuredOutput/StructuredOutputParser.php`
+- `app/Services/StructuredOutput/PreQuoteSchema.php`
+- `app/Services/Validation/ValidationWorkflow.php`
+- `app/Services/Validation/ProjectAnonymizer.php`
+- `app/Models/SessionValidationLog.php`
+- `database/migrations/2025_12_27_100003_add_validation_status_to_ai_sessions.php`
+
+Fichiers modifiés:
+- `app/Services/AI/PromptBuilder.php` (instructions structured output)
+- `app/Services/Webhook/WebhookDispatcher.php` (extraction + dispatch)
 
 ```
-☐ 10. STRUCTURED OUTPUT
-  ☐ 10.1 StructuredOutputParser.php
-      ☐ Méthode parse(string $content): ?array
-      ☐ Regex pour trouver ```json-quote ... ```
-      ☐ Valider JSON
-      ☐ Retourner array ou null
+✅ 10. STRUCTURED OUTPUT
+  ✅ 10.1 StructuredOutputParser.php
+      ✅ Méthode parse(string $content): ?array
+      ✅ Patterns: json-quote, json-pre-quote, json-project, json
+      ✅ Valider JSON avec JsonException handling
+      ✅ Méthodes: parseAll(), parsePreQuote(), stripStructuredOutput()
+      ✅ getPromptInstructions() pour injection dans system prompt
 
-  ☐ 10.2 Schéma pré-devis
-      ☐ Config dans agent: output_schemas.pre_quote
-      ☐ Valider structure (project_type, items[], total_ht)
-      ☐ Nettoyer/normaliser les données
+  ✅ 10.2 Schéma pré-devis (PreQuoteSchema.php)
+      ✅ Types de projets: peinture, plomberie, électricité, etc.
+      ✅ Validation: items[], total_ht, tva_rate, total_ttc
+      ✅ Normalisation: unités, types de projet, calculs totaux
+      ✅ Méthodes: validate(), validateSafe(), sanitize()
+      ✅ toSummary() pour résumé textuel
+      ✅ toWebhookPayload() pour format webhook
 
-  ☐ 10.3 Intégration prompt
-      ☐ Ajouter instructions dans system_prompt Expert BTP
-      ☐ Template du format JSON attendu
-      ☐ Tests avec différents projets
+  ✅ 10.3 Intégration prompt (PromptBuilder)
+      ✅ Injection instructions structured output dans system_prompt
+      ✅ Activation auto pour sessions whitelabel (deployment_id)
+      ✅ Template JSON avec exemple complet pré-devis
+      ✅ Instructions TVA, prix réalistes
 
-  ☐ 10.4 Extraction dans webhook
-      ☐ Après réponse IA, parser le contenu
-      ☐ Si structured output trouvé: inclure dans webhook payload
-      ☐ Event: project.created avec data.pre_quote
+  ✅ 10.4 Extraction dans webhook (WebhookDispatcher)
+      ✅ extractAndDispatchStructuredOutput(session, message)
+      ✅ Stockage dans message.metadata.structured_output
+      ✅ Dispatch project.created avec pre_quote validé
+      ✅ dispatchMessageWithStructuredOutput() version améliorée
 ```
 
 ```
-☐ 11. WORKFLOW VALIDATION
-  ☐ 11.1 Migration: ajouter status à ai_sessions
-      ☐ validation_status: pending, pending_client_review,
+✅ 11. WORKFLOW VALIDATION
+  ✅ 11.1 Migration: ajouter status à ai_sessions
+      ✅ validation_status: pending, pending_client_review,
         client_validated, pending_master_review, validated, rejected
-      ☐ validated_by (FK user), validated_at
+      ✅ validated_by (FK user), validated_at, validation_comment
+      ✅ pre_quote_data (JSONB), anonymized_project (JSONB)
+      ✅ Table session_validation_logs pour historique
 
-  ☐ 11.2 Config client: validation_workflow
-      ☐ Dans clients.settings (JSONB)
-      ☐ mode: client_first | direct_master | auto
-      ☐ client_validators: array emails
-      ☐ auto_promote_after_days: int
+  ✅ 11.2 Config validation_workflow
+      ✅ Mode: client_first | direct_master | auto
+      ✅ Configuration via editor.settings JSONB
+      ✅ Lecture depuis deployment.editor dans workflow
 
-  ☐ 11.3 ValidationWorkflow.php service
-      ☐ Méthode getNextStatus(session, action): string
-      ☐ Méthode canTransition(session, status): bool
-      ☐ Méthode transition(session, status, user): void
+  ✅ 11.3 ValidationWorkflow.php service
+      ✅ submitForValidation(session, preQuoteData)
+      ✅ clientValidate(), clientReject()
+      ✅ masterValidate(), masterReject()
+      ✅ sendToMaster() avec anonymisation auto
+      ✅ promoteToLearnedResponse()
+      ✅ canTransition(), getNextStatus(), getAvailableTransitions()
+      ✅ getStatusLabel(), getStatusColor() helpers
 
-  ☐ 11.4 Filament: Page validation client
+  ☐ 11.4 Filament: Page validation client (Phase 5)
       ☐ Liste sessions pending_client_review
       ☐ Voir détails projet, pré-devis
       ☐ Boutons: Valider, Rejeter, Demander modifications
-      ☐ Anonymisation avant envoi master
 
-  ☐ 11.5 Filament: Page validation master
+  ☐ 11.5 Filament: Page validation master (Phase 5)
       ☐ Liste sessions pending_master_review
       ☐ Voir projet anonymisé
       ☐ Valider/Rejeter avec commentaire
       ☐ Option: promouvoir en learned response
 
-  ☐ 11.6 ProjectAnonymizer.php
-      ☐ Supprimer: artisan info, client IP, emails
-      ☐ Remplacer noms propres (NLP simple ou liste)
-      ☐ Optionnel: flouter visages (API Vision)
+  ✅ 11.6 ProjectAnonymizer.php
+      ✅ anonymize(session) → données complètes anonymisées
+      ✅ anonymizeText() avec patterns regex
+      ✅ Patterns: email, téléphone, IP, SIRET, SIREN
+      ✅ Collecte et remplacement des noms propres
+      ✅ anonymizeAddresses() heuristique adresses françaises
+      ✅ containsSensitiveData(), getAnonymizationReport()
 ```
 
 ---

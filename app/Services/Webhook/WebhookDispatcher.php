@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Services\Webhook;
 
 use App\Jobs\DispatchWebhookJob;
+use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\EditorWebhook;
 use App\Models\EditorWebhookLog;
 use App\Models\User;
+use App\Services\StructuredOutput\PreQuoteSchema;
+use App\Services\StructuredOutput\StructuredOutputParser;
 use Illuminate\Support\Facades\Log;
 
 class WebhookDispatcher
@@ -227,6 +230,123 @@ class WebhookDispatcher
             $editor,
             EditorWebhook::EVENT_LEAD_GENERATED,
             $leadData,
+            $session
+        );
+    }
+
+    /**
+     * Analyse une réponse IA pour extraire le structured output et dispatcher les webhooks.
+     *
+     * Appelé après génération d'une réponse IA pour:
+     * 1. Parser le contenu pour trouver des données structurées
+     * 2. Valider les données selon le schéma (pré-devis, projet, etc.)
+     * 3. Dispatcher le webhook approprié (project.created)
+     * 4. Stocker les données structurées dans le message
+     *
+     * @param AiSession $session La session concernée
+     * @param AiMessage $message Le message IA généré
+     * @return array|null Les données structurées extraites, ou null
+     */
+    public function extractAndDispatchStructuredOutput(AiSession $session, AiMessage $message): ?array
+    {
+        // Ne traiter que les messages assistant
+        if ($message->role !== 'assistant') {
+            return null;
+        }
+
+        $parser = new StructuredOutputParser();
+        $result = $parser->parsePreQuote($message->content);
+
+        if (!$result) {
+            // Essayer le parse générique
+            $result = $parser->parse($message->content);
+        }
+
+        if (!$result) {
+            return null;
+        }
+
+        Log::info('Structured output detected in message', [
+            'session_id' => $session->uuid,
+            'message_id' => $message->uuid,
+            'type' => $result['type'],
+        ]);
+
+        // Valider et normaliser selon le type
+        $validatedData = null;
+        if ($result['type'] === StructuredOutputParser::TYPE_PRE_QUOTE) {
+            $validatedData = PreQuoteSchema::validateSafe($result['data']);
+        } else {
+            $validatedData = $result['data'];
+        }
+
+        if (!$validatedData) {
+            Log::warning('Structured output validation failed', [
+                'session_id' => $session->uuid,
+                'message_id' => $message->uuid,
+                'type' => $result['type'],
+            ]);
+            return null;
+        }
+
+        // Stocker les données structurées dans les métadonnées du message
+        $metadata = $message->metadata ?? [];
+        $metadata['structured_output'] = [
+            'type' => $result['type'],
+            'data' => $validatedData,
+            'extracted_at' => now()->toIso8601String(),
+        ];
+        $message->update(['metadata' => $metadata]);
+
+        // Dispatcher le webhook project.created
+        $this->dispatchProjectCreated($session, [
+            'type' => $result['type'],
+            'message_id' => $message->uuid,
+            ...(
+                $result['type'] === StructuredOutputParser::TYPE_PRE_QUOTE
+                    ? PreQuoteSchema::toWebhookPayload($validatedData)
+                    : ['data' => $validatedData]
+            ),
+        ]);
+
+        return [
+            'type' => $result['type'],
+            'data' => $validatedData,
+        ];
+    }
+
+    /**
+     * Dispatch message.received avec extraction automatique de structured output.
+     *
+     * Version améliorée de dispatchMessageReceived qui:
+     * 1. Parse le contenu pour extraire le structured output
+     * 2. Inclut les données structurées dans le payload du webhook
+     * 3. Dispatche project.created si un pré-devis est détecté
+     */
+    public function dispatchMessageWithStructuredOutput(AiSession $session, AiMessage $message): void
+    {
+        $editor = $session->deployment?->editor;
+        if (!$editor) {
+            return;
+        }
+
+        // Extraire le structured output
+        $structuredOutput = null;
+        if ($message->role === 'assistant') {
+            $structuredOutput = $this->extractAndDispatchStructuredOutput($session, $message);
+        }
+
+        // Dispatcher message.received avec les données structurées incluses
+        $this->dispatch(
+            $editor,
+            EditorWebhook::EVENT_MESSAGE_RECEIVED,
+            [
+                'message_id' => $message->uuid,
+                'role' => $message->role,
+                'content' => $message->content,
+                'sources' => $message->metadata['sources'] ?? [],
+                'structured_output' => $structuredOutput,
+            ],
             $session
         );
     }
