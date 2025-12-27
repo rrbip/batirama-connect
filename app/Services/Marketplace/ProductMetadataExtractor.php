@@ -39,11 +39,6 @@ class ProductMetadataExtractor
      */
     public function extractFromCrawlUrl(FabricantCatalog $catalog, WebCrawlUrl $crawlUrl): ?FabricantProduct
     {
-        // Check if this URL matches product patterns
-        if (!$this->isProductUrl($crawlUrl->url, $catalog->extraction_config)) {
-            return null;
-        }
-
         // Load HTML content
         $html = $this->loadContent($crawlUrl);
         if (empty($html)) {
@@ -54,11 +49,31 @@ class ProductMetadataExtractor
         }
 
         $config = $catalog->extraction_config ?? FabricantCatalog::getDefaultExtractionConfig();
+        $productData = [];
 
-        // Try selector-based extraction first
-        $productData = $this->extractWithSelectors($html, $config);
+        // 1. Try JSON-LD extraction first (most reliable)
+        $jsonLdData = $this->extractFromJsonLd($html);
+        if (!empty($jsonLdData)) {
+            $productData = $jsonLdData;
+            $productData['_extraction_method'] = 'jsonld';
+            Log::debug('ProductMetadataExtractor: JSON-LD data found', [
+                'url' => $crawlUrl->url,
+                'name' => $productData['name'] ?? null,
+            ]);
+        }
 
-        // Use LLM extraction if enabled and selector extraction incomplete
+        // 2. If no JSON-LD product, check if URL matches product patterns
+        if (empty($productData['name'])) {
+            if (!$this->isProductUrl($crawlUrl->url, $config)) {
+                return null;
+            }
+        }
+
+        // 3. Try selector-based extraction to fill gaps
+        $selectorData = $this->extractWithSelectors($html, $config);
+        $productData = $this->mergeExtractionData($productData, $selectorData);
+
+        // 4. Use LLM extraction if enabled and still incomplete
         if (($config['use_llm_extraction'] ?? false) && !$this->isDataComplete($productData)) {
             $llmData = $this->extractWithLlm($html, $crawlUrl->url);
             $productData = $this->mergeExtractionData($productData, $llmData);
@@ -74,6 +89,186 @@ class ProductMetadataExtractor
 
         // Create or update product
         return $this->createOrUpdateProduct($catalog, $crawlUrl, $productData);
+    }
+
+    /**
+     * Extract full product data from JSON-LD structured data.
+     */
+    private function extractFromJsonLd(string $html): array
+    {
+        $crawler = new Crawler($html);
+        $data = [];
+
+        try {
+            $scripts = $crawler->filter('script[type="application/ld+json"]');
+
+            foreach ($scripts as $script) {
+                $json = json_decode($script->textContent, true);
+                if (!$json) {
+                    continue;
+                }
+
+                // Handle @graph format
+                $items = [];
+                if (isset($json['@graph'])) {
+                    $items = $json['@graph'];
+                } elseif (isset($json['@type'])) {
+                    $items = [$json];
+                }
+
+                foreach ($items as $item) {
+                    if ($this->isProductType($item)) {
+                        $data = $this->parseJsonLdProduct($item);
+                        if (!empty($data['name'])) {
+                            return $data;
+                        }
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::debug('ProductMetadataExtractor: JSON-LD parsing error', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Check if JSON-LD item is a Product type.
+     */
+    private function isProductType(array $item): bool
+    {
+        $type = $item['@type'] ?? '';
+
+        if (is_array($type)) {
+            return in_array('Product', $type) || in_array('IndividualProduct', $type);
+        }
+
+        return in_array($type, ['Product', 'IndividualProduct', 'ProductModel']);
+    }
+
+    /**
+     * Parse JSON-LD Product into our data format.
+     */
+    private function parseJsonLdProduct(array $item): array
+    {
+        $data = [];
+
+        // Name
+        $data['name'] = $item['name'] ?? null;
+
+        // Description
+        $data['description'] = $item['description'] ?? null;
+
+        // SKU
+        $data['sku'] = $item['sku'] ?? $item['productID'] ?? $item['mpn'] ?? null;
+
+        // EAN/GTIN
+        $data['ean'] = $item['gtin13'] ?? $item['gtin14'] ?? $item['gtin'] ?? $item['gtin8'] ?? null;
+
+        // Brand
+        if (isset($item['brand'])) {
+            $data['brand'] = is_array($item['brand'])
+                ? ($item['brand']['name'] ?? null)
+                : $item['brand'];
+        }
+
+        // Category
+        $data['category'] = $item['category'] ?? null;
+        if (is_array($data['category'])) {
+            $data['category'] = end($data['category']); // Take the most specific
+        }
+
+        // Images
+        if (isset($item['image'])) {
+            $images = is_array($item['image']) ? $item['image'] : [$item['image']];
+            // Handle ImageObject format
+            $data['images'] = array_map(function ($img) {
+                return is_array($img) ? ($img['url'] ?? $img['contentUrl'] ?? null) : $img;
+            }, $images);
+            $data['images'] = array_filter($data['images']);
+            $data['main_image_url'] = $data['images'][0] ?? null;
+        }
+
+        // Price from Offer(s)
+        $offer = null;
+        if (isset($item['offers'])) {
+            $offers = isset($item['offers']['@type']) ? [$item['offers']] : $item['offers'];
+            $offer = $offers[0] ?? null;
+        }
+
+        if ($offer) {
+            $price = $offer['price'] ?? $offer['lowPrice'] ?? null;
+            if ($price !== null) {
+                $data['price_ht'] = (float) $price;
+            }
+
+            $data['currency'] = $offer['priceCurrency'] ?? 'EUR';
+
+            // Unit price
+            if (isset($offer['priceSpecification']['referenceQuantity'])) {
+                $refQty = $offer['priceSpecification']['referenceQuantity'];
+                $data['price_unit'] = $refQty['unitCode'] ?? $refQty['unitText'] ?? null;
+            }
+
+            // Availability
+            if (isset($offer['availability'])) {
+                $data['availability'] = $this->parseAvailability($offer['availability']);
+            }
+        }
+
+        // Manufacturer
+        if (isset($item['manufacturer'])) {
+            $data['manufacturer'] = is_array($item['manufacturer'])
+                ? ($item['manufacturer']['name'] ?? null)
+                : $item['manufacturer'];
+        }
+
+        // Additional properties / specifications
+        if (isset($item['additionalProperty'])) {
+            $specs = [];
+            foreach ($item['additionalProperty'] as $prop) {
+                if (isset($prop['name']) && isset($prop['value'])) {
+                    $specs[$prop['name']] = $prop['value'];
+                }
+            }
+            if (!empty($specs)) {
+                $data['specifications'] = $specs;
+            }
+        }
+
+        // Weight
+        if (isset($item['weight'])) {
+            $weight = is_array($item['weight']) ? $item['weight']['value'] ?? null : $item['weight'];
+            if ($weight) {
+                $data['weight_kg'] = (float) $weight;
+            }
+        }
+
+        // Dimensions
+        if (isset($item['width'])) {
+            $data['width_cm'] = $this->parseDimension($item['width']);
+        }
+        if (isset($item['height'])) {
+            $data['height_cm'] = $this->parseDimension($item['height']);
+        }
+        if (isset($item['depth'])) {
+            $data['depth_cm'] = $this->parseDimension($item['depth']);
+        }
+
+        return array_filter($data, fn($v) => $v !== null && $v !== '' && $v !== []);
+    }
+
+    /**
+     * Parse dimension value from JSON-LD.
+     */
+    private function parseDimension($dimension): ?float
+    {
+        if (is_array($dimension)) {
+            return isset($dimension['value']) ? (float) $dimension['value'] : null;
+        }
+        return is_numeric($dimension) ? (float) $dimension : null;
     }
 
     /**
