@@ -144,18 +144,13 @@ class WebCrawlResource extends Resource
                                             ->default(true)
                                             ->helperText('Recommandé pour être un bon citoyen du web'),
 
-                                        Forms\Components\Toggle::make('use_browser')
-                                            ->label('Mode navigateur (FlareSolverr)')
-                                            ->default(false)
-                                            ->helperText('Utiliser un navigateur headless pour bypass Cloudflare'),
-
                                         Forms\Components\TextInput::make('user_agent')
                                             ->label('User-Agent')
                                             ->default(WebCrawl::DEFAULT_USER_AGENT)
                                             ->placeholder(WebCrawl::DEFAULT_USER_AGENT)
                                             ->helperText('Laissez vide pour le Chrome par défaut'),
                                     ])
-                                    ->columns(3),
+                                    ->columns(2),
                             ]),
                     ])
                     ->columnSpanFull(),

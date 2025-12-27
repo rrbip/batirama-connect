@@ -43,11 +43,6 @@ class WebCrawlerService
      */
     public function fetch(string $url, WebCrawl $crawl): array
     {
-        // Utiliser FlareSolverr si le mode navigateur est activé
-        if ($crawl->use_browser) {
-            return $this->fetchWithFlareSolverr($url, $crawl);
-        }
-
         $options = [
             'timeout' => 30,
             'connect_timeout' => 10,
@@ -489,89 +484,5 @@ class WebCrawlerService
         }
 
         return 'bin';
-    }
-
-    /**
-     * Récupère le contenu d'une URL via FlareSolverr (bypass Cloudflare).
-     */
-    private function fetchWithFlareSolverr(string $url, WebCrawl $crawl): array
-    {
-        $flaresolverr = app(FlareSolverrService::class);
-
-        if (!$flaresolverr->isAvailable()) {
-            Log::warning('FlareSolverr not available, falling back to standard fetch', [
-                'url' => $url,
-                'crawl_id' => $crawl->id,
-            ]);
-
-            // Fallback: désactiver le mode navigateur et réessayer
-            return $this->fetchStandard($url, $crawl);
-        }
-
-        $result = $flaresolverr->fetch($url, $crawl->user_agent);
-
-        if (!$result['success']) {
-            Log::error('FlareSolverr fetch failed', [
-                'url' => $url,
-                'error' => $result['error'] ?? 'Unknown error',
-            ]);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Fetch standard sans FlareSolverr (pour fallback).
-     */
-    private function fetchStandard(string $url, WebCrawl $crawl): array
-    {
-        $options = [
-            'timeout' => 30,
-            'connect_timeout' => 10,
-        ];
-
-        $defaultHeaders = [
-            'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language' => 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding' => 'gzip, deflate, br',
-            'Cache-Control' => 'no-cache',
-            'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile' => '?0',
-            'Sec-Ch-Ua-Platform' => '"Windows"',
-            'Sec-Fetch-Dest' => 'document',
-            'Sec-Fetch-Mode' => 'navigate',
-            'Sec-Fetch-Site' => 'none',
-            'Sec-Fetch-User' => '?1',
-            'Upgrade-Insecure-Requests' => '1',
-            'Pragma' => 'no-cache',
-        ];
-
-        $request = Http::timeout($options['timeout'])
-            ->connectTimeout($options['connect_timeout'])
-            ->withUserAgent($crawl->user_agent)
-            ->withHeaders($defaultHeaders);
-
-        if (!empty($crawl->custom_headers)) {
-            $request = $request->withHeaders($crawl->custom_headers);
-        }
-
-        try {
-            $response = $request->get($url);
-
-            return [
-                'success' => true,
-                'status' => $response->status(),
-                'headers' => $response->headers(),
-                'body' => $response->body(),
-                'content_type' => $response->header('Content-Type'),
-                'content_length' => (int) $response->header('Content-Length', strlen($response->body())),
-            ];
-        } catch (\Exception $e) {
-            return [
-                'success' => false,
-                'status' => 0,
-                'error' => $e->getMessage(),
-            ];
-        }
     }
 }
