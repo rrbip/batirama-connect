@@ -880,9 +880,15 @@ class ClientObserver
    - Avantages : Mutualisation des améliorations (ex: gestion RAG), maintenance unique, cohérence technique
 
 3. **Widget : iframe ou injection directe ?**
-   - Option A : iframe (isolation totale)
-   - Option B : Shadow DOM (meilleure intégration)
-   - **Recommandation** : Option A pour sécurité, Option B en v2
+   - ✅ **Option A : iframe (isolation totale) + API/Webhook**
+   - ~~Option B : Shadow DOM (meilleure intégration)~~
+   - Justification : Compatibilité domaines sensibles (comptabilité, bancaire, RH)
+   - Architecture :
+     - Contexte sensible via API serveur-à-serveur (jamais en JS navigateur)
+     - Widget iframe isolé (Same-Origin Policy)
+     - Résultats via Webhook signé vers serveur client
+
+### À Décider
 
 4. **Gestion des documents RAG par client ?**
    - Option A : Upload via admin uniquement
