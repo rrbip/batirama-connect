@@ -24,6 +24,7 @@ class AiSession extends Model
         'editor_link_id',
         'deployment_id',
         'particulier_id',
+        'whitelabel_token',
         // Standard columns
         'external_session_id',
         'external_ref',

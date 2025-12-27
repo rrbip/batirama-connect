@@ -32,10 +32,17 @@ return new class extends Migration
                 ->constrained('users')
                 ->nullOnDelete();
 
+            // Token pour les sessions standalone whitelabel
+            $table->string('whitelabel_token', 128)
+                ->nullable()
+                ->after('particulier_id')
+                ->unique();
+
             // Index
             $table->index('editor_link_id');
             $table->index('deployment_id');
             $table->index('particulier_id');
+            $table->index('whitelabel_token');
         });
     }
 
@@ -45,7 +52,7 @@ return new class extends Migration
             $table->dropForeign(['editor_link_id']);
             $table->dropForeign(['deployment_id']);
             $table->dropForeign(['particulier_id']);
-            $table->dropColumn(['editor_link_id', 'deployment_id', 'particulier_id']);
+            $table->dropColumn(['editor_link_id', 'deployment_id', 'particulier_id', 'whitelabel_token']);
         });
     }
 };

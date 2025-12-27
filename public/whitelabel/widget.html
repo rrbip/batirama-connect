@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Batirama Chat</title>
+    <style>
+        :root {
+            --primary-color: #1E88E5;
+            --primary-dark: #1565C0;
+            --text-color: #333;
+            --text-light: #666;
+            --bg-color: #fff;
+            --bg-light: #f5f5f5;
+            --border-color: #e0e0e0;
+            --shadow: 0 2px 8px rgba(0,0,0,0.1);
+            --radius: 12px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-color);
+            background: var(--bg-color);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .widget-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Header */
+        .widget-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .widget-header-logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .widget-header-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .widget-header-logo svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        .widget-header-info {
+            flex: 1;
+        }
+
+        .widget-header-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .widget-header-status {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .widget-header-close {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .widget-header-close:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Messages Container */
+        .messages-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .message {
+            display: flex;
+            gap: 8px;
+            max-width: 85%;
+            animation: messageIn 0.3s ease;
+        }
+
+        @keyframes messageIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .message-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .message.user .message-avatar {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .message-bubble {
+            padding: 10px 14px;
+            border-radius: var(--radius);
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: var(--primary-color);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant .message-bubble {
+            background: var(--bg-light);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: var(--text-light);
+            margin-top: 4px;
+            text-align: right;
+        }
+
+        .message.assistant .message-time {
+            text-align: left;
+        }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: none;
+            align-self: flex-start;
+            padding: 10px 14px;
+            background: var(--bg-light);
+            border-radius: var(--radius);
+            border-bottom-left-radius: 4px;
+        }
+
+        .typing-indicator.visible {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--text-light);
+            border-radius: 50%;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-4px);
+            }
+        }
+
+        /* Welcome Message */
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-light);
+        }
+
+        .welcome-message h2 {
+            font-size: 18px;
+            color: var(--text-color);
+            margin-bottom: 8px;
+        }
+
+        .welcome-message p {
+            font-size: 14px;
+        }
+
+        /* Input Area */
+        .input-container {
+            padding: 12px 16px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-color);
+            flex-shrink: 0;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .input-field {
+            flex: 1;
+            min-height: 40px;
+            max-height: 120px;
+            padding: 10px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: none;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-field:focus {
+            border-color: var(--primary-color);
+        }
+
+        .input-field::placeholder {
+            color: #999;
+        }
+
+        .send-button {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: var(--primary-color);
+            color: white;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, transform 0.2s;
+            flex-shrink: 0;
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: var(--primary-dark);
+            transform: scale(1.05);
+        }
+
+        .send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Powered By Footer */
+        .powered-by {
+            text-align: center;
+            padding: 8px;
+            font-size: 11px;
+            color: var(--text-light);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .powered-by a {
+            color: var(--primary-color);
+            text-decoration: none;
+        }
+
+        /* Loading State */
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Error State */
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 12px 16px;
+            border-radius: var(--radius);
+            margin: 16px;
+            text-align: center;
+        }
+
+        /* Sources */
+        .message-sources {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .message-sources summary {
+            cursor: pointer;
+        }
+
+        .source-item {
+            margin-top: 4px;
+            padding-left: 8px;
+        }
+
+        /* Responsive */
+        @media (max-width: 400px) {
+            .widget-header {
+                padding: 12px 16px;
+            }
+
+            .messages-container {
+                padding: 12px;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="widget-container" id="widget">
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-spinner"></div>
+        </div>
+
+        <!-- Header -->
+        <div class="widget-header" id="header">
+            <div class="widget-header-logo" id="headerLogo">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+            </div>
+            <div class="widget-header-info">
+                <div class="widget-header-title" id="headerTitle">Assistant Batirama</div>
+                <div class="widget-header-status" id="headerStatus">En ligne</div>
+            </div>
+            <button class="widget-header-close" id="closeBtn" title="Fermer">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages-container" id="messagesContainer">
+            <div class="welcome-message" id="welcomeMessage">
+                <h2 id="welcomeTitle">Bonjour !</h2>
+                <p id="welcomeText">Comment puis-je vous aider aujourd'hui ?</p>
+            </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div class="typing-indicator" id="typingIndicator">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-container">
+            <div class="input-wrapper">
+                <textarea
+                    class="input-field"
+                    id="inputField"
+                    placeholder="Tapez votre message..."
+                    rows="1"
+                ></textarea>
+                <button class="send-button" id="sendButton" disabled>
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Powered By -->
+        <div class="powered-by" id="poweredBy">
+            Propulsé par <a href="https://batirama.fr" target="_blank" rel="noopener">Batirama</a>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            // Configuration from URL params
+            var params = new URLSearchParams(window.location.search);
+            var config = {
+                deploymentKey: params.get('key'),
+                origin: params.get('origin'),
+                externalId: params.get('external_id'),
+                particulierEmail: params.get('particulier_email'),
+                particulierName: params.get('particulier_name'),
+                context: params.get('context') ? JSON.parse(params.get('context')) : {}
+            };
+
+            // API Base URL (relative to widget location)
+            var API_BASE = window.location.origin + '/api';
+
+            // State
+            var state = {
+                session: null,
+                branding: null,
+                messages: [],
+                isLoading: false,
+                isSending: false
+            };
+
+            // DOM Elements
+            var elements = {
+                widget: document.getElementById('widget'),
+                loadingOverlay: document.getElementById('loadingOverlay'),
+                header: document.getElementById('header'),
+                headerLogo: document.getElementById('headerLogo'),
+                headerTitle: document.getElementById('headerTitle'),
+                headerStatus: document.getElementById('headerStatus'),
+                closeBtn: document.getElementById('closeBtn'),
+                messagesContainer: document.getElementById('messagesContainer'),
+                welcomeMessage: document.getElementById('welcomeMessage'),
+                welcomeTitle: document.getElementById('welcomeTitle'),
+                welcomeText: document.getElementById('welcomeText'),
+                typingIndicator: document.getElementById('typingIndicator'),
+                inputField: document.getElementById('inputField'),
+                sendButton: document.getElementById('sendButton'),
+                poweredBy: document.getElementById('poweredBy')
+            };
+
+            // Notify parent window
+            function notifyParent(type, data) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'batirama:' + type,
+                        ...data
+                    }, '*');
+                }
+            }
+
+            // Apply branding
+            function applyBranding(branding) {
+                if (!branding) return;
+
+                state.branding = branding;
+
+                // Primary color
+                if (branding.primary_color) {
+                    document.documentElement.style.setProperty('--primary-color', branding.primary_color);
+                    // Calculate darker shade
+                    var color = branding.primary_color;
+                    document.documentElement.style.setProperty('--primary-dark', adjustColor(color, -20));
+                }
+
+                // Logo
+                if (branding.logo_url) {
+                    elements.headerLogo.innerHTML = '<img src="' + escapeHtml(branding.logo_url) + '" alt="Logo">';
+                }
+
+                // Title
+                if (branding.chat_title) {
+                    elements.headerTitle.textContent = branding.chat_title;
+                    document.title = branding.chat_title;
+                }
+
+                // Welcome message
+                if (branding.welcome_message) {
+                    elements.welcomeText.textContent = branding.welcome_message;
+                }
+
+                // Powered by / Signature
+                if (branding.powered_by === false) {
+                    elements.poweredBy.style.display = 'none';
+                } else if (branding.signature) {
+                    elements.poweredBy.textContent = branding.signature;
+                }
+
+                // Placeholder text
+                if (branding.placeholder_text) {
+                    elements.inputField.placeholder = branding.placeholder_text;
+                }
+            }
+
+            // Color adjustment helper
+            function adjustColor(hex, percent) {
+                var num = parseInt(hex.replace('#', ''), 16);
+                var amt = Math.round(2.55 * percent);
+                var R = (num >> 16) + amt;
+                var G = (num >> 8 & 0x00FF) + amt;
+                var B = (num & 0x0000FF) + amt;
+                return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 +
+                    (G < 255 ? G < 1 ? 0 : G : 255) * 0x100 +
+                    (B < 255 ? B < 1 ? 0 : B : 255)).toString(16).slice(1);
+            }
+
+            // Escape HTML
+            function escapeHtml(text) {
+                var div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            // Format time
+            function formatTime(date) {
+                return new Date(date).toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+
+            // Add message to UI
+            function addMessage(message) {
+                state.messages.push(message);
+
+                // Hide welcome message
+                elements.welcomeMessage.style.display = 'none';
+
+                var messageEl = document.createElement('div');
+                messageEl.className = 'message ' + message.role;
+                messageEl.innerHTML = `
+                    <div class="message-avatar">
+                        ${message.role === 'user'
+                            ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'
+                            : (state.branding && state.branding.logo_url
+                                ? '<img src="' + escapeHtml(state.branding.logo_url) + '" alt="">'
+                                : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>')
+                        }
+                    </div>
+                    <div class="message-content">
+                        <div class="message-bubble">${escapeHtml(message.content)}</div>
+                        <div class="message-time">${formatTime(message.created_at || new Date())}</div>
+                        ${message.sources && message.sources.length > 0 ? `
+                            <details class="message-sources">
+                                <summary>Sources (${message.sources.length})</summary>
+                                ${message.sources.map(s => `<div class="source-item">${escapeHtml(s.title)}</div>`).join('')}
+                            </details>
+                        ` : ''}
+                    </div>
+                `;
+
+                elements.messagesContainer.appendChild(messageEl);
+                scrollToBottom();
+
+                return messageEl;
+            }
+
+            // Scroll to bottom
+            function scrollToBottom() {
+                elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+            }
+
+            // Show typing indicator
+            function showTyping() {
+                elements.typingIndicator.classList.add('visible');
+                scrollToBottom();
+            }
+
+            // Hide typing indicator
+            function hideTyping() {
+                elements.typingIndicator.classList.remove('visible');
+            }
+
+            // Show error
+            function showError(message) {
+                var errorEl = document.createElement('div');
+                errorEl.className = 'error-message';
+                errorEl.textContent = message;
+                elements.messagesContainer.appendChild(errorEl);
+                scrollToBottom();
+
+                setTimeout(function() {
+                    errorEl.remove();
+                }, 5000);
+            }
+
+            // API Request
+            async function apiRequest(method, endpoint, data) {
+                var headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-Deployment-Key': config.deploymentKey
+                };
+
+                if (config.origin) {
+                    headers['Origin'] = config.origin;
+                }
+
+                var options = {
+                    method: method,
+                    headers: headers
+                };
+
+                if (data && method !== 'GET') {
+                    options.body = JSON.stringify(data);
+                }
+
+                var response = await fetch(API_BASE + endpoint, options);
+                var json = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(json.message || json.error || 'Request failed');
+                }
+
+                return json;
+            }
+
+            // Initialize session
+            async function initSession() {
+                try {
+                    state.isLoading = true;
+
+                    // First get config/branding
+                    var configResponse = await apiRequest('GET', '/whitelabel/config');
+                    applyBranding(configResponse.branding);
+
+                    // Create session
+                    var sessionData = {
+                        external_id: config.externalId
+                    };
+
+                    if (config.particulierEmail) {
+                        sessionData.particulier_email = config.particulierEmail;
+                    }
+                    if (config.particulierName) {
+                        sessionData.particulier_name = config.particulierName;
+                    }
+                    if (Object.keys(config.context).length > 0) {
+                        sessionData.context = config.context;
+                    }
+
+                    var sessionResponse = await apiRequest('POST', '/whitelabel/sessions', sessionData);
+                    state.session = sessionResponse;
+
+                    // Apply session-specific branding if different
+                    if (sessionResponse.branding) {
+                        applyBranding(sessionResponse.branding);
+                    }
+
+                    // Load existing messages if any
+                    if (sessionResponse.messages && sessionResponse.messages.length > 0) {
+                        sessionResponse.messages.forEach(function(msg) {
+                            addMessage(msg);
+                        });
+                    }
+
+                    elements.loadingOverlay.style.display = 'none';
+                    notifyParent('session_started', { session: state.session });
+                    notifyParent('ready', {});
+
+                } catch (error) {
+                    console.error('Init error:', error);
+                    elements.loadingOverlay.style.display = 'none';
+                    showError(error.message || 'Erreur de connexion');
+                    notifyParent('error', { error: error.message });
+                } finally {
+                    state.isLoading = false;
+                }
+            }
+
+            // Send message
+            async function sendMessage(content) {
+                if (!content.trim() || state.isSending || !state.session) {
+                    return;
+                }
+
+                state.isSending = true;
+                elements.sendButton.disabled = true;
+                elements.inputField.value = '';
+                autoResize();
+
+                // Add user message immediately
+                addMessage({
+                    role: 'user',
+                    content: content,
+                    created_at: new Date().toISOString()
+                });
+
+                showTyping();
+
+                try {
+                    var response = await apiRequest('POST', '/whitelabel/sessions/' + state.session.session_id + '/messages', {
+                        message: content
+                    });
+
+                    hideTyping();
+
+                    // Add assistant response
+                    addMessage({
+                        role: 'assistant',
+                        content: response.content,
+                        sources: response.sources,
+                        created_at: response.created_at
+                    });
+
+                    notifyParent('message', { message: response });
+
+                } catch (error) {
+                    console.error('Send error:', error);
+                    hideTyping();
+                    showError(error.message || 'Erreur lors de l\'envoi');
+                    notifyParent('error', { error: error.message });
+                } finally {
+                    state.isSending = false;
+                    updateSendButton();
+                }
+            }
+
+            // Auto-resize textarea
+            function autoResize() {
+                elements.inputField.style.height = 'auto';
+                elements.inputField.style.height = Math.min(elements.inputField.scrollHeight, 120) + 'px';
+            }
+
+            // Update send button state
+            function updateSendButton() {
+                elements.sendButton.disabled = !elements.inputField.value.trim() || state.isSending;
+            }
+
+            // Event listeners
+            elements.inputField.addEventListener('input', function() {
+                autoResize();
+                updateSendButton();
+            });
+
+            elements.inputField.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage(elements.inputField.value);
+                }
+            });
+
+            elements.sendButton.addEventListener('click', function() {
+                sendMessage(elements.inputField.value);
+            });
+
+            elements.closeBtn.addEventListener('click', function() {
+                notifyParent('close', {});
+            });
+
+            // Listen for messages from parent
+            window.addEventListener('message', function(event) {
+                var data = event.data;
+                if (!data || !data.type || data.type.indexOf('batirama:') !== 0) {
+                    return;
+                }
+
+                var type = data.type.replace('batirama:', '');
+
+                switch (type) {
+                    case 'send_message':
+                        if (data.message) {
+                            sendMessage(data.message);
+                        }
+                        break;
+
+                    case 'set_context':
+                        if (data.context) {
+                            config.context = Object.assign({}, config.context, data.context);
+                        }
+                        break;
+                }
+            });
+
+            // Initialize
+            if (config.deploymentKey) {
+                initSession();
+            } else {
+                elements.loadingOverlay.style.display = 'none';
+                showError('Configuration manquante');
+                notifyParent('error', { error: 'Missing deployment key' });
+            }
+
+        })();
+    </script>
+</body>
+</html>

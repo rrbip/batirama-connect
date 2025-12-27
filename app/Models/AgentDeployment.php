@@ -200,4 +200,24 @@ class AgentDeployment extends Model
 
         return $config;
     }
+
+    /**
+     * Get a specific config value with default.
+     */
+    public function getConfigValue(string $key, mixed $default = null): mixed
+    {
+        $overlay = $this->config_overlay ?? [];
+
+        return $overlay[$key] ?? $default;
+    }
+
+    /**
+     * Get branding value with default.
+     */
+    public function getBrandingValue(string $key, mixed $default = null): mixed
+    {
+        $branding = $this->branding ?? [];
+
+        return $branding[$key] ?? $default;
+    }
 }

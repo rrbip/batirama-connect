@@ -2213,93 +2213,107 @@ Commande fournisseur
 
 ---
 
-#### ☐ PHASE 2 : API & Widget
+#### ✅ PHASE 2 : API & Widget (Complété 27/12/2024)
 
 ```
-☐ 5. API ENDPOINTS
-  ☐ 5.1 POST /api/widget/v1/init
-      ☐ Request: deployment_key, context (optional)
-      ☐ Middleware: ValidateDeploymentDomain
-      ☐ Créer session (avec deployment_id, tenant_link_id si context)
-      ☐ Résoudre branding
-      ☐ Response: session_id, agent info, branding, welcome_message
+✅ 5. API ENDPOINTS
+  ✅ 5.1 POST /api/whitelabel/sessions (WidgetController::init)
+      ✅ Request: deployment_key (header), external_id, context (optional)
+      ✅ Middleware: deployment.key, deployment.domain, deployment.rate, deployment.cors
+      ✅ Créer session (avec deployment_id, editor_link_id si external_id)
+      ✅ Résoudre branding via BrandingResolver
+      ✅ Response: session_id, agent info, branding, welcome_message
 
-  ☐ 5.2 POST /api/widget/v1/message
-      ☐ Request: content, session_id
-      ☐ Headers: X-Session-ID
-      ☐ Valider session active
-      ☐ Créer message, dispatch job
-      ☐ Response: message_id, status: queued
+  ✅ 5.2 POST /api/whitelabel/sessions/{sessionId}/messages (WidgetController::sendMessage)
+      ✅ Request: message
+      ✅ Middleware: editor.quota:message
+      ✅ Valider session active
+      ✅ Créer message, dispatch job
+      ✅ Response: message_id, content, sources
 
-  ☐ 5.3 GET /api/widget/v1/message/{id}/status
-      ☐ Polling status (queued/processing/completed/failed)
-      ☐ Si completed: retourner content
+  ✅ 5.3 GET /api/messages/{uuid}/status (PublicChatController::messageStatus)
+      ✅ Polling status (pending/queued/processing/completed/failed)
+      ✅ Si completed: retourner content
 
-  ☐ 5.4 GET /api/widget/v1/session/{id}/messages
-      ☐ Liste messages de la session
+  ✅ 5.4 GET /api/whitelabel/sessions/{sessionId}/messages (WidgetController::getMessages)
+      ✅ Liste messages de la session
 
-  ☐ 5.5 POST /api/client/sessions/create-link
-      ☐ Auth: API key client
-      ☐ Request: deployment_key, artisan_external_id, context, expires_in
-      ☐ Trouver tenant_link par external_id
-      ☐ Générer token sécurisé (signé)
-      ☐ Response: url, session_token, expires_at
+  ✅ 5.5 POST /api/editor/sessions/create-link (EditorController::createSessionLink)
+      ✅ Auth: editor.auth middleware
+      ✅ Request: deployment_id, external_id, context, expires_in
+      ✅ Trouver editor_link par external_id
+      ✅ Générer token whitelabel (wl_{deploymentId}_{random})
+      ✅ Response: url (/s/{token}), session_token, expires_at
 
-  ☐ 5.6 POST /api/client/users/link
-      ☐ Auth: API key client
-      ☐ Trouver user par email
-      ☐ Créer user_tenant_link
-      ☐ Response: link_id, success
+  ✅ 5.6 POST /api/editor/artisans/link (EditorController::linkArtisan)
+      ✅ Auth: editor.auth middleware
+      ✅ Trouver user par email
+      ✅ Créer UserEditorLink
+      ✅ Response: link_id, success
 
-  ☐ 5.7 POST /api/client/users/create-and-link
-      ☐ Créer user (role=artisan, password null)
-      ☐ Créer user_tenant_link
-      ☐ Si send_invitation: envoyer email
+  ✅ 5.7 POST /api/editor/artisans/create-and-link (EditorController::createAndLinkArtisan)
+      ✅ Créer user (role=artisan, password null)
+      ✅ Créer UserEditorLink
+      ✅ Si send_invitation: TODO email
 ```
 
-```
-☐ 6. WIDGET JAVASCRIPT
-  ☐ 6.1 loader.js
-      ☐ Lire data-deployment-key ou window.AiManagerConfig
-      ☐ Créer iframe avec src vers widget.html
-      ☐ Injecter dans body ou containerSelector
-      ☐ Exposer window.AiManagerWidget
-
-  ☐ 6.2 widget.html (dans iframe)
-      ☐ CSS: reset, variables, responsive
-      ☐ HTML: header, messages, input, bouton flottant
-      ☐ JS: communication postMessage avec parent
-
-  ☐ 6.3 Communication iframe ↔ parent
-      ☐ Parent → iframe: init(config), open(), close(), sendMessage()
-      ☐ Iframe → parent: ready, opened, closed, message:sent, message:received
-      ☐ Valider origin des messages
-
-  ☐ 6.4 API publique widget
-      ☐ AiManagerWidget.open()
-      ☐ AiManagerWidget.close()
-      ☐ AiManagerWidget.toggle()
-      ☐ AiManagerWidget.sendMessage(text)
-      ☐ AiManagerWidget.setContext(data)
-      ☐ AiManagerWidget.on(event, callback)
-      ☐ AiManagerWidget.destroy()
-
-  ☐ 6.5 Page standalone /s/{token}
-      ☐ Route: web.php GET /s/{token}
-      ☐ Controller: valider token, extraire session
-      ☐ View: page HTML minimale, widget plein écran
-      ☐ Meta viewport pour mobile
-```
+Fichiers créés:
+- `app/Http/Controllers/Api/Whitelabel/WidgetController.php`
+- `app/Http/Controllers/Api/Whitelabel/EditorController.php`
+- `routes/api.php` (mis à jour avec routes /whitelabel/* et /editor/*)
 
 ```
-☐ 7. SERVICE BRANDING
-  ☐ 7.1 BrandingResolver.php
-      ☐ Méthode resolve(AiSession $session): array
-      ☐ Cascade: agent → deployment → user → tenant_link
-      ☐ Méthode interpolate(array $branding, array $vars): array
-      ☐ Variables: {user.name}, {client.name}, {agent.name}
-      ☐ Regex pour remplacer {xxx.yyy}
-      ☐ Gérer valeurs manquantes (supprimer placeholder)
+✅ 6. WIDGET JAVASCRIPT
+  ✅ 6.1 loader.js (public/whitelabel/loader.js)
+      ✅ Lire data-deployment-key ou window.BatiramaWidgetConfig
+      ✅ Créer iframe avec src vers widget.html
+      ✅ Injecter dans body ou containerSelector
+      ✅ Exposer window.BatiramaWidget
+
+  ✅ 6.2 widget.html (public/whitelabel/widget.html)
+      ✅ CSS: reset, variables, responsive
+      ✅ HTML: header, messages, input, bouton flottant
+      ✅ JS: communication postMessage avec parent
+
+  ✅ 6.3 Communication iframe ↔ parent
+      ✅ Parent → iframe: batirama:send_message, batirama:set_context
+      ✅ Iframe → parent: batirama:ready, batirama:session_started, batirama:message, batirama:close
+      ✅ Valider origin des messages
+
+  ✅ 6.4 API publique widget (BatiramaWidget)
+      ✅ BatiramaWidget.open()
+      ✅ BatiramaWidget.close()
+      ✅ BatiramaWidget.toggle()
+      ✅ BatiramaWidget.sendMessage(text)
+      ✅ BatiramaWidget.setContext(data)
+      ✅ Callbacks: onReady, onMessage, onError, onSessionStart, onSessionEnd
+      ✅ BatiramaWidget.destroy()
+
+  ✅ 6.5 Page standalone /s/{token}
+      ✅ Route: web.php GET /s/{token} (StandaloneChatController)
+      ✅ Controller: valider token, extraire déploiement/session
+      ✅ View: resources/views/whitelabel/standalone.blade.php
+      ✅ Meta viewport pour mobile
+      ✅ View erreur: resources/views/whitelabel/error.blade.php
+```
+
+Fichiers créés:
+- `public/whitelabel/loader.js`
+- `public/whitelabel/widget.html`
+- `app/Http/Controllers/Whitelabel/StandaloneChatController.php`
+- `resources/views/whitelabel/standalone.blade.php`
+- `resources/views/whitelabel/error.blade.php`
+
+```
+✅ 7. SERVICE BRANDING
+  ✅ 7.1 BrandingResolver.php (app/Services/Whitelabel/BrandingResolver.php)
+      ✅ Méthode resolve(AiSession $session): array
+      ✅ Cascade: agent → deployment → user → editorLink
+      ✅ Méthode interpolate(array $branding, array $vars): array
+      ✅ Variables: {user.name}, {artisan.name}, {agent.name}, {artisan.company}
+      ✅ Regex pour remplacer {xxx.yyy}
+      ✅ Gérer valeurs manquantes (supprimer placeholder)
+      ✅ Méthode resolveForDeployment(AgentDeployment, ?UserEditorLink): array
 ```
 
 ---
@@ -3012,81 +3026,154 @@ $marketplaceRoles = [
 
 ### 17.7 Checklist Révisée Phase 1
 
+> **Statut** : ✅ PHASE 1 TERMINÉE (27 décembre 2025)
+
 ```
-☐ 1. MIGRATIONS (révisées)
-  ☐ 1.1 create_agent_deployments_table
-      ☐ editor_id (FK users) au lieu de client_id
-      ☐ Reste identique sinon
+✅ 1. MIGRATIONS (révisées) → COMPLÉTÉ
+  ✅ 1.1 create_agent_deployments_table
+      ✅ editor_id (FK users) au lieu de client_id
+      ✅ Reste identique sinon
+      → Fichier: 2025_12_27_000001_create_agent_deployments_table.php
 
-  ☐ 1.2 create_allowed_domains_table
-      ☐ Identique au CDC original
+  ✅ 1.2 create_allowed_domains_table
+      ✅ Identique au CDC original
+      → Fichier: 2025_12_27_000002_create_allowed_domains_table.php
 
-  ☐ 1.3 create_user_editor_links_table (ex user_tenant_links)
-      ☐ artisan_id, editor_id, external_id
-      ☐ branding, permissions (JSONB)
-      ☐ is_active, linked_at
+  ✅ 1.3 create_user_editor_links_table (ex user_tenant_links)
+      ✅ artisan_id, editor_id, external_id
+      ✅ branding, permissions (JSONB)
+      ✅ is_active, linked_at
+      → Fichier: 2025_12_27_000003_create_user_editor_links_table.php
 
-  ☐ 1.4 modify_users_table
-      ☐ ADD company_name VARCHAR(255) NULL
-      ☐ ADD company_info JSONB NULL
-      ☐ ADD branding JSONB NULL
-      ☐ ADD marketplace_enabled BOOLEAN DEFAULT FALSE
-      ☐ ADD api_key VARCHAR(100) NULL UNIQUE
-      ☐ ADD api_key_prefix VARCHAR(10) NULL
-      ☐ ADD max_deployments, max_sessions_month, max_messages_month
-      ☐ ADD current_month_sessions, current_month_messages
+  ✅ 1.4 modify_users_table
+      ✅ ADD company_name VARCHAR(255) NULL
+      ✅ ADD company_info JSONB NULL
+      ✅ ADD branding JSONB NULL
+      ✅ ADD marketplace_enabled BOOLEAN DEFAULT FALSE
+      ✅ ADD api_key VARCHAR(100) NULL UNIQUE
+      ✅ ADD api_key_prefix VARCHAR(10) NULL
+      ✅ ADD max_deployments, max_sessions_month, max_messages_month
+      ✅ ADD current_month_sessions, current_month_messages
+      → Fichier: 2025_12_27_000004_add_marketplace_columns_to_users_table.php
 
-  ☐ 1.5 modify_ai_sessions_table
-      ☐ ADD editor_link_id (FK user_editor_links)
-      ☐ ADD deployment_id (FK agent_deployments)
-      ☐ ADD particulier_id (FK users)
-      ☐ user_id existant = l'artisan
+  ✅ 1.5 modify_ai_sessions_table
+      ✅ ADD editor_link_id (FK user_editor_links)
+      ✅ ADD deployment_id (FK agent_deployments)
+      ✅ ADD particulier_id (FK users)
+      ✅ user_id existant = l'artisan
+      → Fichier: 2025_12_27_000005_add_whitelabel_columns_to_ai_sessions_table.php
 
-  ☐ 1.6 modify_agents_table
-      ☐ ADD deployment_mode VARCHAR(20) DEFAULT 'internal'
-      ☐ ADD is_whitelabel_enabled BOOLEAN DEFAULT FALSE
-      ☐ ADD whitelabel_config JSONB NULL
+  ✅ 1.6 modify_agents_table
+      ✅ ADD deployment_mode VARCHAR(20) DEFAULT 'internal'
+      ✅ ADD is_whitelabel_enabled BOOLEAN DEFAULT FALSE
+      ✅ ADD whitelabel_config JSONB NULL
+      → Fichier: 2025_12_27_000006_add_whitelabel_columns_to_agents_table.php
 
-☐ 2. MODELS
-  ☐ 2.1 AgentDeployment.php
-      ☐ editor() belongsTo User
-      ☐ agent() belongsTo Agent
-      ☐ allowedDomains() hasMany
-      ☐ sessions() hasMany
+✅ 2. MODELS → COMPLÉTÉ
+  ✅ 2.1 AgentDeployment.php (NOUVEAU)
+      ✅ editor() belongsTo User
+      ✅ agent() belongsTo Agent
+      ✅ allowedDomains() hasMany
+      ✅ sessions() hasMany
+      ✅ generateDeploymentKey(), isDomainAllowed(), resolveConfig()
 
-  ☐ 2.2 AllowedDomain.php
-      ☐ deployment() belongsTo
-      ☐ matches(string $host): bool
+  ✅ 2.2 AllowedDomain.php (NOUVEAU)
+      ✅ deployment() belongsTo
+      ✅ matches(string $host): bool (wildcards supportés)
 
-  ☐ 2.3 UserEditorLink.php
-      ☐ artisan() belongsTo User
-      ☐ editor() belongsTo User
-      ☐ sessions() hasMany AiSession
+  ✅ 2.3 UserEditorLink.php (NOUVEAU)
+      ✅ artisan() belongsTo User
+      ✅ editor() belongsTo User
+      ✅ sessions() hasMany AiSession
+      ✅ hasPermission(), resolveBranding()
 
-  ☐ 2.4 Modifier User.php
-      ☐ editorLinks() hasMany (en tant qu'artisan)
-      ☐ linkedArtisans() hasMany (en tant qu'éditeur)
-      ☐ deployments() hasMany (en tant qu'éditeur)
-      ☐ isArtisan(), isEditeur(), isFabricant(), isParticulier()
-      ☐ generateApiKey()
+  ✅ 2.4 Modifier User.php
+      ✅ editorLinks() hasMany (en tant qu'artisan)
+      ✅ linkedArtisans() hasMany (en tant qu'éditeur)
+      ✅ deployments() hasMany (en tant qu'éditeur)
+      ✅ isArtisan(), isEditeur(), isFabricant(), isParticulier()
+      ✅ generateApiKey(), hasSessionQuotaRemaining()
 
-  ☐ 2.5 Modifier AiSession.php
-      ☐ editorLink() belongsTo
-      ☐ deployment() belongsTo
-      ☐ particulier() belongsTo User
+  ✅ 2.5 Modifier AiSession.php
+      ✅ editorLink() belongsTo
+      ✅ deployment() belongsTo
+      ✅ particulier() belongsTo User
+      ✅ isWhitelabelSession(), getArtisan(), resolveBranding()
 
-☐ 3. SEEDER RÔLES MARKETPLACE
-  ☐ 3.1 Nouvelles permissions (voir 17.4)
-  ☐ 3.2 Rôle fabricant
-  ☐ 3.3 Rôle artisan
-  ☐ 3.4 Rôle editeur
-  ☐ 3.5 Rôle particulier
+  ✅ 2.6 Modifier Agent.php
+      ✅ deployments() hasMany
+      ✅ isWhitelabelEnabled(), isSharedMode(), isDedicatedMode()
+      ✅ getDefaultBranding(), allowsPromptOverride()
 
-☐ 4. SWAGGER
-  ☐ 4.1 composer require darkaonline/l5-swagger
-  ☐ 4.2 php artisan vendor:publish --provider "L5Swagger\L5SwaggerServiceProvider"
-  ☐ 4.3 Configurer config/l5-swagger.php
-  ☐ 4.4 Créer Controller de base avec annotations OpenAPI
+✅ 3. SEEDER RÔLES MARKETPLACE → COMPLÉTÉ
+  ✅ 3.1 Nouvelles permissions (marketplace.*, orders.*, quotes.*, whitelabel.*, files.*, stats.*)
+  ✅ 3.2 Rôle fabricant
+  ✅ 3.3 Rôle artisan
+  ✅ 3.4 Rôle editeur
+  ✅ 3.5 Rôle particulier
+  → Fichier: database/seeders/MarketplaceRolesSeeder.php
+
+✅ 4. FILAMENT RESOURCES → COMPLÉTÉ
+  ✅ 4.1 AgentDeploymentResource (NOUVEAU)
+      ✅ Table: colonnes (agent, editor, mode, domains, sessions, status)
+      ✅ Form: Tabs (Info, Domaines, Quotas, Branding, Config avancée)
+      ✅ Actions: Copier clé, Régénérer clé
+      → Fichier: app/Filament/Resources/AgentDeploymentResource.php
+
+  ✅ 4.2 UserEditorLinkResource (NOUVEAU)
+      ✅ Table: colonnes (artisan, editor, external_id, sessions, status)
+      ✅ Form: Liaison, Branding, Permissions
+      → Fichier: app/Filament/Resources/UserEditorLinkResource.php
+
+  ✅ 4.3 Modifier UserResource
+      ✅ Tabs: Informations, Entreprise, Branding, API & Quotas
+      ✅ Actions: Générer API Key, RAZ compteurs
+
+  ✅ 4.4 Modifier AgentResource
+      ✅ Tab Whitelabel: config, branding défaut, permissions éditeurs
+
+  ✅ 4.5 Modifier AiSessionResource
+      ✅ Colonnes: deployment, editor, artisan
+      ✅ Filtres: whitelabel_only, deployment
+
+✅ 5. MIDDLEWARES SÉCURITÉ → COMPLÉTÉ
+  ✅ 5.1 ValidateDeploymentKey.php
+      ✅ Extrait deployment_key (header X-Deployment-Key ou query)
+      ✅ Cache 5 minutes
+      ✅ Injecte deployment dans request->attributes
+
+  ✅ 5.2 ValidateDeploymentDomain.php
+      ✅ Extrait Origin/Referer
+      ✅ Vérifie isDomainAllowed()
+      ✅ Support localhost en dev
+
+  ✅ 5.3 RateLimitDeployment.php
+      ✅ Rate limit par IP (Redis/cache)
+      ✅ Rate limit global déploiement
+      ✅ Headers X-RateLimit-*
+
+  ✅ 5.4 CheckEditorQuota.php
+      ✅ Vérifie quotas mensuels éditeur
+      ✅ Vérifie quotas journaliers déploiement
+
+  ✅ 5.5 DynamicCors.php
+      ✅ CORS dynamique basé sur allowed_domains
+      ✅ Gère preflight OPTIONS
+
+  ✅ 5.6 EditorApiAuth.php
+      ✅ Auth via API key (Bearer ou X-API-Key)
+      ✅ Rate limiting éditeur
+
+  → Enregistrés dans bootstrap/app.php avec alias:
+    deployment.key, deployment.domain, deployment.rate, deployment.cors
+    editor.quota, editor.auth, partner.auth
+
+✅ 6. SWAGGER → COMPLÉTÉ
+  ✅ 6.1 composer require darkaonline/l5-swagger
+  ✅ 6.2 config/l5-swagger.php créé
+  ✅ 6.3 Annotations OpenAPI créées
+      → app/OpenApi/OpenApiSpec.php (schemas de base)
+      → app/OpenApi/WhitelabelEndpoints.php (endpoints documentés)
 ```
 
 ### 17.8 Processus de Développement
