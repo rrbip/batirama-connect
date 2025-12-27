@@ -116,7 +116,7 @@ class CrawlUrlJob implements ShouldQueue
             }
 
             // Contenu non modifié (304) - garder le contenu existant
-            if ($result['not_modified']) {
+            if ($result['not_modified'] ?? false) {
                 $crawlUrl->update(['http_status' => 304]);
 
                 $this->urlEntry->update([
@@ -135,10 +135,10 @@ class CrawlUrlJob implements ShouldQueue
             // Mettre à jour les infos de l'URL
             $crawlUrl->update([
                 'http_status' => $result['status'],
-                'content_type' => $result['content_type'],
-                'content_length' => $result['content_length'],
-                'etag' => $result['etag'],
-                'last_modified' => $result['last_modified'],
+                'content_type' => $result['content_type'] ?? 'text/html',
+                'content_length' => $result['content_length'] ?? 0,
+                'etag' => $result['etag'] ?? null,
+                'last_modified' => $result['last_modified'] ?? null,
             ]);
 
             // Vérifier le code HTTP
