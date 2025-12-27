@@ -138,15 +138,13 @@ class FaqsPage extends Page implements HasForms
         do {
             $response = $qdrantService->scroll(
                 collection: self::LEARNED_RESPONSES_COLLECTION,
+                limit: $limit,
+                offset: $offset,
                 filter: [
                     'must' => [
                         ['key' => 'agent_slug', 'match' => ['value' => $agentSlug]]
                     ]
-                ],
-                limit: $limit,
-                offset: $offset,
-                withPayload: true,
-                withVector: false
+                ]
             );
 
             if (empty($response['points'])) {
