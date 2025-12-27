@@ -155,34 +155,6 @@ namespace App\OpenApi;
  *     )
  * )
  *
- * @OA\Post(
- *     path="/whitelabel/sessions/{session_id}/messages/stream",
- *     summary="Envoyer un message (streaming)",
- *     description="Envoie un message et reçoit la réponse en streaming SSE.",
- *     operationId="streamWhitelabelMessage",
- *     tags={"Whitelabel Messages"},
- *     security={{"deploymentKey": {}}},
- *     @OA\Parameter(
- *         name="session_id",
- *         in="path",
- *         required=true,
- *         description="UUID de la session",
- *         @OA\Schema(type="string", format="uuid")
- *     ),
- *     @OA\RequestBody(
- *         required=true,
- *         @OA\JsonContent(ref="#/components/schemas/SendMessageRequest")
- *     ),
- *     @OA\Response(
- *         response=200,
- *         description="Stream SSE de la réponse",
- *         @OA\MediaType(
- *             mediaType="text/event-stream",
- *             @OA\Schema(type="string")
- *         )
- *     )
- * )
- *
  * ═══════════════════════════════════════════════════════════════
  * WHITELABEL CONFIG ENDPOINTS
  * ═══════════════════════════════════════════════════════════════
