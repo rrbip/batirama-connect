@@ -96,15 +96,17 @@
             {{-- Barre de recherche --}}
             <div class="mb-4">
                 <div class="relative">
-                    <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-                        <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
-                    </div>
                     <input
                         type="text"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Rechercher dans les questions et réponses..."
-                        class="fi-input block w-full rounded-lg border-none bg-white py-2.5 pl-11 pr-10 text-base text-gray-950 shadow-sm ring-1 ring-gray-950/10 transition duration-75 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500 sm:text-sm sm:leading-6"
+                        class="fi-input block w-full rounded-lg border-none bg-white py-2.5 pl-4 pr-12 text-base text-gray-950 shadow-sm ring-1 ring-gray-950/10 transition duration-75 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500 sm:text-sm sm:leading-6"
                     />
+                    <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                        @if(empty($search))
+                            <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
+                        @endif
+                    </div>
                     @if(!empty($search))
                         <button
                             type="button"
