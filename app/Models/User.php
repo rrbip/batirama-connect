@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 
 class User extends Authenticatable implements FilamentUser
 {
@@ -31,11 +32,24 @@ class User extends Authenticatable implements FilamentUser
         'email',
         'password',
         'email_verified_at',
+        // Marketplace columns
+        'company_name',
+        'company_info',
+        'branding',
+        'marketplace_enabled',
+        'api_key',
+        'api_key_prefix',
+        'max_deployments',
+        'max_sessions_month',
+        'max_messages_month',
+        'current_month_sessions',
+        'current_month_messages',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'api_key',
     ];
 
     protected function casts(): array
@@ -43,6 +57,9 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'company_info' => 'array',
+            'branding' => 'array',
+            'marketplace_enabled' => 'boolean',
         ];
     }
 
@@ -116,5 +133,217 @@ class User extends Authenticatable implements FilamentUser
     public function getFilamentName(): string
     {
         return $this->name;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS MARKETPLACE
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Liens vers les éditeurs (en tant qu'artisan).
+     */
+    public function editorLinks(): HasMany
+    {
+        return $this->hasMany(UserEditorLink::class, 'artisan_id');
+    }
+
+    /**
+     * Artisans liés (en tant qu'éditeur).
+     */
+    public function linkedArtisans(): HasMany
+    {
+        return $this->hasMany(UserEditorLink::class, 'editor_id');
+    }
+
+    /**
+     * Déploiements d'agents (en tant qu'éditeur).
+     */
+    public function deployments(): HasMany
+    {
+        return $this->hasMany(AgentDeployment::class, 'editor_id');
+    }
+
+    /**
+     * Sessions en tant que particulier (client final).
+     */
+    public function sessionsAsParticulier(): HasMany
+    {
+        return $this->hasMany(AiSession::class, 'particulier_id');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES MARKETPLACE - RÔLES
+    // ─────────────────────────────────────────────────────────────────
+
+    public function isArtisan(): bool
+    {
+        return $this->hasRole('artisan');
+    }
+
+    public function isEditeur(): bool
+    {
+        return $this->hasRole('editeur');
+    }
+
+    public function isFabricant(): bool
+    {
+        return $this->hasRole('fabricant');
+    }
+
+    public function isParticulier(): bool
+    {
+        return $this->hasRole('particulier');
+    }
+
+    public function isMetreur(): bool
+    {
+        return $this->hasRole('metreur');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES MARKETPLACE - API KEY
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Génère une nouvelle API key pour cet utilisateur.
+     */
+    public function generateApiKey(?string $prefix = null): string
+    {
+        $prefix = $prefix ?? $this->getDefaultApiKeyPrefix();
+        $key = $prefix . '_' . Str::random(40);
+
+        $this->update([
+            'api_key' => $key,
+            'api_key_prefix' => $prefix,
+        ]);
+
+        return $key;
+    }
+
+    /**
+     * Retourne le préfixe par défaut selon le rôle.
+     */
+    protected function getDefaultApiKeyPrefix(): string
+    {
+        if ($this->isEditeur()) {
+            return 'edt';
+        }
+        if ($this->isFabricant()) {
+            return 'fab';
+        }
+        if ($this->isArtisan()) {
+            return 'art';
+        }
+
+        return 'usr';
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES MARKETPLACE - QUOTAS
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si le quota de sessions du mois est atteint.
+     */
+    public function hasSessionQuotaRemaining(): bool
+    {
+        if ($this->max_sessions_month === null) {
+            return true;
+        }
+
+        return $this->current_month_sessions < $this->max_sessions_month;
+    }
+
+    /**
+     * Vérifie si le quota de messages du mois est atteint.
+     */
+    public function hasMessageQuotaRemaining(): bool
+    {
+        if ($this->max_messages_month === null) {
+            return true;
+        }
+
+        return $this->current_month_messages < $this->max_messages_month;
+    }
+
+    /**
+     * Vérifie si le quota de déploiements est atteint.
+     */
+    public function hasDeploymentQuotaRemaining(): bool
+    {
+        if ($this->max_deployments === null) {
+            return true;
+        }
+
+        return $this->deployments()->count() < $this->max_deployments;
+    }
+
+    /**
+     * Incrémente le compteur de sessions du mois.
+     */
+    public function incrementSessionCount(): void
+    {
+        $this->increment('current_month_sessions');
+    }
+
+    /**
+     * Incrémente le compteur de messages du mois.
+     */
+    public function incrementMessageCount(): void
+    {
+        $this->increment('current_month_messages');
+    }
+
+    /**
+     * Réinitialise les compteurs mensuels.
+     */
+    public function resetMonthlyCounters(): void
+    {
+        $this->update([
+            'current_month_sessions' => 0,
+            'current_month_messages' => 0,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES MARKETPLACE - LIAISON ARTISAN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Lie un artisan à cet éditeur.
+     */
+    public function linkArtisan(User $artisan, string $externalId, array $data = []): UserEditorLink
+    {
+        return UserEditorLink::create([
+            'artisan_id' => $artisan->id,
+            'editor_id' => $this->id,
+            'external_id' => $externalId,
+            'branding' => $data['branding'] ?? null,
+            'permissions' => $data['permissions'] ?? null,
+            'is_active' => true,
+            'linked_at' => now(),
+        ]);
+    }
+
+    /**
+     * Vérifie si un artisan est lié à cet éditeur.
+     */
+    public function hasLinkedArtisan(User $artisan): bool
+    {
+        return $this->linkedArtisans()
+            ->where('artisan_id', $artisan->id)
+            ->where('is_active', true)
+            ->exists();
+    }
+
+    /**
+     * Trouve le lien avec un éditeur par external_id.
+     */
+    public function findEditorLinkByExternalId(User $editor, string $externalId): ?UserEditorLink
+    {
+        return UserEditorLink::where('editor_id', $editor->id)
+            ->where('external_id', $externalId)
+            ->where('is_active', true)
+            ->first();
     }
 }

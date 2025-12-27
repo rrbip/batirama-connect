@@ -48,6 +48,10 @@ class Agent extends Model
         'default_extraction_method',
         'default_chunk_strategy',
         'use_category_filtering',
+        // Whitelabel columns
+        'deployment_mode',
+        'is_whitelabel_enabled',
+        'whitelabel_config',
     ];
 
     protected $casts = [
@@ -61,6 +65,8 @@ class Agent extends Model
         'allow_attachments' => 'boolean',
         'allow_public_access' => 'boolean',
         'use_category_filtering' => 'boolean',
+        'is_whitelabel_enabled' => 'boolean',
+        'whitelabel_config' => 'array',
     ];
 
     public function tenant(): BelongsTo
@@ -203,5 +209,105 @@ GUARDRAILS;
     public function getDefaultChunkStrategy(): string
     {
         return $this->default_chunk_strategy ?? 'sentence';
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Les déploiements de cet agent.
+     */
+    public function deployments(): HasMany
+    {
+        return $this->hasMany(AgentDeployment::class);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si cet agent est disponible en whitelabel.
+     */
+    public function isWhitelabelEnabled(): bool
+    {
+        return $this->is_whitelabel_enabled === true;
+    }
+
+    /**
+     * Vérifie si cet agent est en mode interne uniquement.
+     */
+    public function isInternalOnly(): bool
+    {
+        return $this->deployment_mode === 'internal';
+    }
+
+    /**
+     * Vérifie si cet agent est partagé (même config pour tous).
+     */
+    public function isSharedMode(): bool
+    {
+        return $this->deployment_mode === 'shared';
+    }
+
+    /**
+     * Vérifie si cet agent est dédié (config personnalisable par déploiement).
+     */
+    public function isDedicatedMode(): bool
+    {
+        return $this->deployment_mode === 'dedicated';
+    }
+
+    /**
+     * Retourne le branding par défaut pour les déploiements.
+     */
+    public function getDefaultBranding(): array
+    {
+        return $this->whitelabel_config['default_branding'] ?? [
+            'chat_title' => $this->name,
+            'welcome_message' => "Bonjour, je suis {$this->name}. Comment puis-je vous aider ?",
+            'primary_color' => $this->color ?? '#3B82F6',
+        ];
+    }
+
+    /**
+     * Vérifie si l'override de prompt est autorisé.
+     */
+    public function allowsPromptOverride(): bool
+    {
+        return $this->whitelabel_config['allow_prompt_override'] ?? false;
+    }
+
+    /**
+     * Vérifie si l'override de RAG est autorisé.
+     */
+    public function allowsRagOverride(): bool
+    {
+        return $this->whitelabel_config['allow_rag_override'] ?? false;
+    }
+
+    /**
+     * Vérifie si l'override de modèle est autorisé.
+     */
+    public function allowsModelOverride(): bool
+    {
+        return $this->whitelabel_config['allow_model_override'] ?? false;
+    }
+
+    /**
+     * Retourne le rate limit minimum imposé.
+     */
+    public function getMinRateLimit(): int
+    {
+        return $this->whitelabel_config['min_rate_limit'] ?? 30;
+    }
+
+    /**
+     * Vérifie si le branding "Powered by" est obligatoire.
+     */
+    public function requiresPoweredByBranding(): bool
+    {
+        return $this->whitelabel_config['required_branding'] ?? true;
     }
 }

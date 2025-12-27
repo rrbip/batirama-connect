@@ -276,6 +276,91 @@ class AgentResource extends Resource
                                             ->helperText('Instructions données au modèle pour définir son comportement'),
                                     ]),
                             ]),
+
+                        Forms\Components\Tabs\Tab::make('Whitelabel')
+                            ->icon('heroicon-o-rocket-launch')
+                            ->schema([
+                                Forms\Components\Section::make('Configuration Whitelabel')
+                                    ->description('Permettre aux éditeurs tiers d\'intégrer cet agent dans leurs applications')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('is_whitelabel_enabled')
+                                            ->label('Activer le whitelabel')
+                                            ->helperText('Permet aux éditeurs de créer des déploiements de cet agent')
+                                            ->live(),
+
+                                        Forms\Components\Select::make('deployment_mode')
+                                            ->label('Mode de déploiement')
+                                            ->options([
+                                                'internal' => 'Interne uniquement (pas de whitelabel)',
+                                                'shared' => 'Partagé (même RAG pour tous)',
+                                                'dedicated' => 'Dédié (collection RAG par déploiement)',
+                                            ])
+                                            ->default('internal')
+                                            ->helperText('Détermine comment le RAG est partagé entre les déploiements')
+                                            ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
+                                    ])
+                                    ->columns(2),
+
+                                Forms\Components\Section::make('Branding par défaut')
+                                    ->description('Valeurs par défaut pour les nouveaux déploiements (peuvent être surchargées)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('whitelabel_config.default_branding.chat_title')
+                                            ->label('Titre du chat')
+                                            ->placeholder('Assistant IA'),
+
+                                        Forms\Components\Textarea::make('whitelabel_config.default_branding.welcome_message')
+                                            ->label('Message de bienvenue')
+                                            ->rows(2)
+                                            ->placeholder('Bonjour, comment puis-je vous aider ?'),
+
+                                        Forms\Components\ColorPicker::make('whitelabel_config.default_branding.primary_color')
+                                            ->label('Couleur principale'),
+
+                                        Forms\Components\TextInput::make('whitelabel_config.default_branding.signature')
+                                            ->label('Signature')
+                                            ->placeholder('Powered by Batirama'),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
+
+                                Forms\Components\Section::make('Permissions éditeurs')
+                                    ->description('Ce que les éditeurs peuvent personnaliser')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('whitelabel_config.allow_prompt_override')
+                                            ->label('Override du system prompt')
+                                            ->helperText('Permettre aux éditeurs d\'ajouter des instructions au prompt'),
+
+                                        Forms\Components\Toggle::make('whitelabel_config.allow_rag_override')
+                                            ->label('Override de la config RAG')
+                                            ->helperText('Permettre de modifier max_results, min_score, etc.'),
+
+                                        Forms\Components\Toggle::make('whitelabel_config.allow_model_override')
+                                            ->label('Override du modèle LLM')
+                                            ->helperText('Permettre de changer le modèle LLM'),
+
+                                        Forms\Components\Toggle::make('whitelabel_config.required_branding')
+                                            ->label('Branding "Powered by" obligatoire')
+                                            ->default(true)
+                                            ->helperText('Forcer l\'affichage du branding Batirama'),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
+
+                                Forms\Components\Section::make('Limites')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('whitelabel_config.min_rate_limit')
+                                            ->label('Rate limit minimum (req/min)')
+                                            ->numeric()
+                                            ->default(30)
+                                            ->helperText('Les éditeurs ne peuvent pas descendre en dessous'),
+
+                                        Forms\Components\Placeholder::make('deployments_count')
+                                            ->label('Déploiements actifs')
+                                            ->content(fn ($record) => $record?->deployments()->where('is_active', true)->count() ?? 0),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
+                            ]),
                     ])
                     ->columnSpanFull(),
             ]);
@@ -308,6 +393,20 @@ class AgentResource extends Resource
                     ->label('Public')
                     ->boolean(),
 
+                Tables\Columns\IconColumn::make('is_whitelabel_enabled')
+                    ->label('Whitelabel')
+                    ->boolean()
+                    ->trueIcon('heroicon-o-rocket-launch')
+                    ->falseIcon('heroicon-o-minus')
+                    ->trueColor('success')
+                    ->falseColor('gray'),
+
+                Tables\Columns\TextColumn::make('deployments_count')
+                    ->label('Déploiements')
+                    ->counts('deployments')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 Tables\Columns\TextColumn::make('sessions_count')
                     ->label('Sessions')
                     ->counts('sessions')
@@ -330,6 +429,9 @@ class AgentResource extends Resource
 
                 Tables\Filters\TernaryFilter::make('allow_public_access')
                     ->label('Accès public'),
+
+                Tables\Filters\TernaryFilter::make('is_whitelabel_enabled')
+                    ->label('Whitelabel'),
             ])
             ->actions([
                 Tables\Actions\Action::make('test')

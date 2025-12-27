@@ -2548,4 +2548,575 @@ Semaine 4 (Phase 4 + Buffer)
 
 ---
 
+## 17. RÉVISION : Architecture Marketplace Centralisée
+
+> **Date révision** : Décembre 2025
+> **Changement majeur** : Tous les acteurs sont des utilisateurs avec des rôles spécifiques
+
+### 17.1 Principe Fondamental
+
+**AVANT** : Table `clients` séparée pour les éditeurs whitelabel
+**APRÈS** : Tous les acteurs dans la table `users` avec des rôles marketplace
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ARCHITECTURE MARKETPLACE CENTRALISÉE                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  TOUS LES ACTEURS = USERS avec RÔLES                                        │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │                           TABLE: users                                  ││
+│  │                                                                         ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    ││
+│  │  │  FABRICANT  │  │   ARTISAN   │  │   EDITEUR   │  │ PARTICULIER │    ││
+│  │  │             │  │             │  │             │  │             │    ││
+│  │  │ Weber,      │  │ Agents IA   │  │ EBP, SAGE,  │  │ Demandeurs  │    ││
+│  │  │ Porcelanosa │  │ Devis/Fact. │  │ Logiciels   │  │ de devis    │    ││
+│  │  │ Grohe...    │  │ Commandes   │  │ tierces     │  │ (clients)   │    ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    ││
+│  │                                                                         ││
+│  │  + Rôles existants : super-admin, admin, metreur, validator             ││
+│  │                                                                         ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  RELATIONS ENTRE ACTEURS                                                    │
+│                                                                             │
+│  ┌─────────────┐         ┌─────────────┐         ┌─────────────┐           │
+│  │   EDITEUR   │◄───────►│   ARTISAN   │◄───────►│ PARTICULIER │           │
+│  │   (EBP)     │  user_  │  (Durant)   │ sessions│  (Martin)   │           │
+│  └─────────────┘  editor │             │         └─────────────┘           │
+│        │         _links  └─────────────┘                                    │
+│        │                        │                                           │
+│        ▼                        ▼                                           │
+│  ┌─────────────┐         ┌─────────────┐                                   │
+│  │ Deployments │         │ FABRICANT   │ ◄─── Commandes matériaux          │
+│  │ (agents)    │         │ (Weber...)  │                                   │
+│  └─────────────┘         └─────────────┘                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.2 Acteurs de la Marketplace
+
+| Rôle | Description | Fonctionnalités | Exemples |
+|------|-------------|-----------------|----------|
+| **fabricant** | Fabricant de matériaux B2B | Catalogue produits, gestion commandes, expéditions | Weber, Porcelanosa, Grohe, Knauf |
+| **artisan** | Professionnel du BTP | Agents IA, devis/factures, commande matériaux | Durant Peinture |
+| **editeur** | Éditeur logiciel tiers | Déploiement agents whitelabel, API, webhooks | EBP, SAGE |
+| **particulier** | Client final | Demande de devis, chat avec agent | M. Martin |
+| **metreur** | Validateur technique | Validation pré-devis, promotion learned | Expert interne |
+| **admin** | Administrateur plateforme | Gestion agents, utilisateurs, stats | Équipe interne |
+
+> ⚠️ **Distinction importante** : Les **fabricants** (Weber, Porcelanosa) produisent les matériaux.
+> Les **négociants** (Point.P, BigMat) les revendent → Hors scope initial de la marketplace.
+
+### 17.3 Tables Révisées
+
+#### SUPPRIMÉ : Table `clients`
+→ Remplacée par users avec role `editeur`
+
+#### RENOMMÉ : `user_tenant_links` → `user_editor_links`
+
+```sql
+-- Lie un artisan à un éditeur (EBP peut avoir N artisans)
+CREATE TABLE user_editor_links (
+    id              BIGSERIAL PRIMARY KEY,
+
+    -- L'artisan (user avec role artisan)
+    artisan_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- L'éditeur (user avec role editeur)
+    editor_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- ID de l'artisan dans le système de l'éditeur
+    external_id     VARCHAR(100) NOT NULL,  -- "DUR-001" chez EBP
+
+    -- Branding spécifique pour cet éditeur (override user.branding)
+    branding        JSONB NULL,
+
+    -- Permissions spécifiques chez cet éditeur
+    permissions     JSONB NULL,
+
+    is_active       BOOLEAN DEFAULT TRUE,
+    linked_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(artisan_id, editor_id),
+    UNIQUE(editor_id, external_id)
+);
+
+CREATE INDEX idx_editor_links_artisan ON user_editor_links(artisan_id);
+CREATE INDEX idx_editor_links_editor ON user_editor_links(editor_id);
+CREATE INDEX idx_editor_links_external ON user_editor_links(external_id);
+```
+
+#### MODIFIÉ : `agent_deployments`
+
+```sql
+-- AVANT: client_id BIGINT REFERENCES clients(id)
+-- APRÈS:
+ALTER TABLE agent_deployments
+    RENAME COLUMN client_id TO editor_id;
+-- editor_id = user avec role 'editeur' qui déploie cet agent
+```
+
+#### MODIFIÉ : `ai_sessions`
+
+```sql
+ALTER TABLE ai_sessions
+    ADD COLUMN editor_link_id BIGINT NULL REFERENCES user_editor_links(id),
+    ADD COLUMN deployment_id BIGINT NULL REFERENCES agent_deployments(id),
+    ADD COLUMN particulier_id BIGINT NULL REFERENCES users(id);
+-- user_id existant = l'artisan (si session liée à un artisan)
+-- particulier_id = le client final (M. Martin)
+-- editor_link_id = le lien artisan↔éditeur utilisé (si via éditeur)
+-- deployment_id = le déploiement utilisé
+
+CREATE INDEX idx_sessions_editor_link ON ai_sessions(editor_link_id);
+CREATE INDEX idx_sessions_deployment ON ai_sessions(deployment_id);
+CREATE INDEX idx_sessions_particulier ON ai_sessions(particulier_id);
+```
+
+#### MODIFIÉ : `users`
+
+```sql
+-- Colonnes à ajouter à la table users existante
+ALTER TABLE users ADD COLUMN company_name VARCHAR(255) NULL;
+-- Nom de l'entreprise (pour artisans, éditeurs, fabricants)
+
+ALTER TABLE users ADD COLUMN company_info JSONB NULL;
+-- {
+--   "siret": "12345678901234",
+--   "address": "12 rue des Artisans, 75011 Paris",
+--   "phone": "01 23 45 67 89",
+--   "website": "https://durant-peinture.fr"
+-- }
+
+ALTER TABLE users ADD COLUMN branding JSONB NULL;
+-- Branding par défaut (pour artisans principalement)
+-- {
+--   "welcome_message": "Bonjour, je suis l'assistant de {user.company_name}",
+--   "primary_color": "#E53935",
+--   "logo_url": "https://...",
+--   "signature": "L'équipe Durant Peinture"
+-- }
+
+ALTER TABLE users ADD COLUMN marketplace_enabled BOOLEAN DEFAULT FALSE;
+-- Accès marketplace activé
+
+ALTER TABLE users ADD COLUMN api_key VARCHAR(100) NULL UNIQUE;
+ALTER TABLE users ADD COLUMN api_key_prefix VARCHAR(10) NULL;
+-- Pour les éditeurs et fabricants qui ont besoin d'accès API
+
+-- Quotas et limites (pour éditeurs)
+ALTER TABLE users ADD COLUMN max_deployments INTEGER NULL;
+ALTER TABLE users ADD COLUMN max_sessions_month INTEGER NULL;
+ALTER TABLE users ADD COLUMN max_messages_month INTEGER NULL;
+ALTER TABLE users ADD COLUMN current_month_sessions INTEGER DEFAULT 0;
+ALTER TABLE users ADD COLUMN current_month_messages INTEGER DEFAULT 0;
+```
+
+### 17.4 Rôles et Permissions Marketplace
+
+```php
+// À ajouter au RolePermissionSeeder existant
+
+// ═══════════════════════════════════════════════════════════════════
+// NOUVELLES PERMISSIONS
+// ═══════════════════════════════════════════════════════════════════
+
+$newPermissions = [
+    // Marketplace
+    ['name' => 'Accès marketplace', 'slug' => 'marketplace.access', 'group_name' => 'marketplace'],
+    ['name' => 'Gérer catalogue', 'slug' => 'catalog.manage', 'group_name' => 'marketplace'],
+
+    // Commandes
+    ['name' => 'Voir commandes', 'slug' => 'orders.view', 'group_name' => 'orders'],
+    ['name' => 'Voir ses commandes', 'slug' => 'orders.view_own', 'group_name' => 'orders'],
+    ['name' => 'Créer commande', 'slug' => 'orders.create', 'group_name' => 'orders'],
+    ['name' => 'Traiter commandes', 'slug' => 'orders.process', 'group_name' => 'orders'],
+    ['name' => 'Gérer livraisons', 'slug' => 'deliveries.manage', 'group_name' => 'orders'],
+
+    // Devis
+    ['name' => 'Créer devis', 'slug' => 'quotes.create', 'group_name' => 'quotes'],
+    ['name' => 'Voir ses devis', 'slug' => 'quotes.view_own', 'group_name' => 'quotes'],
+
+    // Déploiements whitelabel
+    ['name' => 'Gérer déploiements', 'slug' => 'deployments.manage', 'group_name' => 'whitelabel'],
+    ['name' => 'Gérer domaines', 'slug' => 'domains.manage', 'group_name' => 'whitelabel'],
+    ['name' => 'Lier artisans', 'slug' => 'artisans.link', 'group_name' => 'whitelabel'],
+    ['name' => 'Voir artisans liés', 'slug' => 'artisans.view', 'group_name' => 'whitelabel'],
+    ['name' => 'Créer liens session', 'slug' => 'sessions.create_link', 'group_name' => 'whitelabel'],
+    ['name' => 'Gérer branding', 'slug' => 'branding.manage', 'group_name' => 'whitelabel'],
+
+    // Sessions IA (compléments)
+    ['name' => 'Créer session', 'slug' => 'ai-sessions.create', 'group_name' => 'ai'],
+    ['name' => 'Voir ses sessions', 'slug' => 'ai-sessions.view_own', 'group_name' => 'ai'],
+    ['name' => 'Participer session', 'slug' => 'ai-sessions.participate', 'group_name' => 'ai'],
+
+    // Fichiers
+    ['name' => 'Uploader fichiers', 'slug' => 'files.upload', 'group_name' => 'files'],
+
+    // Stats
+    ['name' => 'Voir statistiques', 'slug' => 'stats.view', 'group_name' => 'stats'],
+];
+
+// ═══════════════════════════════════════════════════════════════════
+// NOUVEAUX RÔLES MARKETPLACE
+// ═══════════════════════════════════════════════════════════════════
+
+$marketplaceRoles = [
+    [
+        'name' => 'Fabricant',
+        'slug' => 'fabricant',
+        'description' => 'Fabricant de matériaux B2B sur la marketplace',
+        'is_system' => true,
+        'permissions' => [
+            'marketplace.access',
+            'catalog.manage',
+            'orders.view',
+            'orders.process',
+            'deliveries.manage',
+            'api.access',
+        ],
+    ],
+    [
+        'name' => 'Artisan',
+        'slug' => 'artisan',
+        'description' => 'Professionnel BTP - Agents IA, devis, commandes',
+        'is_system' => true,
+        'permissions' => [
+            'agents.view',
+            'ai-sessions.create',
+            'ai-sessions.view_own',
+            'files.upload',
+            'quotes.create',
+            'quotes.view_own',
+            'orders.create',
+            'orders.view_own',
+            'marketplace.access',
+        ],
+    ],
+    [
+        'name' => 'Éditeur',
+        'slug' => 'editeur',
+        'description' => 'Éditeur logiciel tiers (intégration whitelabel)',
+        'is_system' => true,
+        'permissions' => [
+            'deployments.manage',
+            'domains.manage',
+            'artisans.link',
+            'artisans.view',
+            'sessions.create_link',
+            'webhooks.manage',
+            'stats.view',
+            'api.access',
+            'branding.manage',
+        ],
+    ],
+    [
+        'name' => 'Particulier',
+        'slug' => 'particulier',
+        'description' => 'Client final demandeur de devis',
+        'is_system' => true,
+        'permissions' => [
+            'ai-sessions.participate',
+            'files.upload',
+            'quotes.view_own',
+        ],
+    ],
+];
+```
+
+### 17.5 Cas Concret Révisé : Expert BTP via EBP
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        PARCOURS COMPLET - VERSION MARKETPLACE               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ACTEURS (tous dans table users) :                                          │
+│  • EBP (role: editeur) = Éditeur logiciel                                   │
+│  • Durant Peinture (role: artisan) = Artisan peintre                        │
+│  • M. Martin (role: particulier) = Client final                             │
+│  • Weber (role: fabricant) = Fabricant colles/enduits                       │
+│  • Porcelanosa (role: fabricant) = Fabricant carrelage                      │
+│  • Expert BTP = Agent IA déployé                                            │
+│                                                                             │
+│  ════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  0. SETUP (fait une fois)                                                   │
+│     ┌─────────────┐                                                        │
+│     │   ADMIN     │ Crée le user EBP avec role "editeur"                   │
+│     │ (platform)  │ EBP crée un AgentDeployment de "Expert BTP"            │
+│     └─────────────┘ Configure domaines autorisés (app.ebp.com)              │
+│            │                                                                │
+│            ▼                                                                │
+│     ┌─────────────┐                                                        │
+│     │   EBP       │ Lie l'artisan Durant à son compte                      │
+│     │ (editeur)   │ POST /api/editor/artisans/link                         │
+│     └─────────────┘ { email: "durant@...", external_id: "DUR-001" }        │
+│                     → Crée user_editor_links                               │
+│                                                                             │
+│  ════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  1. INITIATION SESSION                                                      │
+│     ┌─────────────┐                                                        │
+│     │  Durant     │ Dans EBP, clique "Nouveau projet IA"                   │
+│     │ (artisan)   │ → EBP appelle POST /api/editor/sessions/create-link    │
+│     └──────┬──────┘ → Génère https://chat.ebp.com/s/abc123                 │
+│            │                                                                │
+│            │ Envoie le lien par email/SMS à son client                     │
+│            ▼                                                                │
+│     ┌─────────────┐                                                        │
+│     │  M. Martin  │ Clique sur le lien                                     │
+│     │(particulier)│ → Compte créé automatiquement ou session anonyme       │
+│     └──────┬──────┘                                                        │
+│            │                                                                │
+│            ▼                                                                │
+│  2. CONVERSATION IA (widget plein écran)                                    │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  🤖 "Bonjour, je suis l'assistant de Durant Peinture.          │    │
+│     │      Pouvez-vous me décrire votre projet ?"                     │    │
+│     │      [Branding = celui de Durant via EBP]                       │    │
+│     │                                                                 │    │
+│     │  👤 M. Martin : "Je souhaite refaire ma salle de bain..."      │    │
+│     │                                                                 │    │
+│     │  🤖 "Pouvez-vous m'envoyer quelques photos ?"                  │    │
+│     │                                                                 │    │
+│     │  👤 [📷 photo1.jpg] [📷 photo2.jpg]  ← Upload dans widget      │    │
+│     │                                                                 │    │
+│     │  🤖 "Voici un pré-devis estimatif :                           │    │
+│     │      - Carrelage Porcelanosa 60x60 : 640€                      │    │
+│     │      - Colle Weber flex : 85€                                   │    │
+│     │      - Main d'œuvre : 1,200€                                    │    │
+│     │      Total HT : 5,790€ / TTC : 6,948€                          │    │
+│     │      ```json-quote { ... structured output ... } ```"          │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
+│            │                                                                │
+│            ▼                                                                │
+│  3. WEBHOOK VERS EBP (automatique)                                          │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  POST https://api.ebp.com/webhooks/ai-manager                   │    │
+│     │  {                                                              │    │
+│     │    "event": "session.completed",                                │    │
+│     │    "editor_id": "ebp-uuid",                                     │    │
+│     │    "artisan": { "external_id": "DUR-001", "name": "Durant" },  │    │
+│     │    "particulier": { "name": "M. Martin" },                      │    │
+│     │    "project": { description, photos[], pre_quote{} },          │    │
+│     │    "signature": "hmac_sha256..."                                │    │
+│     │  }                                                              │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
+│            │                                                                │
+│            ▼                                                                │
+│  4. VALIDATION (workflow configurable)                                      │
+│     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
+│     │ Métreur EBP │────►│ Anonymise   │────►│ Métreur     │               │
+│     │ valide      │     │ données     │     │ AI-Manager  │               │
+│     └─────────────┘     └─────────────┘     └─────────────┘               │
+│            │                                                                │
+│            ▼                                                                │
+│  5. DEVIS SIGNÉ → MARKETPLACE                                               │
+│     ┌─────────────┐                                                        │
+│     │ M. Martin   │ Signe le devis dans EBP                                │
+│     │ signe devis │                                                        │
+│     └──────┬──────┘                                                        │
+│            │ EBP notifie: POST /api/integration/quote-signed               │
+│            ▼                                                                │
+│     ┌─────────────┐                                                        │
+│     │  Durant     │ Reçoit notification "Devis signé !"                    │
+│     │ (artisan)   │ Voit commande matériaux suggérée                       │
+│     └──────┬──────┘                                                        │
+│            │ Valide la commande matériaux                                  │
+│            ▼                                                                │
+│     ┌─────────────┐     ┌─────────────┐                                   │
+│     │   Weber     │     │ Porcelanosa │                                   │
+│     │ (fabricant) │     │ (fabricant) │                                   │
+│     │ Reçoit cde  │     │ Reçoit cde  │                                   │
+│     │ colle/enduit│     │ carrelage   │                                   │
+│     └─────────────┘     └─────────────┘                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.6 Documentation API (Swagger)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DOCUMENTATION API - SWAGGER                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Endpoints :                                                                 │
+│  ├── GET  /api/docs              → Interface Swagger UI interactive         │
+│  ├── GET  /api/docs/openapi.json → Spécification OpenAPI 3.0 (JSON)         │
+│  └── GET  /api/docs/openapi.yaml → Spécification OpenAPI 3.0 (YAML)         │
+│                                                                             │
+│  ════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  Sections documentées :                                                      │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │ WIDGET API (public avec deployment_key)                                 ││
+│  │ POST /api/widget/v1/init              Initialiser une session           ││
+│  │ POST /api/widget/v1/message           Envoyer un message                ││
+│  │ GET  /api/widget/v1/message/{id}/status  Statut d'un message            ││
+│  │ POST /api/widget/v1/upload            Uploader un fichier               ││
+│  │ GET  /api/widget/v1/session/{id}/messages  Historique messages          ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │ EDITOR API (role: editeur, auth: API Key)                               ││
+│  │ POST /api/editor/artisans/link        Lier un artisan existant          ││
+│  │ POST /api/editor/artisans/create-and-link  Créer et lier un artisan     ││
+│  │ GET  /api/editor/artisans             Liste des artisans liés           ││
+│  │ POST /api/editor/sessions/create-link Créer un lien de session          ││
+│  │ GET  /api/editor/deployments          Ses déploiements                  ││
+│  │ PUT  /api/editor/deployments/{id}     Modifier un déploiement           ││
+│  │ GET  /api/editor/stats                Ses statistiques                  ││
+│  │ POST /api/editor/webhooks             Configurer un webhook             ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │ ARTISAN API (role: artisan, auth: Bearer Token)                         ││
+│  │ GET  /api/artisan/sessions            Ses sessions                      ││
+│  │ POST /api/artisan/quotes              Créer un devis                    ││
+│  │ GET  /api/artisan/orders              Ses commandes matériaux           ││
+│  │ POST /api/artisan/orders              Commander matériaux               ││
+│  │ GET  /api/artisan/editors             Éditeurs auxquels il est lié      ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │ FABRICANT API (role: fabricant, auth: API Key)                          ││
+│  │ GET  /api/fabricant/orders            Commandes reçues                  ││
+│  │ PUT  /api/fabricant/orders/{id}       Mettre à jour statut commande     ││
+│  │ GET  /api/fabricant/catalog           Son catalogue produits            ││
+│  │ POST /api/fabricant/catalog           Ajouter un produit                ││
+│  │ PUT  /api/fabricant/catalog/{id}      Modifier un produit               ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────┐│
+│  │ INTEGRATION API (webhooks entrants)                                     ││
+│  │ POST /api/integration/quote-signed    Devis signé (depuis éditeur)      ││
+│  └─────────────────────────────────────────────────────────────────────────┘│
+│                                                                             │
+│  ════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  Package : darkaonline/l5-swagger                                           │
+│  └── Génération automatique depuis annotations PHP (OpenAPI 3.0)            │
+│                                                                             │
+│  Configuration : config/l5-swagger.php                                      │
+│  └── Titre, version, serveurs, sécurité (API Key, Bearer Token)             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 17.7 Checklist Révisée Phase 1
+
+```
+☐ 1. MIGRATIONS (révisées)
+  ☐ 1.1 create_agent_deployments_table
+      ☐ editor_id (FK users) au lieu de client_id
+      ☐ Reste identique sinon
+
+  ☐ 1.2 create_allowed_domains_table
+      ☐ Identique au CDC original
+
+  ☐ 1.3 create_user_editor_links_table (ex user_tenant_links)
+      ☐ artisan_id, editor_id, external_id
+      ☐ branding, permissions (JSONB)
+      ☐ is_active, linked_at
+
+  ☐ 1.4 modify_users_table
+      ☐ ADD company_name VARCHAR(255) NULL
+      ☐ ADD company_info JSONB NULL
+      ☐ ADD branding JSONB NULL
+      ☐ ADD marketplace_enabled BOOLEAN DEFAULT FALSE
+      ☐ ADD api_key VARCHAR(100) NULL UNIQUE
+      ☐ ADD api_key_prefix VARCHAR(10) NULL
+      ☐ ADD max_deployments, max_sessions_month, max_messages_month
+      ☐ ADD current_month_sessions, current_month_messages
+
+  ☐ 1.5 modify_ai_sessions_table
+      ☐ ADD editor_link_id (FK user_editor_links)
+      ☐ ADD deployment_id (FK agent_deployments)
+      ☐ ADD particulier_id (FK users)
+      ☐ user_id existant = l'artisan
+
+  ☐ 1.6 modify_agents_table
+      ☐ ADD deployment_mode VARCHAR(20) DEFAULT 'internal'
+      ☐ ADD is_whitelabel_enabled BOOLEAN DEFAULT FALSE
+      ☐ ADD whitelabel_config JSONB NULL
+
+☐ 2. MODELS
+  ☐ 2.1 AgentDeployment.php
+      ☐ editor() belongsTo User
+      ☐ agent() belongsTo Agent
+      ☐ allowedDomains() hasMany
+      ☐ sessions() hasMany
+
+  ☐ 2.2 AllowedDomain.php
+      ☐ deployment() belongsTo
+      ☐ matches(string $host): bool
+
+  ☐ 2.3 UserEditorLink.php
+      ☐ artisan() belongsTo User
+      ☐ editor() belongsTo User
+      ☐ sessions() hasMany AiSession
+
+  ☐ 2.4 Modifier User.php
+      ☐ editorLinks() hasMany (en tant qu'artisan)
+      ☐ linkedArtisans() hasMany (en tant qu'éditeur)
+      ☐ deployments() hasMany (en tant qu'éditeur)
+      ☐ isArtisan(), isEditeur(), isFabricant(), isParticulier()
+      ☐ generateApiKey()
+
+  ☐ 2.5 Modifier AiSession.php
+      ☐ editorLink() belongsTo
+      ☐ deployment() belongsTo
+      ☐ particulier() belongsTo User
+
+☐ 3. SEEDER RÔLES MARKETPLACE
+  ☐ 3.1 Nouvelles permissions (voir 17.4)
+  ☐ 3.2 Rôle fabricant
+  ☐ 3.3 Rôle artisan
+  ☐ 3.4 Rôle editeur
+  ☐ 3.5 Rôle particulier
+
+☐ 4. SWAGGER
+  ☐ 4.1 composer require darkaonline/l5-swagger
+  ☐ 4.2 php artisan vendor:publish --provider "L5Swagger\L5SwaggerServiceProvider"
+  ☐ 4.3 Configurer config/l5-swagger.php
+  ☐ 4.4 Créer Controller de base avec annotations OpenAPI
+```
+
+### 17.8 Processus de Développement
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    PROCESSUS DE DÉVELOPPEMENT PAR PHASE                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Pour chaque PHASE :                                                         │
+│                                                                             │
+│  1. DÉVELOPPER                                                               │
+│     └── Suivre les todos de la checklist CDC (section 16.4 + 17.7)          │
+│                                                                             │
+│  2. VÉRIFIER vs CAS CONCRET (section 17.5)                                   │
+│     ├── EBP (editeur) peut-il créer un déploiement ?                        │
+│     ├── Durant (artisan) peut-il être lié à EBP ?                           │
+│     ├── M. Martin (particulier) peut-il utiliser le widget ?                │
+│     ├── Les webhooks fonctionnent-ils vers EBP ?                            │
+│     └── Weber/Porcelanosa (fabricants) reçoivent-ils les commandes ?        │
+│                                                                             │
+│  3. CORRIGER si le cas concret n'est pas réalisable                         │
+│     └── Ajuster le code jusqu'à validation                                  │
+│                                                                             │
+│  4. PASSER à la phase suivante                                               │
+│     └── Seulement quand la vérification est OK                              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 **Fin du document**

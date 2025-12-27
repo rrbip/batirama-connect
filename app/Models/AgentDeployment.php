@@ -1,0 +1,203 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
+
+class AgentDeployment extends Model
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'uuid',
+        'agent_id',
+        'editor_id',
+        'name',
+        'deployment_key',
+        'deployment_mode',
+        'config_overlay',
+        'branding',
+        'dedicated_collection',
+        'max_sessions_day',
+        'max_messages_day',
+        'rate_limit_per_ip',
+        'sessions_count',
+        'messages_count',
+        'last_activity_at',
+        'is_active',
+    ];
+
+    protected $casts = [
+        'config_overlay' => 'array',
+        'branding' => 'array',
+        'is_active' => 'boolean',
+        'last_activity_at' => 'datetime',
+    ];
+
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (AgentDeployment $deployment) {
+            if (empty($deployment->uuid)) {
+                $deployment->uuid = (string) Str::uuid();
+            }
+            if (empty($deployment->deployment_key)) {
+                $deployment->deployment_key = $deployment->generateDeploymentKey();
+            }
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS
+    // ─────────────────────────────────────────────────────────────────
+
+    public function agent(): BelongsTo
+    {
+        return $this->belongsTo(Agent::class);
+    }
+
+    public function editor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'editor_id');
+    }
+
+    public function allowedDomains(): HasMany
+    {
+        return $this->hasMany(AllowedDomain::class, 'deployment_id');
+    }
+
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(AiSession::class, 'deployment_id');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Génère une clé de déploiement unique.
+     */
+    public function generateDeploymentKey(): string
+    {
+        return 'dpl_' . Str::random(32);
+    }
+
+    /**
+     * Vérifie si un domaine est autorisé pour ce déploiement.
+     */
+    public function isDomainAllowed(?string $host): bool
+    {
+        if (!$host) {
+            return false;
+        }
+
+        foreach ($this->allowedDomains as $allowed) {
+            if (!$allowed->is_active) {
+                continue;
+            }
+
+            if ($allowed->matches($host)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si le quota journalier de sessions est atteint.
+     */
+    public function hasSessionQuotaRemaining(): bool
+    {
+        if ($this->max_sessions_day === null) {
+            return true;
+        }
+
+        // Compter les sessions du jour
+        $todaySessions = $this->sessions()
+            ->whereDate('created_at', today())
+            ->count();
+
+        return $todaySessions < $this->max_sessions_day;
+    }
+
+    /**
+     * Vérifie si le quota journalier de messages est atteint.
+     */
+    public function hasMessageQuotaRemaining(): bool
+    {
+        if ($this->max_messages_day === null) {
+            return true;
+        }
+
+        // Compter les messages du jour via les sessions
+        $todayMessages = AiMessage::whereHas('session', function ($query) {
+            $query->where('deployment_id', $this->id)
+                ->whereDate('created_at', today());
+        })->count();
+
+        return $todayMessages < $this->max_messages_day;
+    }
+
+    /**
+     * Incrémente les compteurs de session.
+     */
+    public function incrementSessionCount(): void
+    {
+        $this->increment('sessions_count');
+        $this->update(['last_activity_at' => now()]);
+    }
+
+    /**
+     * Incrémente les compteurs de message.
+     */
+    public function incrementMessageCount(): void
+    {
+        $this->increment('messages_count');
+        $this->update(['last_activity_at' => now()]);
+    }
+
+    /**
+     * Résout la configuration finale (agent + overlay).
+     */
+    public function resolveConfig(): array
+    {
+        $agent = $this->agent;
+        $overlay = $this->config_overlay ?? [];
+
+        $config = [
+            'model' => $overlay['model'] ?? $agent->model,
+            'temperature' => $overlay['temperature'] ?? $agent->temperature,
+            'max_tokens' => $overlay['max_tokens'] ?? $agent->max_tokens,
+            'qdrant_collection' => $this->deployment_mode === 'dedicated'
+                ? $this->dedicated_collection
+                : $agent->qdrant_collection,
+        ];
+
+        // System prompt
+        if (!empty($overlay['system_prompt_replace'])) {
+            $config['system_prompt'] = $overlay['system_prompt_replace'];
+        } else {
+            $config['system_prompt'] = $agent->system_prompt;
+            if (!empty($overlay['system_prompt_append'])) {
+                $config['system_prompt'] .= "\n\n" . $overlay['system_prompt_append'];
+            }
+        }
+
+        // Branding
+        $config['branding'] = array_merge(
+            $agent->whitelabel_config['default_branding'] ?? [],
+            $this->branding ?? []
+        );
+
+        return $config;
+    }
+}

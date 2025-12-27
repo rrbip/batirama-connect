@@ -20,6 +20,11 @@ class AiSession extends Model
         'user_id',
         'tenant_id',
         'partner_id',
+        // Whitelabel columns
+        'editor_link_id',
+        'deployment_id',
+        'particulier_id',
+        // Standard columns
         'external_session_id',
         'external_ref',
         'external_context',
@@ -103,5 +108,92 @@ class AiSession extends Model
             'status' => 'archived',
             'closed_at' => now(),
         ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Le lien artisan ↔ éditeur utilisé pour cette session.
+     */
+    public function editorLink(): BelongsTo
+    {
+        return $this->belongsTo(UserEditorLink::class, 'editor_link_id');
+    }
+
+    /**
+     * Le déploiement utilisé pour cette session.
+     */
+    public function deployment(): BelongsTo
+    {
+        return $this->belongsTo(AgentDeployment::class, 'deployment_id');
+    }
+
+    /**
+     * Le particulier (client final) de cette session.
+     */
+    public function particulier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'particulier_id');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si cette session est via un éditeur whitelabel.
+     */
+    public function isWhitelabelSession(): bool
+    {
+        return $this->deployment_id !== null;
+    }
+
+    /**
+     * Retourne l'artisan lié à cette session (via user_id ou editor_link).
+     */
+    public function getArtisan(): ?User
+    {
+        if ($this->editor_link_id) {
+            return $this->editorLink?->artisan;
+        }
+
+        return $this->user;
+    }
+
+    /**
+     * Retourne l'éditeur lié à cette session.
+     */
+    public function getEditor(): ?User
+    {
+        if ($this->editor_link_id) {
+            return $this->editorLink?->editor;
+        }
+
+        return $this->deployment?->editor;
+    }
+
+    /**
+     * Résout le branding pour cette session.
+     */
+    public function resolveBranding(): array
+    {
+        // 1. Base : Agent par défaut
+        $branding = $this->deployment?->agent?->whitelabel_config['default_branding'] ?? [];
+
+        // 2. Override : Deployment
+        $branding = array_merge($branding, $this->deployment?->branding ?? []);
+
+        // 3. Override : Artisan
+        $artisan = $this->getArtisan();
+        $branding = array_merge($branding, $artisan?->branding ?? []);
+
+        // 4. Override final : Lien artisan ↔ éditeur
+        if ($this->editor_link_id) {
+            $branding = array_merge($branding, $this->editorLink?->branding ?? []);
+        }
+
+        return $branding;
     }
 }
