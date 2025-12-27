@@ -17,10 +17,12 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
+use Livewire\WithPagination;
 
 class FaqsPage extends Page implements HasForms
 {
     use InteractsWithForms;
+    use WithPagination;
 
     protected static ?string $navigationIcon = 'heroicon-o-question-mark-circle';
 
@@ -39,11 +41,17 @@ class FaqsPage extends Page implements HasForms
     #[Url]
     public ?string $selectedAgentId = null;
 
+    public string $search = '';
+
     public array $faqs = [];
 
     public ?array $addFaqData = [];
 
     public bool $showAddForm = false;
+
+    public int $perPage = 10;
+
+    public int $currentPage = 1;
 
     public function mount(): void
     {
@@ -54,6 +62,37 @@ class FaqsPage extends Page implements HasForms
         }
 
         $this->loadFaqs();
+    }
+
+    public function updatedSelectedAgentId(): void
+    {
+        $this->currentPage = 1;
+        $this->search = '';
+        $this->loadFaqs();
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->currentPage = 1;
+    }
+
+    public function previousPage(): void
+    {
+        if ($this->currentPage > 1) {
+            $this->currentPage--;
+        }
+    }
+
+    public function nextPage(): void
+    {
+        if ($this->currentPage < $this->getTotalPages()) {
+            $this->currentPage++;
+        }
+    }
+
+    public function goToPage(int $page): void
+    {
+        $this->currentPage = max(1, min($page, $this->getTotalPages()));
     }
 
     public function form(Form $form): Form
@@ -301,6 +340,43 @@ class FaqsPage extends Page implements HasForms
     public function getSelectedAgent(): ?Agent
     {
         return $this->selectedAgentId ? Agent::find($this->selectedAgentId) : null;
+    }
+
+    public function getFilteredFaqs(): array
+    {
+        $filtered = $this->faqs;
+
+        // Filtrer par recherche
+        if (!empty($this->search)) {
+            $searchLower = mb_strtolower($this->search);
+            $filtered = array_filter($filtered, function ($faq) use ($searchLower) {
+                return str_contains(mb_strtolower($faq['question']), $searchLower)
+                    || str_contains(mb_strtolower($faq['answer']), $searchLower);
+            });
+            $filtered = array_values($filtered); // Réindexer
+        }
+
+        return $filtered;
+    }
+
+    public function getPaginatedFaqs(): array
+    {
+        $filtered = $this->getFilteredFaqs();
+        $offset = ($this->currentPage - 1) * $this->perPage;
+
+        return array_slice($filtered, $offset, $this->perPage);
+    }
+
+    public function getTotalPages(): int
+    {
+        $total = count($this->getFilteredFaqs());
+
+        return max(1, (int) ceil($total / $this->perPage));
+    }
+
+    public function getTotalFilteredCount(): int
+    {
+        return count($this->getFilteredFaqs());
     }
 
     public function isAdmin(): bool

@@ -80,28 +80,65 @@
                         <x-heroicon-o-list-bullet class="w-5 h-5" />
                         Questions/Réponses apprises
                         @if($this->getSelectedAgent())
-                            <span class="text-sm text-gray-500">- {{ $this->getSelectedAgent()->name }}</span>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">- {{ $this->getSelectedAgent()->name }}</span>
                         @endif
                     </div>
                     <span class="text-sm text-gray-500 dark:text-gray-400">
-                        {{ count($faqs) }} FAQ(s)
+                        @if(!empty($search))
+                            {{ $this->getTotalFilteredCount() }} / {{ count($faqs) }} FAQ(s)
+                        @else
+                            {{ count($faqs) }} FAQ(s)
+                        @endif
                     </span>
                 </div>
             </x-slot>
 
-            @if(count($faqs) === 0)
+            {{-- Barre de recherche --}}
+            <div class="mb-4">
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                        <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                        type="text"
+                        wire:model.live.debounce.300ms="search"
+                        placeholder="Rechercher dans les questions et réponses..."
+                        class="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-primary-500 focus:border-primary-500"
+                    />
+                    @if(!empty($search))
+                        <button
+                            type="button"
+                            wire:click="$set('search', '')"
+                            class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                            <x-heroicon-o-x-mark class="w-5 h-5" />
+                        </button>
+                    @endif
+                </div>
+            </div>
+
+            @if($this->getTotalFilteredCount() === 0)
                 <div class="text-center py-12">
                     <x-heroicon-o-chat-bubble-left-right class="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                    <p class="text-gray-500 dark:text-gray-400">
-                        Aucune FAQ pour cet agent.
-                    </p>
-                    <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                        Les FAQs sont créées quand vous validez ou corrigez des réponses IA, ou en les ajoutant manuellement.
-                    </p>
+                    @if(!empty($search))
+                        <p class="text-gray-600 dark:text-gray-300">
+                            Aucune FAQ ne correspond à votre recherche.
+                        </p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Essayez avec d'autres mots-clés.
+                        </p>
+                    @else
+                        <p class="text-gray-600 dark:text-gray-300">
+                            Aucune FAQ pour cet agent.
+                        </p>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Les FAQs sont créées quand vous validez ou corrigez des réponses IA, ou en les ajoutant manuellement.
+                        </p>
+                    @endif
                 </div>
             @else
                 <div class="space-y-4">
-                    @foreach($faqs as $faq)
+                    @foreach($this->getPaginatedFaqs() as $faq)
                         <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                             {{-- Question --}}
                             <div class="bg-gray-50 dark:bg-gray-800 px-4 py-3 flex items-start justify-between gap-4">
@@ -121,7 +158,7 @@
                                             </span>
                                         @endif
                                     </div>
-                                    <p class="text-gray-900 dark:text-white font-medium">
+                                    <p class="text-gray-900 dark:text-gray-50 font-medium">
                                         {{ $faq['question'] }}
                                     </p>
                                 </div>
@@ -146,10 +183,10 @@
                                         Réponse
                                     </span>
                                 </div>
-                                <p class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ $faq['answer'] }}</p>
+                                <p class="text-gray-800 dark:text-gray-100 whitespace-pre-wrap">{{ $faq['answer'] }}</p>
 
                                 @if($faq['validated_at'])
-                                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
                                         Ajoutée le {{ \Carbon\Carbon::parse($faq['validated_at'])->format('d/m/Y H:i') }}
                                     </p>
                                 @endif
@@ -157,6 +194,48 @@
                         </div>
                     @endforeach
                 </div>
+
+                {{-- Pagination --}}
+                @if($this->getTotalPages() > 1)
+                    <div class="mt-6 flex items-center justify-between border-t border-gray-200 dark:border-gray-700 pt-4">
+                        <div class="text-sm text-gray-600 dark:text-gray-400">
+                            Affichage de {{ ($currentPage - 1) * $perPage + 1 }} à {{ min($currentPage * $perPage, $this->getTotalFilteredCount()) }} sur {{ $this->getTotalFilteredCount() }} FAQ(s)
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <x-filament::button
+                                wire:click="previousPage"
+                                :disabled="$currentPage <= 1"
+                                size="sm"
+                                color="gray"
+                                icon="heroicon-o-chevron-left"
+                            >
+                                Précédent
+                            </x-filament::button>
+
+                            <div class="flex items-center gap-1">
+                                @for($page = max(1, $currentPage - 2); $page <= min($this->getTotalPages(), $currentPage + 2); $page++)
+                                    <button
+                                        wire:click="goToPage({{ $page }})"
+                                        class="px-3 py-1 text-sm rounded-lg {{ $page === $currentPage ? 'bg-primary-500 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600' }}"
+                                    >
+                                        {{ $page }}
+                                    </button>
+                                @endfor
+                            </div>
+
+                            <x-filament::button
+                                wire:click="nextPage"
+                                :disabled="$currentPage >= $this->getTotalPages()"
+                                size="sm"
+                                color="gray"
+                                icon="heroicon-o-chevron-right"
+                                icon-position="after"
+                            >
+                                Suivant
+                            </x-filament::button>
+                        </div>
+                    </div>
+                @endif
             @endif
         </x-filament::section>
 
