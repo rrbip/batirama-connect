@@ -15,6 +15,11 @@ class Agent extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $attributes = [
+        'icon' => 'heroicon-o-chat-bubble-left-right',
+        'color' => 'primary',
+    ];
+
     protected $fillable = [
         'tenant_id',
         'name',
