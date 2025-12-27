@@ -1270,8 +1270,8 @@ L'artisan a UN compte AI-Manager (pour marketplace, accès direct) qui peut êtr
 **Modification table `users`** :
 ```sql
 -- Ajout colonnes à la table users existante
-ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT 'admin';
--- Roles: 'super_admin', 'admin', 'client_admin', 'artisan', 'metreur'
+-- ⚠️ NOTE: Le système de rôles existe DÉJÀ (tables roles, user_roles, permissions, role_permissions)
+-- Utiliser le système existant : $user->hasRole('artisan'), $user->roles()->attach($roleId)
 
 ALTER TABLE users ADD COLUMN branding JSONB NULL;
 -- Branding par défaut (usage direct AI-Manager)
@@ -1284,6 +1284,28 @@ ALTER TABLE users ADD COLUMN branding JSONB NULL;
 
 ALTER TABLE users ADD COLUMN marketplace_enabled BOOLEAN DEFAULT FALSE;
 -- Accès marketplace pour commandes matériaux
+```
+
+**Seeder: créer rôles whitelabel** (utiliser table `roles` existante) :
+```php
+// database/seeders/WhitelabelRolesSeeder.php
+Role::firstOrCreate(['slug' => 'artisan'], [
+    'name' => 'Artisan',
+    'description' => 'Artisan utilisant les agents IA via clients whitelabel',
+    'is_system' => true,
+]);
+
+Role::firstOrCreate(['slug' => 'metreur'], [
+    'name' => 'Métreur',
+    'description' => 'Validateur technique des pré-devis IA',
+    'is_system' => true,
+]);
+
+Role::firstOrCreate(['slug' => 'client-admin'], [
+    'name' => 'Admin Client',
+    'description' => 'Administrateur d\'un client whitelabel (EBP, SAGE...)',
+    'is_system' => true,
+]);
 ```
 
 **Nouvelle table `user_tenant_links`** :
@@ -1875,7 +1897,8 @@ Commande fournisseur
 | 1.2 | Migration `agent_deployments` | 🟢 Faible | 1h | 1.1 | FK agents |
 | 1.3 | Migration `allowed_domains` | 🟢 Faible | 30min | 1.2 | - |
 | 1.4 | Migration `user_tenant_links` | 🟢 Faible | 1h | 1.1 | FK users |
-| 1.5 | Migration modification `users` | 🟢 Faible | 30min | - | Données existantes |
+| 1.5 | Migration modification `users` (branding, marketplace) | 🟢 Faible | 20min | - | ⚠️ Rôles DÉJÀ gérés |
+| 1.5b | Seeder rôles whitelabel (artisan, metreur, client-admin) | 🟢 Faible | 20min | - | Utilise table roles existante |
 | 1.6 | Migration modification `ai_sessions` | 🟢 Faible | 30min | 1.4 | Données existantes |
 | 1.7 | Model `Client` + relations | 🟢 Faible | 1h | 1.1 | - |
 | 1.8 | Model `AgentDeployment` + relations | 🟢 Faible | 1h | 1.2 | - |
@@ -2068,9 +2091,15 @@ Commande fournisseur
       ☐ Unique: (user_id, client_id), (client_id, external_id)
 
   ☐ 1.5 modify_users_table
-      ☐ ADD role VARCHAR(50) DEFAULT 'admin'
       ☐ ADD branding JSONB NULL
       ☐ ADD marketplace_enabled BOOLEAN DEFAULT FALSE
+      ☐ ⚠️ NE PAS ajouter colonne role (système roles/user_roles EXISTE DÉJÀ)
+
+  ☐ 1.5b Seeder: créer rôles whitelabel (table roles existante)
+      ☐ Créer role 'artisan' (slug: artisan)
+      ☐ Créer role 'metreur' (slug: metreur)
+      ☐ Créer role 'client-admin' (slug: client-admin)
+      ☐ Associer permissions appropriées via role_permissions
 
   ☐ 1.6 modify_ai_sessions_table
       ☐ ADD user_id (FK nullable)
@@ -2116,10 +2145,11 @@ Commande fournisseur
       ☐ Relation: client() belongsTo
       ☐ Relation: sessions() hasMany
 
-  ☐ 2.5 Modifier User.php
-      ☐ Ajouter $casts: role, branding
-      ☐ Relation: tenantLinks() hasMany
-      ☐ Méthode: isArtisan(): bool
+  ☐ 2.5 Modifier User.php (⚠️ roles() et hasRole() EXISTENT DÉJÀ)
+      ☐ Ajouter $casts: branding as array
+      ☐ Ajouter $fillable: branding, marketplace_enabled
+      ☐ Relation: tenantLinks() hasMany (NOUVELLE)
+      ☐ Méthode: isArtisan(): bool → return $this->hasRole('artisan'); (utilise existant)
       ☐ Méthode: linkToClient(Client $client, array $data)
 
   ☐ 2.6 Modifier AiSession.php
