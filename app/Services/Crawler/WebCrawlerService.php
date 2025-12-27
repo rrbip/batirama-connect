@@ -48,12 +48,30 @@ class WebCrawlerService
             'connect_timeout' => 10,
         ];
 
+        // Headers par défaut simulant un vrai navigateur (anti-bot bypass)
+        $defaultHeaders = [
+            'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language' => 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding' => 'gzip, deflate, br',
+            'Cache-Control' => 'no-cache',
+            'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile' => '?0',
+            'Sec-Ch-Ua-Platform' => '"Windows"',
+            'Sec-Fetch-Dest' => 'document',
+            'Sec-Fetch-Mode' => 'navigate',
+            'Sec-Fetch-Site' => 'none',
+            'Sec-Fetch-User' => '?1',
+            'Upgrade-Insecure-Requests' => '1',
+            'Pragma' => 'no-cache',
+        ];
+
         // Préparer la requête
         $request = Http::timeout($options['timeout'])
             ->connectTimeout($options['connect_timeout'])
-            ->withUserAgent($crawl->user_agent);
+            ->withUserAgent($crawl->user_agent)
+            ->withHeaders($defaultHeaders);
 
-        // Headers personnalisés
+        // Headers personnalisés (écrasent les défauts si spécifiés)
         if (!empty($crawl->custom_headers)) {
             $request = $request->withHeaders($crawl->custom_headers);
         }

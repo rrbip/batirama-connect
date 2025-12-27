@@ -146,8 +146,8 @@ class WebCrawlResource extends Resource
 
                                         Forms\Components\TextInput::make('user_agent')
                                             ->label('User-Agent')
-                                            ->default('IA-Manager/1.0')
-                                            ->helperText('Identifiant envoyé au serveur'),
+                                            ->default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                                            ->helperText('User-Agent Chrome par défaut pour éviter les blocages'),
                                     ])
                                     ->columns(2),
                             ]),
