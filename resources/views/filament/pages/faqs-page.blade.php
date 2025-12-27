@@ -95,26 +95,27 @@
 
             {{-- Barre de recherche --}}
             <div class="mb-4">
-                <div class="relative">
-                    <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                <x-filament::input.wrapper>
+                    <x-filament::input.prefix>
                         <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
-                    </div>
-                    <input
+                    </x-filament::input.prefix>
+                    <x-filament::input
                         type="text"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Rechercher dans les questions et réponses..."
-                        class="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:ring-primary-500 focus:border-primary-500"
                     />
                     @if(!empty($search))
-                        <button
-                            type="button"
-                            wire:click="$set('search', '')"
-                            class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                        >
-                            <x-heroicon-o-x-mark class="w-5 h-5" />
-                        </button>
+                        <x-filament::input.suffix>
+                            <button
+                                type="button"
+                                wire:click="$set('search', '')"
+                                class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <x-heroicon-o-x-mark class="w-5 h-5" />
+                            </button>
+                        </x-filament::input.suffix>
                     @endif
-                </div>
+                </x-filament::input.wrapper>
             </div>
 
             @if($this->getTotalFilteredCount() === 0)
