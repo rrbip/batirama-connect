@@ -654,3 +654,129 @@ app/
 4. **Dashboard**
    - Stats: utilisateurs, agents, sessions, messages
    - Tableau activité récente
+
+---
+
+## 12. Page État des Services IA (AiStatusPage)
+
+> **Statut** : ✅ IMPLÉMENTÉE
+> **Fichier** : `app/Filament/Pages/AiStatusPage.php`
+> **URL** : `/admin/ai-status`
+
+### 12.1 Description
+
+Page de monitoring en temps réel de tous les services IA et du système de files d'attente. Permet de superviser l'état de santé de l'infrastructure et d'intervenir en cas de problème.
+
+### 12.2 Services Monitorés
+
+| Service | Indicateurs | Actions |
+|---------|-------------|---------|
+| **Ollama (LLM)** | Statut, nombre de modèles | Redémarrer, Installer/Supprimer modèles |
+| **Qdrant (Vector DB)** | Statut, collections, nombre de points | Redémarrer, Diagnostic |
+| **Embedding Service** | Statut, dimension des vecteurs | - |
+| **Queue Worker** | Statut, jobs en attente/échoués | Redémarrer |
+
+### 12.3 Gestion des Modèles Ollama
+
+**Fonctionnalités :**
+- Liste des modèles installés avec détails (taille, famille, quantization)
+- Installation de nouveaux modèles depuis une liste ou nom personnalisé
+- Suppression de modèles inutilisés
+- Synchronisation de la liste des modèles disponibles
+
+### 12.4 Monitoring Documents RAG
+
+**Statistiques affichées :**
+- Total documents
+- En attente (pending)
+- En traitement (processing)
+- Terminés (completed)
+- Échoués (failed)
+- Indexés dans Qdrant
+
+**Actions :**
+- Traiter tous les documents en attente
+- Relancer les documents échoués
+- Voir les détails d'erreur
+
+### 12.5 Monitoring Messages IA Asynchrones
+
+**Statistiques :**
+- Messages en attente/en file/en traitement
+- Complétés/échoués aujourd'hui
+- Temps moyen de génération
+
+**File d'attente :**
+- Position dans la file
+- Agent concerné
+- Temps d'attente
+- Statut de traitement
+
+**Actions :**
+- Relancer un message échoué
+- Voir le contexte d'erreur complet
+
+### 12.6 Gestion des Jobs Échoués
+
+- Liste des 10 derniers jobs échoués
+- Nom du job, queue, message d'erreur
+- Actions : Relancer, Supprimer
+- Action globale : Vider tous les jobs échoués
+
+### 12.7 Actions Disponibles (Header)
+
+| Action | Description |
+|--------|-------------|
+| `Actualiser` | Rafraîchir tous les statuts |
+| `Traiter documents en attente` | Traitement synchrone des pending |
+| `Relancer tous les échecs` | Relance tous les documents failed |
+| `Vider les jobs échoués` | Supprime tous les failed_jobs |
+| `Diagnostic Qdrant` | Affiche le détail de chaque collection |
+
+### 12.8 Maquette
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  État des Services IA                      [Actualiser] [...]   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐ │
+│  │ 🟢 Ollama (LLM)  │ │ 🟢 Qdrant        │ │ 🟢 Embedding     │ │
+│  │ 3 modèle(s)      │ │ 2 collections    │ │ Dimension: 768   │ │
+│  │ [Redémarrer]     │ │ 1,234 points     │ │                  │ │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘ │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════    │
+│  📄 Documents RAG                                               │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ Total: 45 | Pending: 2 | Processing: 1 | ✅ 40 | ❌ 2      ││
+│  │                                                             ││
+│  │ Documents échoués:                                          ││
+│  │  • rapport.pdf - Erreur extraction      [🔄 Réessayer]      ││
+│  │  • plan.dwg - Format non supporté       [🔄 Réessayer]      ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════    │
+│  🤖 Messages IA (Async)                                         │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ En file: 3 | Traitement: 1 | ✅ 127 aujourd'hui | ❌ 2     ││
+│  │ Temps moyen: 2.3s                                           ││
+│  │                                                             ││
+│  │ File d'attente:                                             ││
+│  │  #1 | Expert BTP | queued | 5s                              ││
+│  │  #2 | Support    | pending | 12s                            ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════    │
+│  🔧 Modèles Ollama                                              │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │ mistral:7b    | 4.1 GB | Q4_0          [🗑️ Supprimer]      ││
+│  │ llama3.3:70b  | 40 GB  | Q4_K_M        [🗑️ Supprimer]      ││
+│  │ nomic-embed   | 274 MB | embeddings    [🗑️ Supprimer]      ││
+│  │                                                             ││
+│  │ Installer: [mistral-small    ▼] [📥 Installer]              ││
+│  │ Ou: [nom-personnalisé        ] [📥 Installer]               ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
