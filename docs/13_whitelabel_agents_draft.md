@@ -1236,55 +1236,183 @@ Tous les deployments en bénéficient
 
 **Problème** : Le CDC actuel prévoit Client → Deployment, mais le cas réel a 3 niveaux.
 
-**Solution** : Nouvelle entité `Artisan` (ou `SubClient`)
+**Solution** : Compte utilisateur unique AI-Manager + Associations multi-tenant
 
+L'artisan a UN compte AI-Manager (pour marketplace, accès direct) qui peut être lié à N clients (EBP, SAGE...) avec un branding différent par contexte.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ARCHITECTURE COMPTE ARTISAN                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  users (compte AI-Manager unique)                                           │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │ id: 1, name: "Durant Peinture", role: "artisan"                       │ │
+│  │ branding: { welcome: "Assistant Durant", color: "#E53935" }           │ │
+│  │ ↑ Branding par défaut (usage direct AI-Manager / Marketplace)         │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│           │                                                                 │
+│           │ user_tenant_links (associations aux clients)                    │
+│           ├────────────────────────────┬────────────────────────────────┐  │
+│           ▼                            ▼                                │  │
+│  ┌─────────────────────────┐  ┌─────────────────────────┐               │  │
+│  │ client: EBP             │  │ client: SAGE            │               │  │
+│  │ external_id: "DUR-001"  │  │ external_id: "A-7834"   │               │  │
+│  │ branding: {             │  │ branding: {             │               │  │
+│  │   welcome: "Assistant   │  │   welcome: "Bienvenue   │               │  │
+│  │   EBP - Durant"         │  │   chez Durant"          │               │  │
+│  │ }                       │  │ }                       │               │  │
+│  └─────────────────────────┘  └─────────────────────────┘               │  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Modification table `users`** :
 ```sql
-CREATE TABLE artisans (
-    id              BIGSERIAL PRIMARY KEY,
-    uuid            UUID DEFAULT uuid_generate_v4() UNIQUE NOT NULL,
+-- Ajout colonnes à la table users existante
+ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT 'admin';
+-- Roles: 'super_admin', 'admin', 'client_admin', 'artisan', 'metreur'
 
-    -- Relation
+ALTER TABLE users ADD COLUMN branding JSONB NULL;
+-- Branding par défaut (usage direct AI-Manager)
+-- {
+--   "welcome_message": "Bonjour, je suis l'assistant de {user.name}",
+--   "primary_color": "#E53935",
+--   "logo_url": "https://...",
+--   "signature": "L'équipe Durant Peinture"
+-- }
+
+ALTER TABLE users ADD COLUMN marketplace_enabled BOOLEAN DEFAULT FALSE;
+-- Accès marketplace pour commandes matériaux
+```
+
+**Nouvelle table `user_tenant_links`** :
+```sql
+CREATE TABLE user_tenant_links (
+    id              BIGSERIAL PRIMARY KEY,
+
+    -- L'artisan (compte AI-Manager)
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- Le client (EBP, SAGE, etc.)
     client_id       BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
 
-    -- Identification (données EBP)
-    external_id     VARCHAR(100) NOT NULL,  -- ID dans le système client (EBP)
+    -- ID de l'artisan dans le système du client
+    external_id     VARCHAR(100) NOT NULL,  -- "DUR-001" chez EBP
 
-    -- Informations affichées dans le chat
-    name            VARCHAR(255) NOT NULL,  -- "Durant Peinture"
-    logo_url        VARCHAR(500) NULL,
-    contact_email   VARCHAR(255) NULL,
-    contact_phone   VARCHAR(50) NULL,
-
-    -- Branding personnalisé (override deployment)
+    -- Branding spécifique pour ce client (override user.branding)
     branding        JSONB NULL,
     -- {
-    --   "welcome_message": "Bonjour, je suis l'assistant de {name}",
-    --   "primary_color": "#E53935",
-    --   "signature": "L'équipe Durant Peinture"
+    --   "welcome_message": "Assistant EBP - Durant Peinture",
+    --   "primary_color": "#1E88E5",
+    --   "logo_url": "https://...",
+    --   "signature": "Durant Peinture via EBP"
     -- }
 
-    -- Limites (sous-quotas du client)
-    max_sessions_month  INTEGER NULL,
+    -- Permissions spécifiques chez ce client
+    permissions     JSONB NULL,
+    -- {
+    --   "can_create_sessions": true,
+    --   "can_view_analytics": false,
+    --   "max_sessions_month": 100
+    -- }
 
-    -- Statistiques
-    sessions_count      INTEGER DEFAULT 0,
-
+    -- Statut
     is_active       BOOLEAN DEFAULT TRUE,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    linked_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+    UNIQUE(user_id, client_id),
     UNIQUE(client_id, external_id)
 );
 
-CREATE INDEX idx_artisans_client ON artisans(client_id);
-CREATE INDEX idx_artisans_external ON artisans(external_id);
+CREATE INDEX idx_tenant_links_user ON user_tenant_links(user_id);
+CREATE INDEX idx_tenant_links_client ON user_tenant_links(client_id);
+CREATE INDEX idx_tenant_links_external ON user_tenant_links(external_id);
 ```
 
 **Modification table `ai_sessions`** :
 ```sql
-ALTER TABLE ai_sessions ADD COLUMN artisan_id BIGINT NULL REFERENCES artisans(id);
-CREATE INDEX idx_sessions_artisan ON ai_sessions(artisan_id);
+ALTER TABLE ai_sessions ADD COLUMN user_id BIGINT NULL REFERENCES users(id);
+ALTER TABLE ai_sessions ADD COLUMN tenant_link_id BIGINT NULL REFERENCES user_tenant_links(id);
+-- Si tenant_link_id = NULL → usage direct AI-Manager (branding user)
+-- Si tenant_link_id = X → usage via client EBP (branding du link)
+
+CREATE INDEX idx_sessions_user ON ai_sessions(user_id);
+CREATE INDEX idx_sessions_tenant_link ON ai_sessions(tenant_link_id);
 ```
+
+**Résolution du branding (priorité)** :
+```php
+class BrandingResolver
+{
+    public function resolve(AiSession $session): array
+    {
+        // 1. Base : Agent par défaut
+        $branding = $session->deployment?->agent->default_branding ?? [];
+
+        // 2. Override : Deployment
+        $branding = array_merge($branding, $session->deployment?->branding ?? []);
+
+        // 3. Override : User (artisan)
+        $branding = array_merge($branding, $session->user?->branding ?? []);
+
+        // 4. Override final : Tenant Link (si via client)
+        if ($session->tenant_link_id) {
+            $branding = array_merge($branding, $session->tenantLink->branding ?? []);
+        }
+
+        // 5. Interpolation des variables
+        return $this->interpolate($branding, [
+            'user.name' => $session->user?->name,
+            'client.name' => $session->tenantLink?->client->name,
+            'agent.name' => $session->deployment?->agent->name,
+        ]);
+    }
+}
+```
+
+**Flux de liaison compte artisan ↔ client** :
+```
+Scénario 1 : EBP crée le lien (artisan existe déjà sur AI-Manager)
+───────────────────────────────────────────────────────────────────
+POST /api/client/users/link
+Headers: X-API-Key: ebp_api_key
+Body: {
+    "email": "contact@durant-peinture.fr",
+    "external_id": "DUR-001",
+    "branding": { "welcome_message": "Assistant EBP - Durant" }
+}
+→ Trouve user par email, crée user_tenant_link
+
+Scénario 2 : EBP crée le lien (artisan n'existe pas)
+───────────────────────────────────────────────────────────────────
+POST /api/client/users/create-and-link
+Body: {
+    "name": "Durant Peinture",
+    "email": "contact@durant-peinture.fr",
+    "external_id": "DUR-001",
+    "branding": { ... },
+    "send_invitation": true
+}
+→ Crée user (role=artisan) + user_tenant_link
+→ Envoie email invitation AI-Manager (accès marketplace)
+
+Scénario 3 : Artisan se lie lui-même via code
+───────────────────────────────────────────────────────────────────
+1. EBP génère un code de liaison : "LINK-ABC123"
+2. Artisan dans AI-Manager : "Lier mon compte" → saisit code
+3. Crée user_tenant_link
+```
+
+**Avantages de cette architecture** :
+| Bénéfice | Description |
+|----------|-------------|
+| **Compte unique** | Un artisan = un compte AI-Manager pour tout (sessions, marketplace) |
+| **Multi-tenant** | Même artisan chez N clients (EBP, SAGE, etc.) |
+| **Branding contextuel** | Différent selon le point d'entrée (direct vs via client) |
+| **Traçabilité** | `tenant_link_id` indique d'où vient la session |
+| **Marketplace** | Artisan peut commander directement depuis son compte |
+| **Évolutif** | Permissions granulaires par tenant |
 
 ---
 
@@ -1679,7 +1807,7 @@ Commande fournisseur
 
 | Section | Modification |
 |---------|--------------|
-| **3. Architecture** | Ajouter table `artisans`, modifier `ai_sessions` |
+| **3. Architecture** | Modifier `users` (role, branding), ajouter `user_tenant_links`, modifier `ai_sessions` |
 | **5. Widget** | Ajouter upload fichiers, page standalone /s/{token} |
 | **6. API Endpoints** | Ajouter `/sessions/create-link`, `/upload`, `/quote-signed` |
 | **8. Flux de Données** | Ajouter résolution branding 3 niveaux |
@@ -1692,7 +1820,7 @@ Commande fournisseur
 
 | Phase | Fonctionnalité | Effort | Bloquant pour MVP |
 |-------|----------------|--------|-------------------|
-| **1** | Entité Artisan + lien session | 2j | ✅ OUI |
+| **1** | Users (role artisan) + user_tenant_links + lien session | 2j | ✅ OUI |
 | **1** | Branding dynamique artisan | 1j | ✅ OUI |
 | **1** | Upload photos widget | 2j | ✅ OUI |
 | **1** | Webhooks base (session.completed) | 1j | ✅ OUI |
