@@ -144,14 +144,17 @@ class FaqsPage extends Page implements HasForms
                     'must' => [
                         ['key' => 'agent_slug', 'match' => ['value' => $agentSlug]]
                     ]
-                ]
+                ],
+                withFullResult: true
             );
 
-            if (empty($response['points'])) {
+            $points = $response['points'] ?? [];
+
+            if (empty($points)) {
                 break;
             }
 
-            foreach ($response['points'] as $point) {
+            foreach ($points as $point) {
                 $faqs[] = [
                     'id' => $point['id'],
                     'question' => $point['payload']['question'] ?? '',
