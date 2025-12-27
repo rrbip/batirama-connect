@@ -9,10 +9,25 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 class AiMessage extends Model
 {
     use HasFactory;
+
+    /**
+     * Boot the model - Auto-generate UUID on creation.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (AiMessage $message) {
+            if (empty($message->uuid)) {
+                $message->uuid = (string) Str::uuid();
+            }
+        });
+    }
 
     // Constantes pour les statuts de traitement
     public const STATUS_PENDING = 'pending';

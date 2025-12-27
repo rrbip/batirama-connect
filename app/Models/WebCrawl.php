@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 /**
  * Représente un crawl de site web.
@@ -18,6 +19,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class WebCrawl extends Model
 {
     use HasFactory;
+
+    /**
+     * Boot the model - Auto-generate UUID on creation.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (WebCrawl $crawl) {
+            if (empty($crawl->uuid)) {
+                $crawl->uuid = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'uuid',

@@ -9,10 +9,25 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
 
 class AiSession extends Model
 {
     use HasFactory;
+
+    /**
+     * Boot the model - Auto-generate UUID on creation.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (AiSession $session) {
+            if (empty($session->uuid)) {
+                $session->uuid = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'uuid',
