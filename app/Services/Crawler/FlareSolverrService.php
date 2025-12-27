@@ -36,7 +36,16 @@ class FlareSolverrService
         }
 
         try {
-            $response = Http::timeout(5)->get($this->baseUrl);
+            // FlareSolverr répond sur la racine, pas sur /v1
+            $rootUrl = str_replace('/v1', '', $this->baseUrl);
+            $response = Http::timeout(5)->get($rootUrl);
+
+            Log::debug('FlareSolverr availability check', [
+                'url' => $rootUrl,
+                'status' => $response->status(),
+                'body' => substr($response->body(), 0, 200),
+            ]);
+
             return $response->successful();
         } catch (\Exception $e) {
             Log::debug('FlareSolverr not available', ['error' => $e->getMessage()]);
