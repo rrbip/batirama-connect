@@ -307,6 +307,6 @@ class FaqsPage extends Page implements HasForms
             return false;
         }
 
-        return $user->hasRole(['super-admin', 'admin']);
+        return $user->hasRole('super-admin') || $user->hasRole('admin');
     }
 }
