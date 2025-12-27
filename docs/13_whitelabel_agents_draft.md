@@ -3,7 +3,7 @@
 > **Statut** : 📝 DRAFT - Base de travail
 > **Version** : 0.1.0
 > **Date** : Décembre 2025
-> **Auteur** : Claude
+> **Auteur** : Rodolphe
 
 ---
 
@@ -865,14 +865,14 @@ class ClientObserver
 
 ---
 
-## 11. Questions Ouvertes
+## 11. Décisions Techniques
 
-### À Décider
+### Validées
 
 1. **Vérification DNS des domaines ?**
-   - Option A : Simple déclaratif (confiance client)
-   - Option B : Vérification TXT record DNS
-   - **Recommandation** : Option A pour MVP, B plus tard
+   - ✅ **Option A : Simple déclaratif (confiance client)**
+   - ~~Option B : Vérification TXT record DNS~~
+   - Mitigations : Logging détaillé, alertes si doublon, validation manuelle Enterprise
 
 2. **Portail client séparé ou dans Filament ?**
    - Option A : Nouveau panel Filament dédié
