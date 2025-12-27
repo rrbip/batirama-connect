@@ -38,6 +38,11 @@ class Agent extends Model
             if (empty($agent->system_prompt)) {
                 $agent->system_prompt = 'Tu es un assistant IA. Réponds aux questions de manière claire et concise.';
             }
+            // RAG config defaults (these columns are NOT NULL in prod database)
+            $agent->min_rag_score = $agent->min_rag_score ?? 0.3;
+            $agent->max_learned_responses = $agent->max_learned_responses ?? 10;
+            $agent->learned_min_score = $agent->learned_min_score ?? 0.5;
+            $agent->context_token_limit = $agent->context_token_limit ?? 4096;
         });
     }
 
