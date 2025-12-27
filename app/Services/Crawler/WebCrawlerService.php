@@ -48,25 +48,35 @@ class WebCrawlerService
             'connect_timeout' => 10,
         ];
 
-        // Headers par défaut simulant un vrai navigateur (anti-bot bypass)
+        // Headers par défaut simulant un vrai navigateur Chrome (ordre important pour anti-bot)
+        $parsedUrl = parse_url($url);
+        $origin = ($parsedUrl['scheme'] ?? 'https') . '://' . ($parsedUrl['host'] ?? '');
+
         $defaultHeaders = [
-            'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language' => 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding' => 'gzip, deflate, br',
-            'Cache-Control' => 'no-cache',
+            'Connection' => 'keep-alive',
+            'Cache-Control' => 'max-age=0',
             'Sec-Ch-Ua' => '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
             'Sec-Ch-Ua-Mobile' => '?0',
             'Sec-Ch-Ua-Platform' => '"Windows"',
-            'Sec-Fetch-Dest' => 'document',
-            'Sec-Fetch-Mode' => 'navigate',
-            'Sec-Fetch-Site' => 'none',
-            'Sec-Fetch-User' => '?1',
             'Upgrade-Insecure-Requests' => '1',
-            'Pragma' => 'no-cache',
+            'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Sec-Fetch-Site' => 'none',
+            'Sec-Fetch-Mode' => 'navigate',
+            'Sec-Fetch-User' => '?1',
+            'Sec-Fetch-Dest' => 'document',
+            'Accept-Encoding' => 'gzip, deflate, br',
+            'Accept-Language' => 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer' => $origin . '/',
         ];
 
-        // Préparer la requête
-        $request = Http::timeout($options['timeout'])
+        // Préparer la requête avec HTTP/2
+        $request = Http::withOptions([
+                'version' => 2.0,  // HTTP/2 pour bypass Cloudflare
+                'curl' => [
+                    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,
+                ],
+            ])
+            ->timeout($options['timeout'])
             ->connectTimeout($options['connect_timeout'])
             ->withUserAgent($crawl->user_agent)
             ->withHeaders($defaultHeaders);
