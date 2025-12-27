@@ -901,6 +901,18 @@ class ClientObserver
    - Docs communs dans collection master, docs spécifiques dans collection client
    - Pas de duplication d'agent, pas de filtrage tenant_id → isolation native Qdrant
 
+6. **Répartition de charge Qdrant ?**
+   - ✅ **Non nécessaire : Single node Qdrant suffit**
+   - Justification :
+     - Qdrant traite 1,000-5,000 req/sec, Ollama est le bottleneck (99.9% du temps de traitement)
+     - Isolation native par collection (pas besoin de filtrage tenant_id)
+     - 1M vecteurs = ~3 GB RAM, confortable sur un node 32GB
+   - Évolution si croissance :
+     - < 10M vecteurs : Single node
+     - 10-50M vecteurs : Augmenter RAM (64-128GB)
+     - > 50M vecteurs : Qdrant cluster mode (réplication native)
+   - Pas d'override `qdrant_host` par deployment (contrairement à Ollama)
+
 ---
 
 ## 12. Architecture Master / Deployment
