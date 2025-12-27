@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\Whitelabel;
 
+use App\Events\Whitelabel\FileUploaded;
+use App\Events\Whitelabel\SessionStarted;
 use App\Http\Controllers\Controller;
 use App\Models\AgentDeployment;
 use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\User;
 use App\Models\UserEditorLink;
+use App\Services\Upload\FileUploadService;
 use App\Services\Whitelabel\BrandingResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +31,8 @@ use Illuminate\Support\Str;
 class WidgetController extends Controller
 {
     public function __construct(
-        private readonly BrandingResolver $brandingResolver
+        private readonly BrandingResolver $brandingResolver,
+        private readonly FileUploadService $fileUploadService
     ) {}
 
     /**
@@ -120,6 +124,9 @@ class WidgetController extends Controller
             'editor_link_id' => $editorLink->id,
             'artisan_id' => $editorLink->artisan_id,
         ]);
+
+        // Dispatch event for webhooks
+        SessionStarted::dispatch($session);
 
         return response()->json([
             'session_id' => $session->uuid,
@@ -325,6 +332,95 @@ class WidgetController extends Controller
                 'max_message_length' => 10000,
                 'streaming_enabled' => true,
             ],
+        ]);
+    }
+
+    /**
+     * Upload un fichier pour une session.
+     */
+    public function uploadFile(Request $request, string $sessionId): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:10240', // 10 MB
+        ]);
+
+        /** @var AgentDeployment $deployment */
+        $deployment = $request->attributes->get('deployment');
+
+        // Trouver la session
+        $session = AiSession::where('uuid', $sessionId)
+            ->where('deployment_id', $deployment->id)
+            ->where('status', 'active')
+            ->first();
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'session_not_found',
+                'message' => 'Session non trouvée ou fermée',
+            ], 404);
+        }
+
+        try {
+            $file = $this->fileUploadService->upload(
+                $request->file('file'),
+                $session
+            );
+
+            // Dispatch event for webhooks
+            FileUploaded::dispatch($session, $file);
+
+            Log::info('Whitelabel file uploaded', [
+                'session_id' => $session->uuid,
+                'file_id' => $file->uuid,
+                'file_name' => $file->original_name,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'file' => $file->toApiArray(),
+            ], 201);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'error' => 'validation_error',
+                'message' => $e->getMessage(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Whitelabel upload error', [
+                'session_id' => $sessionId,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'error' => 'upload_failed',
+                'message' => 'Erreur lors de l\'upload du fichier',
+            ], 500);
+        }
+    }
+
+    /**
+     * Récupère les fichiers d'une session.
+     */
+    public function getFiles(Request $request, string $sessionId): JsonResponse
+    {
+        /** @var AgentDeployment $deployment */
+        $deployment = $request->attributes->get('deployment');
+
+        $session = AiSession::where('uuid', $sessionId)
+            ->where('deployment_id', $deployment->id)
+            ->first();
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'session_not_found',
+                'message' => 'Session non trouvée',
+            ], 404);
+        }
+
+        $files = $this->fileUploadService->getSessionFiles($session);
+
+        return response()->json([
+            'session_id' => $session->uuid,
+            'files' => $files,
         ]);
     }
 

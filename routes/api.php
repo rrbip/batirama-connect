@@ -64,6 +64,10 @@ Route::prefix('whitelabel')
         // Messages
         Route::post('/sessions/{sessionId}/messages', [WidgetController::class, 'sendMessage'])
             ->middleware('editor.quota:message');
+
+        // Files (upload and list)
+        Route::post('/sessions/{sessionId}/upload', [WidgetController::class, 'uploadFile']);
+        Route::get('/sessions/{sessionId}/files', [WidgetController::class, 'getFiles']);
     });
 
 // Editor API (authentifié via API key éditeur)
