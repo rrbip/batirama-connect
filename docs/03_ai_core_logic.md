@@ -1474,15 +1474,24 @@ class LearningService
     }
 
     /**
-     * Valide une réponse sans correction
+     * Valide une réponse ET l'indexe pour l'apprentissage
+     * (la réponse originale est considérée comme correcte)
+     *
+     * @since Décembre 2025 - Valider indexe maintenant aussi dans Qdrant
      */
     public function validate(AiMessage $message, int $validatorId): bool
     {
-        return $message->update([
-            'validation_status' => 'validated',
-            'validated_by' => $validatorId,
-            'validated_at' => now(),
-        ]);
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
+            ]);
+        }
+
+        // Valider ET apprendre (sans correction = réponse originale)
+        return $this->validateAndLearn($message, $validator, null);
     }
 
     /**

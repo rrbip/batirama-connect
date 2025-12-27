@@ -254,10 +254,14 @@ Quand l'utilisateur clique sur "Corriger" :
 ```php
 LearningService::validate($message, auth()->id())
 ```
-- Change `validation_status` → `validated`
+- Change `validation_status` → `learned`
 - Enregistre `validated_by` et `validated_at`
-- Pas d'indexation Qdrant
+- **Indexe la réponse originale dans Qdrant** (collection `learned_responses`)
+- La réponse validée sera utilisée pour les futures questions similaires
 - Notification de succès
+
+> **Note** : Depuis décembre 2025, "Valider" indexe automatiquement la réponse pour l'apprentissage.
+> Auparavant, seule l'action "Corriger" déclenchait l'indexation.
 
 **Corriger et apprendre (✏️)** :
 ```php

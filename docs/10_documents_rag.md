@@ -167,10 +167,37 @@ Affiche les informations d'extraction :
 - **Taille du fichier**
 
 **Section "Texte extrait"** (dépliable) :
-Affiche le texte brut extrait du document.
+- Affiche le texte brut extrait du document
+- **Éditable** : Le texte peut être modifié manuellement pour nettoyer le contenu
+- Utile pour corriger les erreurs d'OCR ou supprimer du contenu non pertinent (headers, footers, etc.)
+- Les modifications sont sauvegardées en cliquant sur "Enregistrer"
 
 **Section "Erreur"** :
 Affiche le message d'erreur si l'extraction a échoué.
+
+### Actions d'en-tête
+
+| Action | Description |
+|--------|-------------|
+| **Gérer les chunks** | Ouvre la page des chunks (visible si chunks > 0) |
+| **Retraiter** | Ré-extrait et ré-indexe le document complet |
+| **Re-chunker** | Re-découpe le texte sans ré-extraire (visible si texte extrait présent) |
+
+#### Action "Re-chunker"
+
+Permet de re-découper le document sans refaire l'extraction :
+- Supprime les anciens chunks
+- Crée de nouveaux chunks selon la stratégie configurée
+- Lance la ré-indexation automatique
+
+**Workflow typique** :
+1. Importer un document PDF
+2. Vérifier/corriger le texte extrait
+3. Cliquer sur "Re-chunker" pour appliquer les modifications
+
+**Comportement selon la stratégie** :
+- `sentence`, `paragraph`, `fixed` : Chunking synchrone immédiat
+- `llm_assisted` : Job asynchrone sur queue `llm-chunking`
 
 ### Onglet "Indexation"
 

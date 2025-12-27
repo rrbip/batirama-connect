@@ -723,3 +723,103 @@ La page `/admin/gestion-rag` inclut :
 - **Navigation cliquable** vers les documents et agents
 - **Actions de masse** : tout supprimer avec confirmation
 - **Filtrage par agent** et statut d'indexation
+
+### 12.6 Page FAQs - Gestion des Réponses Apprises
+
+**Route** : `/admin/faqs`
+**Menu** : Intelligence Artificielle → FAQs
+
+La page FAQs permet de gérer les questions/réponses stockées dans la collection Qdrant `learned_responses`. Ces FAQ sont utilisées par l'IA pour améliorer ses réponses.
+
+#### Fonctionnalités
+
+| Fonctionnalité | Description |
+|----------------|-------------|
+| **Sélection d'agent** | Dropdown pour filtrer par agent (actualisation automatique) |
+| **Recherche** | Recherche en temps réel dans les questions et réponses |
+| **Pagination** | Navigation par pages (10 FAQs par page) |
+| **Ajout manuel** | Formulaire pour ajouter une Q&A manuellement (admin) |
+| **Suppression** | Supprimer une FAQ de la base d'apprentissage (admin) |
+
+#### Sources des FAQs
+
+Les FAQs proviennent de trois sources :
+1. **Validation** : Quand un admin valide une réponse IA (badge "Validé")
+2. **Correction** : Quand un admin corrige une réponse IA (badge "Validé")
+3. **Manuel** : Ajout direct depuis la page FAQs (badge "Manuel")
+
+#### Interface
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  FAQs - Questions/Réponses                                       │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────┐  ┌─────────────────────────┐      │
+│  │ Agent: [Assistant ▼]    │  │ + Ajouter une FAQ       │      │
+│  └──────────────────────────┘  └─────────────────────────┘      │
+├─────────────────────────────────────────────────────────────────┤
+│  🔍 [Rechercher dans les questions et réponses...]              │
+├─────────────────────────────────────────────────────────────────┤
+│  Questions/Réponses apprises - Assistant          12 / 45 FAQs  │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ Q: Comment fonctionne le parrainage ?        [Manuel] 🗑│    │
+│  ├─────────────────────────────────────────────────────────┤    │
+│  │ R: Le parrainage permet de bénéficier de...             │    │
+│  │    Ajoutée le 27/12/2025 14:30                          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│  ...                                                             │
+├─────────────────────────────────────────────────────────────────┤
+│  Affichage de 1 à 10 sur 12 FAQs                                │
+│  [← Précédent] [1] [2] [Suivant →]                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Code source
+
+- **Page** : `App\Filament\Pages\FaqsPage`
+- **Vue** : `resources/views/filament/pages/faqs-page.blade.php`
+- **Collection Qdrant** : `learned_responses`
+
+### 12.7 Validation = Apprentissage
+
+**Important** : L'action "Valider" dans les sessions IA indexe maintenant automatiquement la réponse dans la base d'apprentissage.
+
+Avant (ancienne logique) :
+- "Valider" → Marque comme `validated` (pas d'impact sur les futures réponses)
+- "Corriger" → Marque comme `learned` + indexe dans Qdrant
+
+Après (nouvelle logique) :
+- "Valider" → Marque comme `learned` + indexe la réponse originale dans Qdrant
+- "Corriger" → Marque comme `learned` + indexe la version corrigée dans Qdrant
+- "Rejeter" → Marque comme `rejected` (pas d'apprentissage)
+
+Le `LearningService::validate()` appelle maintenant `validateAndLearn()` pour indexer la réponse validée.
+
+### 12.8 Texte Extrait Éditable
+
+La page d'édition d'un document (`/admin/documents/{id}/edit`) permet maintenant :
+
+#### Édition du texte extrait
+- Le champ "Texte extrait" est maintenant **éditable**
+- Permet de nettoyer le texte avant le chunking
+- Utile pour corriger les erreurs d'OCR ou supprimer du contenu non pertinent
+
+#### Action "Re-chunker"
+Bouton disponible quand le document a du texte extrait :
+- **Re-découpe** le texte sans ré-extraire le document
+- Supprime les anciens chunks
+- Crée de nouveaux chunks selon la stratégie configurée
+- Lance la ré-indexation automatique
+
+Comportement selon la stratégie :
+| Stratégie | Comportement |
+|-----------|--------------|
+| `sentence`, `paragraph`, `fixed` | Chunking synchrone immédiat |
+| `llm_assisted` | Job asynchrone sur queue `llm-chunking` |
+
+Workflow typique :
+1. Importer un document PDF
+2. Vérifier le texte extrait
+3. Nettoyer si nécessaire (supprimer headers, footers, etc.)
+4. Cliquer sur "Re-chunker" pour appliquer les modifications
