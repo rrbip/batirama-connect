@@ -20,6 +20,19 @@ class Agent extends Model
         'color' => 'primary',
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (Agent $agent) {
+            // Filament sends explicit null, so we need to set defaults here
+            if (empty($agent->icon)) {
+                $agent->icon = 'heroicon-o-chat-bubble-left-right';
+            }
+            if (empty($agent->color)) {
+                $agent->color = 'primary';
+            }
+        });
+    }
+
     protected $fillable = [
         'tenant_id',
         'name',
