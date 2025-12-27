@@ -1135,4 +1135,575 @@ Tous les deployments en bénéficient
 
 ---
 
+## 15. Cas d'Usage Concret : Parcours Artisan-Client
+
+> ⚠️ **NÉCESSITÉ ABSOLUE** : Ce cas d'usage représente le parcours métier principal de la solution.
+> Tous les éléments listés ci-dessous DOIVENT être implémentés pour que le produit soit viable commercialement.
+> Sans ces fonctionnalités, le déploiement whitelabel ne couvre pas le besoin réel des clients.
+
+### 15.1 Scénario : Expert BTP déployé chez EBP
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        PARCOURS COMPLET ARTISAN-CLIENT                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ACTEURS :                                                                  │
+│  • EBP = Éditeur logiciel (Client whitelabel)                              │
+│  • Durant Peinture = Artisan (utilisateur EBP)                             │
+│  • M. Martin = Client final de l'artisan                                    │
+│  • Expert BTP = Agent IA déployé                                           │
+│                                                                             │
+│  ════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  1. INITIATION                                                              │
+│     ┌─────────────┐                                                        │
+│     │   Artisan   │ Crée un lien de session dans EBP                       │
+│     │   (EBP)     │ → https://chat.ebp.com/s/abc123?artisan=durant         │
+│     └──────┬──────┘                                                        │
+│            │ Envoie le lien par email/SMS                                  │
+│            ▼                                                                │
+│     ┌─────────────┐                                                        │
+│     │   Client    │ Clique sur le lien                                     │
+│     │  M. Martin  │                                                        │
+│     └──────┬──────┘                                                        │
+│            │                                                                │
+│            ▼                                                                │
+│  2. CONVERSATION IA                                                         │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  🤖 "Bonjour, je suis l'assistant de Durant Peinture.          │    │
+│     │      Pouvez-vous me décrire votre projet ?"                     │    │
+│     │                                                                 │    │
+│     │  👤 "Je souhaite refaire ma salle de bain, 8m², douche         │    │
+│     │      italienne, carrelage mural et sol"                         │    │
+│     │                                                                 │    │
+│     │  🤖 "Pouvez-vous m'envoyer quelques photos de l'existant ?"    │    │
+│     │                                                                 │    │
+│     │  👤 [📷 photo1.jpg] [📷 photo2.jpg]                             │    │
+│     │                                                                 │    │
+│     │  🤖 "Merci ! Voici un pré-devis estimatif :                    │    │
+│     │      - Dépose existant : 450€                                   │    │
+│     │      - Plomberie : 1,200€                                       │    │
+│     │      - Carrelage sol 8m² : 640€                                 │    │
+│     │      - Carrelage mural 20m² : 1,400€                            │    │
+│     │      - Douche italienne : 2,100€                                │    │
+│     │      Total HT : 5,790€ / TTC : 6,948€                          │    │
+│     │                                                                 │    │
+│     │      Un devis détaillé vous sera envoyé par Durant Peinture."  │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
+│            │                                                                │
+│            ▼                                                                │
+│  3. WEBHOOK VERS EBP                                                        │
+│     ┌─────────────────────────────────────────────────────────────────┐    │
+│     │  POST https://api.ebp.com/webhooks/ai-manager                   │    │
+│     │  {                                                              │    │
+│     │    "event": "project_complete",                                 │    │
+│     │    "artisan_id": "durant-peinture",                            │    │
+│     │    "project": { description, photos[], pre_quote{} },          │    │
+│     │    "signature": "hmac_sha256..."                                │    │
+│     │  }                                                              │    │
+│     └─────────────────────────────────────────────────────────────────┘    │
+│            │                                                                │
+│            ▼                                                                │
+│  4. VALIDATION (2 circuits possibles)                                       │
+│                                                                             │
+│     Circuit A : Expert EBP disponible                                       │
+│     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐               │
+│     │  Admin EBP  │────►│ Anonymise   │────►│  Métreur    │               │
+│     │  valide     │     │ données     │     │ Expert BTP  │               │
+│     └─────────────┘     └─────────────┘     └─────────────┘               │
+│                                                                             │
+│     Circuit B : Pas d'expert EBP                                            │
+│     ┌─────────────┐     ┌─────────────┐                                    │
+│     │ Anonymise   │────►│  Métreur    │                                    │
+│     │ directement │     │ AI-Manager  │                                    │
+│     └─────────────┘     └─────────────┘                                    │
+│            │                                                                │
+│            ▼                                                                │
+│  5. DEVIS SIGNÉ → MARKETPLACE                                               │
+│     ┌─────────────┐                      ┌─────────────┐                   │
+│     │ Client signe│                      │ AI-Manager  │                   │
+│     │ devis (EBP) │─────Webhook─────────►│ Marketplace │                   │
+│     └─────────────┘                      │ Matériaux   │                   │
+│                                          └─────────────┘                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 15.2 Éléments Manquants à Implémenter
+
+#### A. Hiérarchie 3 Niveaux : Client → Artisan → Client Final
+
+**Problème** : Le CDC actuel prévoit Client → Deployment, mais le cas réel a 3 niveaux.
+
+**Solution** : Nouvelle entité `Artisan` (ou `SubClient`)
+
+```sql
+CREATE TABLE artisans (
+    id              BIGSERIAL PRIMARY KEY,
+    uuid            UUID DEFAULT uuid_generate_v4() UNIQUE NOT NULL,
+
+    -- Relation
+    client_id       BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+
+    -- Identification (données EBP)
+    external_id     VARCHAR(100) NOT NULL,  -- ID dans le système client (EBP)
+
+    -- Informations affichées dans le chat
+    name            VARCHAR(255) NOT NULL,  -- "Durant Peinture"
+    logo_url        VARCHAR(500) NULL,
+    contact_email   VARCHAR(255) NULL,
+    contact_phone   VARCHAR(50) NULL,
+
+    -- Branding personnalisé (override deployment)
+    branding        JSONB NULL,
+    -- {
+    --   "welcome_message": "Bonjour, je suis l'assistant de {name}",
+    --   "primary_color": "#E53935",
+    --   "signature": "L'équipe Durant Peinture"
+    -- }
+
+    -- Limites (sous-quotas du client)
+    max_sessions_month  INTEGER NULL,
+
+    -- Statistiques
+    sessions_count      INTEGER DEFAULT 0,
+
+    is_active       BOOLEAN DEFAULT TRUE,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(client_id, external_id)
+);
+
+CREATE INDEX idx_artisans_client ON artisans(client_id);
+CREATE INDEX idx_artisans_external ON artisans(external_id);
+```
+
+**Modification table `ai_sessions`** :
+```sql
+ALTER TABLE ai_sessions ADD COLUMN artisan_id BIGINT NULL REFERENCES artisans(id);
+CREATE INDEX idx_sessions_artisan ON ai_sessions(artisan_id);
+```
+
+---
+
+#### B. Lien de Session Partageable
+
+**Problème** : L'artisan doit pouvoir générer un lien à envoyer à son client.
+
+**Solution** : API génération de lien + page standalone
+
+```
+POST /api/client/sessions/create-link
+Headers: X-API-Key: client_api_key
+Body: {
+    "deployment_key": "dpl_ebp_expert_btp",
+    "artisan_external_id": "durant-peinture",
+    "context": {
+        "project_type": "renovation_sdb",
+        "source": "contact_form"
+    },
+    "expires_in": 604800  // 7 jours
+}
+
+Response: {
+    "success": true,
+    "data": {
+        "session_token": "sess_abc123xyz",
+        "url": "https://chat.ebp.com/s/sess_abc123xyz",
+        "expires_at": "2025-01-03T10:00:00Z"
+    }
+}
+```
+
+**Page standalone widget** :
+```
+GET /s/{session_token}
+
+→ Page HTML minimale avec widget plein écran
+→ Charge automatiquement le contexte (artisan, branding)
+→ Mobile-friendly
+```
+
+---
+
+#### C. Branding Dynamique par Artisan
+
+**Problème** : Le message d'accueil doit mentionner l'artisan, pas le client (EBP).
+
+**Solution** : Résolution branding en cascade
+
+```
+Priorité de résolution :
+1. Artisan.branding (si défini)
+2. Deployment.branding
+3. Agent.default_branding
+
+Variables disponibles dans les templates :
+- {artisan.name} → "Durant Peinture"
+- {artisan.phone} → "06 12 34 56 78"
+- {client.name} → "EBP"
+- {agent.name} → "Expert BTP"
+```
+
+**Exemple welcome_message** :
+```
+"Bonjour, je suis l'assistant IA de {artisan.name}.
+Comment puis-je vous aider avec votre projet ?"
+```
+
+---
+
+#### D. Upload de Photos/Fichiers
+
+**Problème** : L'agent demande des photos, le widget doit supporter l'upload.
+
+**Solution** : Capacité upload dans widget + stockage S3
+
+```javascript
+// Widget API étendue
+AiManagerWidget.uploadFile(file);  // Returns promise avec URL
+
+// Événements
+AiManagerWidget.on('file:uploading', (progress) => {});
+AiManagerWidget.on('file:uploaded', (file) => {});
+AiManagerWidget.on('file:error', (error) => {});
+```
+
+**API Backend** :
+```
+POST /api/widget/v1/upload
+Headers: X-Session-ID
+Body: multipart/form-data { file }
+
+Response: {
+    "success": true,
+    "data": {
+        "file_id": "file_xyz789",
+        "url": "https://cdn.../uploads/file_xyz789.jpg",
+        "thumbnail_url": "https://cdn.../uploads/file_xyz789_thumb.jpg",
+        "mime_type": "image/jpeg",
+        "size": 245000
+    }
+}
+```
+
+**Limites** :
+- Max 10 fichiers par session
+- Max 10 MB par fichier
+- Types autorisés : jpg, png, pdf, webp
+
+**Table stockage** :
+```sql
+CREATE TABLE session_files (
+    id              BIGSERIAL PRIMARY KEY,
+    session_id      BIGINT NOT NULL REFERENCES ai_sessions(id) ON DELETE CASCADE,
+
+    file_id         VARCHAR(50) UNIQUE NOT NULL,
+    original_name   VARCHAR(255) NOT NULL,
+    storage_path    VARCHAR(500) NOT NULL,
+    mime_type       VARCHAR(100) NOT NULL,
+    size_bytes      INTEGER NOT NULL,
+
+    -- Métadonnées extraites (EXIF, dimensions...)
+    metadata        JSONB NULL,
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+#### E. Webhooks Structurés
+
+**Problème** : Les événements doivent être transmis au client (EBP) en temps réel.
+
+**Solution** : Système de webhooks complet
+
+**Table configuration webhooks** :
+```sql
+CREATE TABLE client_webhooks (
+    id              BIGSERIAL PRIMARY KEY,
+    client_id       BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+
+    url             VARCHAR(500) NOT NULL,
+    secret          VARCHAR(100) NOT NULL,  -- Pour signature HMAC
+
+    -- Événements souscrits
+    events          VARCHAR(50)[] NOT NULL,
+    -- ['session.started', 'session.completed', 'message.received',
+    --  'project.created', 'quote.requested', 'file.uploaded']
+
+    -- Configuration
+    is_active       BOOLEAN DEFAULT TRUE,
+    retry_count     INTEGER DEFAULT 3,
+    timeout_ms      INTEGER DEFAULT 5000,
+
+    -- Statistiques
+    last_triggered_at   TIMESTAMP NULL,
+    last_status         VARCHAR(20) NULL,  -- success, failed
+    failure_count       INTEGER DEFAULT 0,
+
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Payload webhook standardisé** :
+```json
+{
+    "id": "evt_abc123",
+    "event": "project.completed",
+    "created_at": "2025-01-01T10:30:00Z",
+    "deployment": {
+        "key": "dpl_ebp_expert_btp",
+        "name": "Expert BTP - EBP"
+    },
+    "artisan": {
+        "external_id": "durant-peinture",
+        "name": "Durant Peinture"
+    },
+    "session": {
+        "id": "sess_xyz789",
+        "started_at": "2025-01-01T10:00:00Z",
+        "messages_count": 12
+    },
+    "data": {
+        "project": {
+            "type": "renovation_salle_de_bain",
+            "description": "Rénovation complète SDB 8m², douche italienne...",
+            "surface_m2": 8,
+            "requirements": ["douche_italienne", "carrelage_sol", "carrelage_mural"]
+        },
+        "files": [
+            {
+                "id": "file_001",
+                "url": "https://cdn.../file_001.jpg",
+                "type": "image/jpeg"
+            }
+        ],
+        "pre_quote": {
+            "items": [
+                {"label": "Dépose existant", "quantity": 1, "unit": "forfait", "price_ht": 450},
+                {"label": "Plomberie", "quantity": 1, "unit": "forfait", "price_ht": 1200},
+                {"label": "Carrelage sol", "quantity": 8, "unit": "m²", "unit_price": 80, "price_ht": 640},
+                {"label": "Carrelage mural", "quantity": 20, "unit": "m²", "unit_price": 70, "price_ht": 1400},
+                {"label": "Douche italienne", "quantity": 1, "unit": "forfait", "price_ht": 2100}
+            ],
+            "total_ht": 5790,
+            "tva_rate": 20,
+            "total_ttc": 6948
+        }
+    },
+    "signature": "sha256=a1b2c3d4e5f6..."
+}
+```
+
+**Vérification signature (côté client)** :
+```php
+$payload = file_get_contents('php://input');
+$signature = $_SERVER['HTTP_X_AIMANAGER_SIGNATURE'];
+$expected = 'sha256=' . hash_hmac('sha256', $payload, $webhook_secret);
+
+if (!hash_equals($expected, $signature)) {
+    http_response_code(401);
+    exit('Invalid signature');
+}
+```
+
+---
+
+#### F. Génération Pré-Devis Structuré (Structured Output)
+
+**Problème** : L'agent doit produire un pré-devis au format exploitable par EBP.
+
+**Solution** : Capacité "structured output" pour agents
+
+**Configuration agent** :
+```json
+{
+    "output_schemas": {
+        "pre_quote": {
+            "type": "object",
+            "properties": {
+                "project_type": {"type": "string"},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "label": {"type": "string"},
+                            "quantity": {"type": "number"},
+                            "unit": {"type": "string"},
+                            "unit_price": {"type": "number"},
+                            "price_ht": {"type": "number"}
+                        }
+                    }
+                },
+                "total_ht": {"type": "number"},
+                "notes": {"type": "string"}
+            }
+        }
+    }
+}
+```
+
+**Instruction dans system_prompt** :
+```
+Quand tu génères un pré-devis, utilise TOUJOURS le format JSON suivant
+dans un bloc ```json-quote ... ``` pour qu'il soit parsé automatiquement.
+```
+
+---
+
+#### G. Workflow Validation Pré-Devis
+
+**Problème** : Deux circuits de validation selon disponibilité expert client.
+
+**Solution** : Statut de validation configurable par client
+
+**Configuration client** :
+```json
+{
+    "validation_workflow": {
+        "mode": "client_first",  // "client_first" | "direct_master" | "auto"
+        "client_validators": ["admin@ebp.com"],
+        "auto_promote_after_days": 7,
+        "require_anonymization": true
+    }
+}
+```
+
+**États d'une session/pré-devis** :
+```
+created → pending_client_review → client_validated → pending_master_review → validated
+                                → client_rejected
+
+created → pending_master_review → validated  (si mode = direct_master)
+                                → rejected
+```
+
+**Anonymisation automatique** :
+```php
+class ProjectAnonymizer
+{
+    public function anonymize(array $projectData): array
+    {
+        // Supprime les données personnelles avant envoi au master
+        unset($projectData['artisan']);
+        unset($projectData['session']['client_ip']);
+
+        // Remplace les noms propres dans la description
+        $projectData['description'] = $this->removeNames($projectData['description']);
+
+        // Floute les visages dans les photos (si détectés)
+        foreach ($projectData['files'] as &$file) {
+            $file['url'] = $this->blurFaces($file['url']);
+        }
+
+        return $projectData;
+    }
+}
+```
+
+---
+
+#### H. Intégration Marketplace (Retour Devis Signé)
+
+**Problème** : Quand le devis est signé chez EBP, déclencher la commande matériaux.
+
+**Solution** : API réception devis signé
+
+```
+POST /api/integration/v1/quote-signed
+Headers: X-API-Key: client_api_key
+Body: {
+    "session_id": "sess_xyz789",
+    "quote_reference": "DEV-2025-00123",
+    "signed_at": "2025-01-05T14:30:00Z",
+    "final_amount_ttc": 7200,
+    "items": [
+        {
+            "label": "Carrelage sol Gris 60x60",
+            "sku": "CARREL-GR-60",
+            "quantity": 10,
+            "unit": "m²"
+        },
+        {
+            "label": "Receveur douche 90x120",
+            "sku": "RECV-90120-BL",
+            "quantity": 1
+        }
+    ],
+    "delivery_address": {
+        "name": "Durant Peinture",
+        "street": "12 rue des Artisans",
+        "postal_code": "75011",
+        "city": "Paris"
+    }
+}
+
+Response: {
+    "success": true,
+    "data": {
+        "marketplace_order_id": "ORD-2025-00456",
+        "status": "pending_validation",
+        "estimated_delivery": "2025-01-12"
+    }
+}
+```
+
+**Workflow marketplace** :
+```
+Devis signé (EBP)
+       │
+       ▼
+API quote-signed
+       │
+       ▼
+Matching SKU → Produits Marketplace
+       │
+       ▼
+Création commande provisoire
+       │
+       ▼
+Notification artisan (validation commande)
+       │
+       ▼
+Commande fournisseur
+```
+
+---
+
+### 15.3 Résumé des Modifications CDC
+
+| Section | Modification |
+|---------|--------------|
+| **3. Architecture** | Ajouter table `artisans`, modifier `ai_sessions` |
+| **5. Widget** | Ajouter upload fichiers, page standalone /s/{token} |
+| **6. API Endpoints** | Ajouter `/sessions/create-link`, `/upload`, `/quote-signed` |
+| **8. Flux de Données** | Ajouter résolution branding 3 niveaux |
+| **Nouvelle section** | Webhooks (configuration, événements, payloads) |
+| **Nouvelle section** | Structured Output (schémas JSON pour pré-devis) |
+| **Nouvelle section** | Workflow Validation (états, anonymisation) |
+| **Nouvelle section** | Intégration Marketplace |
+
+### 15.4 Priorisation Implémentation
+
+| Phase | Fonctionnalité | Effort | Bloquant pour MVP |
+|-------|----------------|--------|-------------------|
+| **1** | Entité Artisan + lien session | 2j | ✅ OUI |
+| **1** | Branding dynamique artisan | 1j | ✅ OUI |
+| **1** | Upload photos widget | 2j | ✅ OUI |
+| **1** | Webhooks base (session.completed) | 1j | ✅ OUI |
+| **2** | Structured output pré-devis | 2j | ✅ OUI |
+| **2** | Webhooks complets (tous events) | 1j | Non |
+| **3** | Workflow validation 2 circuits | 2j | Non |
+| **3** | Anonymisation automatique | 1j | Non |
+| **4** | Intégration marketplace | 3j | Non (phase 2 produit) |
+
+**Total MVP (Phases 1-2)** : ~9 jours de développement
+
+---
+
 **Fin du document**
