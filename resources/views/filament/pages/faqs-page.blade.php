@@ -95,27 +95,26 @@
 
             {{-- Barre de recherche --}}
             <div class="mb-4">
-                <x-filament::input.wrapper>
-                    <x-filament::input.prefix>
+                <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
                         <x-heroicon-o-magnifying-glass class="w-5 h-5 text-gray-400" />
-                    </x-filament::input.prefix>
-                    <x-filament::input
+                    </span>
+                    <input
                         type="text"
                         wire:model.live.debounce.300ms="search"
                         placeholder="Rechercher dans les questions et réponses..."
+                        class="fi-input block w-full rounded-lg border-none bg-white py-2 pl-12 pr-10 text-base text-gray-950 shadow-sm ring-1 ring-gray-950/10 transition duration-75 placeholder:text-gray-400 focus:ring-2 focus:ring-primary-600 dark:bg-white/5 dark:text-white dark:ring-white/20 dark:placeholder:text-gray-500 dark:focus:ring-primary-500 sm:text-sm sm:leading-6"
                     />
                     @if(!empty($search))
-                        <x-filament::input.suffix>
-                            <button
-                                type="button"
-                                wire:click="$set('search', '')"
-                                class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                            >
-                                <x-heroicon-o-x-mark class="w-5 h-5" />
-                            </button>
-                        </x-filament::input.suffix>
+                        <button
+                            type="button"
+                            wire:click="$set('search', '')"
+                            class="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                            <x-heroicon-o-x-mark class="w-5 h-5" />
+                        </button>
                     @endif
-                </x-filament::input.wrapper>
+                </div>
             </div>
 
             @if($this->getTotalFilteredCount() === 0)
