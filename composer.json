@@ -19,10 +19,10 @@
         "livewire/livewire": "^3.6",
         "smalot/pdfparser": "^2.12",
         "symfony/dom-crawler": "^7.0",
-        "thiagoalessio/tesseract_ocr": "^2.13",
-        "darkaonline/l5-swagger": "^8.6"
+        "thiagoalessio/tesseract_ocr": "^2.13"
     },
     "require-dev": {
+        "darkaonline/l5-swagger": "^9.0",
         "fakerphp/faker": "^1.24",
         "laravel/pint": "^1.19",
         "laravel/sail": "^1.37",
