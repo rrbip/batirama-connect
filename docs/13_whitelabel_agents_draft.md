@@ -875,9 +875,9 @@ class ClientObserver
    - Mitigations : Logging détaillé, alertes si doublon, validation manuelle Enterprise
 
 2. **Portail client séparé ou dans Filament ?**
-   - Option A : Nouveau panel Filament dédié
-   - Option B : Application distincte
-   - **Recommandation** : Option A (réutilise Filament)
+   - ✅ **Option A : Nouveau panel Filament dédié**
+   - ~~Option B : Application distincte~~
+   - Avantages : Mutualisation des améliorations (ex: gestion RAG), maintenance unique, cohérence technique
 
 3. **Widget : iframe ou injection directe ?**
    - Option A : iframe (isolation totale)
