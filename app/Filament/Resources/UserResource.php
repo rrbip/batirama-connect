@@ -91,6 +91,7 @@ class UserResource extends Resource
 
                                         Forms\Components\Toggle::make('marketplace_enabled')
                                             ->label('Marketplace activé')
+                                            ->default(true)
                                             ->helperText('Artisan: peut commander des matériaux | Éditeur: accès API marketplace | Fabricant: peut gérer son catalogue et traiter les commandes'),
                                     ])
                                     ->columns(2)
