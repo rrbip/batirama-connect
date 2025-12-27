@@ -1834,4 +1834,688 @@ Commande fournisseur
 
 ---
 
+## 16. Analyse de Complexité et Checklist d'Implémentation
+
+> Ce document sert de guide exhaustif pour l'implémentation. Chaque tâche est détaillée avec ses dépendances, sa complexité, et les points d'attention pour éviter les oublis.
+
+### 16.1 Vue d'Ensemble
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CARTE DE COMPLEXITÉ PAR MODULE                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  BACKEND (Laravel/PHP)                                                      │
+│  ├── 🟢 Faible    : Migrations, Models, Relations                          │
+│  ├── 🟡 Moyenne   : API CRUD, Middlewares, Services                        │
+│  └── 🔴 Élevée    : BrandingResolver, Webhooks async, Structured Output    │
+│                                                                             │
+│  FRONTEND (Widget JS)                                                       │
+│  ├── 🟡 Moyenne   : Widget loader, UI Chat                                 │
+│  └── 🔴 Élevée    : Upload fichiers, iframe communication, Branding dynamique │
+│                                                                             │
+│  ADMIN (Filament)                                                           │
+│  ├── 🟢 Faible    : Resources CRUD                                         │
+│  └── 🟡 Moyenne   : Relations, Stats, Workflows validation                 │
+│                                                                             │
+│  INFRA                                                                      │
+│  ├── 🟢 Faible    : Storage S3                                             │
+│  └── 🟡 Moyenne   : Queue workers (webhooks), CDN                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 16.2 Estimation Détaillée par Tâche
+
+#### PHASE 1 : Fondations (MVP Critique)
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 1.1 | Migration `clients` | 🟢 Faible | 1h | - | Aucun |
+| 1.2 | Migration `agent_deployments` | 🟢 Faible | 1h | 1.1 | FK agents |
+| 1.3 | Migration `allowed_domains` | 🟢 Faible | 30min | 1.2 | - |
+| 1.4 | Migration `user_tenant_links` | 🟢 Faible | 1h | 1.1 | FK users |
+| 1.5 | Migration modification `users` | 🟢 Faible | 30min | - | Données existantes |
+| 1.6 | Migration modification `ai_sessions` | 🟢 Faible | 30min | 1.4 | Données existantes |
+| 1.7 | Model `Client` + relations | 🟢 Faible | 1h | 1.1 | - |
+| 1.8 | Model `AgentDeployment` + relations | 🟢 Faible | 1h | 1.2 | - |
+| 1.9 | Model `AllowedDomain` + relations | 🟢 Faible | 30min | 1.3 | - |
+| 1.10 | Model `UserTenantLink` + relations | 🟢 Faible | 1h | 1.4 | - |
+| 1.11 | Modification Model `User` | 🟢 Faible | 30min | 1.5 | - |
+| 1.12 | Modification Model `AiSession` | 🟢 Faible | 30min | 1.6 | - |
+| **Sous-total Phase 1.A** | | | **8h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 1.13 | `ClientResource` Filament | 🟡 Moyenne | 3h | 1.7 | - |
+| 1.14 | `AgentDeploymentResource` Filament | 🟡 Moyenne | 4h | 1.8 | Relations complexes |
+| 1.15 | `UserTenantLinkResource` Filament | 🟡 Moyenne | 2h | 1.10 | - |
+| 1.16 | Intégration domaines dans deployment | 🟡 Moyenne | 2h | 1.9, 1.14 | Repeater Filament |
+| **Sous-total Phase 1.B** | | | **11h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 1.17 | Middleware `ValidateDeploymentDomain` | 🟡 Moyenne | 3h | 1.8, 1.9 | Regex wildcards |
+| 1.18 | Middleware `DynamicCors` | 🟡 Moyenne | 2h | 1.17 | Headers CORS |
+| 1.19 | Rate Limiting par deployment | 🟡 Moyenne | 2h | 1.17 | Redis/Cache |
+| 1.20 | Vérification quotas client | 🟡 Moyenne | 2h | 1.7 | Compteurs atomiques |
+| **Sous-total Phase 1.C** | | | **9h** | | |
+
+**Total Phase 1 : 28h (3.5 jours)**
+
+---
+
+#### PHASE 2 : Widget & API
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 2.1 | API `/widget/v1/init` | 🟡 Moyenne | 2h | Phase 1 | - |
+| 2.2 | API `/widget/v1/message` | 🟡 Moyenne | 3h | 2.1 | Streaming |
+| 2.3 | API `/widget/v1/message/{id}/status` | 🟢 Faible | 1h | 2.2 | - |
+| 2.4 | API `/client/sessions/create-link` | 🟡 Moyenne | 2h | 1.10 | Token sécurisé |
+| 2.5 | API `/client/users/link` | 🟡 Moyenne | 2h | 1.10 | Match email |
+| 2.6 | API `/client/users/create-and-link` | 🟡 Moyenne | 2h | 2.5 | Invitation email |
+| **Sous-total Phase 2.A** | | | **12h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 2.7 | Widget `loader.js` | 🟡 Moyenne | 4h | - | Cross-browser |
+| 2.8 | Widget iframe container | 🟡 Moyenne | 3h | 2.7 | PostMessage |
+| 2.9 | Widget UI Chat (HTML/CSS) | 🟡 Moyenne | 6h | 2.8 | Responsive |
+| 2.10 | Widget communication iframe ↔ parent | 🔴 Élevée | 4h | 2.8 | Sécurité |
+| 2.11 | Widget API publique (open/close/send) | 🟡 Moyenne | 2h | 2.10 | - |
+| 2.12 | Page standalone `/s/{token}` | 🟡 Moyenne | 2h | 2.8 | Mobile |
+| **Sous-total Phase 2.B** | | | **21h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 2.13 | Service `BrandingResolver` | 🔴 Élevée | 4h | 1.10, 1.12 | Cascade 4 niveaux |
+| 2.14 | Interpolation variables branding | 🟡 Moyenne | 2h | 2.13 | Regex |
+| 2.15 | Intégration branding dans widget | 🟡 Moyenne | 2h | 2.9, 2.13 | CSS dynamique |
+| **Sous-total Phase 2.C** | | | **8h** | | |
+
+**Total Phase 2 : 41h (5 jours)**
+
+---
+
+#### PHASE 3 : Upload & Webhooks
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 3.1 | Migration `session_files` | 🟢 Faible | 30min | - | - |
+| 3.2 | Migration `client_webhooks` | 🟢 Faible | 30min | 1.1 | - |
+| 3.3 | Model `SessionFile` | 🟢 Faible | 30min | 3.1 | - |
+| 3.4 | Model `ClientWebhook` | 🟢 Faible | 30min | 3.2 | - |
+| 3.5 | API `/widget/v1/upload` | 🟡 Moyenne | 3h | 3.1 | Validation MIME |
+| 3.6 | Service `FileUploadService` (S3) | 🟡 Moyenne | 3h | 3.5 | Config S3 |
+| 3.7 | Génération thumbnails | 🟡 Moyenne | 2h | 3.6 | Intervention/Image |
+| 3.8 | Widget: UI upload + progress | 🟡 Moyenne | 4h | 2.9, 3.5 | UX |
+| **Sous-total Phase 3.A** | | | **14h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 3.9 | Service `WebhookDispatcher` | 🔴 Élevée | 4h | 3.4 | Async, retry |
+| 3.10 | Job `DispatchWebhookJob` (queue) | 🟡 Moyenne | 2h | 3.9 | Queue config |
+| 3.11 | Signature HMAC webhooks | 🟡 Moyenne | 1h | 3.9 | Crypto |
+| 3.12 | Events Laravel (session.*, message.*) | 🟡 Moyenne | 2h | 3.9 | - |
+| 3.13 | Logging webhooks (succès/échecs) | 🟡 Moyenne | 2h | 3.9 | - |
+| 3.14 | UI Filament: gestion webhooks | 🟡 Moyenne | 3h | 3.4 | - |
+| 3.15 | UI Filament: logs webhooks | 🟡 Moyenne | 2h | 3.13 | - |
+| **Sous-total Phase 3.B** | | | **16h** | | |
+
+**Total Phase 3 : 30h (4 jours)**
+
+---
+
+#### PHASE 4 : Structured Output & Validation
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 4.1 | Parser JSON structured output | 🔴 Élevée | 4h | - | Regex robuste |
+| 4.2 | Schéma JSON pré-devis | 🟡 Moyenne | 2h | 4.1 | Validation |
+| 4.3 | Intégration dans prompt agent | 🟡 Moyenne | 2h | 4.2 | Tests |
+| 4.4 | Extraction auto dans webhook payload | 🟡 Moyenne | 2h | 4.1, 3.9 | - |
+| **Sous-total Phase 4.A** | | | **10h** | | |
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 4.5 | États validation (migration) | 🟢 Faible | 1h | - | - |
+| 4.6 | Workflow machine (states) | 🟡 Moyenne | 3h | 4.5 | Transitions |
+| 4.7 | UI validation client (Filament) | 🟡 Moyenne | 4h | 4.6 | UX |
+| 4.8 | UI validation master (Filament) | 🟡 Moyenne | 3h | 4.7 | - |
+| 4.9 | Service `ProjectAnonymizer` | 🟡 Moyenne | 3h | - | NLP basique |
+| 4.10 | Intégration flou visages (optionnel) | 🔴 Élevée | 4h | - | ML/API externe |
+| **Sous-total Phase 4.B** | | | **18h** | | |
+
+**Total Phase 4 : 28h (3.5 jours)**
+
+---
+
+#### PHASE 5 : Marketplace (Phase 2 Produit)
+
+| # | Tâche | Complexité | Temps | Dépendances | Risques |
+|---|-------|------------|-------|-------------|---------|
+| 5.1 | API `/integration/v1/quote-signed` | 🟡 Moyenne | 3h | - | Validation |
+| 5.2 | Service matching SKU → produits | 🔴 Élevée | 6h | 5.1 | Algorithme |
+| 5.3 | Création commande provisoire | 🟡 Moyenne | 3h | 5.2 | - |
+| 5.4 | Notification artisan | 🟡 Moyenne | 2h | 5.3 | Email/Push |
+| 5.5 | UI validation commande (artisan) | 🟡 Moyenne | 4h | 5.4 | - |
+| 5.6 | Intégration fournisseurs | 🔴 Élevée | 8h | 5.5 | APIs variées |
+| **Total Phase 5** | | | **26h (3 jours)** | | |
+
+---
+
+### 16.3 Résumé Temps Total
+
+| Phase | Description | Temps | Jours |
+|-------|-------------|-------|-------|
+| **1** | Fondations (DB, Models, Admin, Sécurité) | 28h | 3.5j |
+| **2** | Widget & API | 41h | 5j |
+| **3** | Upload & Webhooks | 30h | 4j |
+| **4** | Structured Output & Validation | 28h | 3.5j |
+| **5** | Marketplace (optionnel) | 26h | 3j |
+| | | | |
+| **MVP (1-3)** | Fonctionnel pour démo client | **99h** | **12.5j** |
+| **Complet (1-4)** | Production ready | **127h** | **16j** |
+| **Avec Marketplace** | Full feature | **153h** | **19j** |
+
+> ⚠️ **Facteur de risque** : Multiplier par 1.3 pour imprévus → MVP réaliste : **16-17 jours**
+
+---
+
+### 16.4 Checklist d'Implémentation Complète
+
+#### ☐ PHASE 1 : Base de données & Models
+
+```
+☐ 1. MIGRATIONS
+  ☐ 1.1 create_clients_table
+      ☐ uuid, name, slug, logo_url, website_url
+      ☐ contact_name, contact_email, contact_phone
+      ☐ billing_email, billing_address, billing_type, billing_status
+      ☐ max_deployments, max_sessions_month, max_messages_month
+      ☐ current_month_sessions, current_month_messages, total_sessions
+      ☐ api_key, api_key_prefix (générer avec Str::random)
+      ☐ status, notes, timestamps
+      ☐ Index: slug, api_key
+
+  ☐ 1.2 create_agent_deployments_table
+      ☐ uuid, agent_id (FK), client_id (FK)
+      ☐ name, deployment_key (unique, générer)
+      ☐ deployment_mode (shared/dedicated)
+      ☐ config_overlay (JSONB)
+      ☐ branding (JSONB)
+      ☐ dedicated_collection (nullable)
+      ☐ max_sessions_day, max_messages_day, rate_limit_per_ip
+      ☐ sessions_count, messages_count, last_activity_at
+      ☐ is_active, timestamps
+      ☐ Index: deployment_key, agent_id, client_id
+      ☐ Unique: (agent_id, client_id, name)
+
+  ☐ 1.3 create_allowed_domains_table
+      ☐ deployment_id (FK)
+      ☐ domain, is_wildcard, environment
+      ☐ is_active, verified_at, created_at
+      ☐ Index: deployment_id, domain
+      ☐ Unique: (deployment_id, domain)
+
+  ☐ 1.4 create_user_tenant_links_table
+      ☐ user_id (FK), client_id (FK)
+      ☐ external_id
+      ☐ branding (JSONB), permissions (JSONB)
+      ☐ is_active, linked_at
+      ☐ Index: user_id, client_id, external_id
+      ☐ Unique: (user_id, client_id), (client_id, external_id)
+
+  ☐ 1.5 modify_users_table
+      ☐ ADD role VARCHAR(50) DEFAULT 'admin'
+      ☐ ADD branding JSONB NULL
+      ☐ ADD marketplace_enabled BOOLEAN DEFAULT FALSE
+
+  ☐ 1.6 modify_ai_sessions_table
+      ☐ ADD user_id (FK nullable)
+      ☐ ADD tenant_link_id (FK nullable)
+      ☐ ADD deployment_id (FK nullable)
+      ☐ Index: user_id, tenant_link_id, deployment_id
+
+  ☐ 1.7 modify_agents_table
+      ☐ ADD deployment_mode VARCHAR(20) DEFAULT 'internal'
+      ☐ ADD is_whitelabel_enabled BOOLEAN DEFAULT FALSE
+      ☐ ADD whitelabel_config JSONB NULL
+```
+
+```
+☐ 2. MODELS & RELATIONS
+  ☐ 2.1 Client.php
+      ☐ $fillable complet
+      ☐ $casts: billing_type, status (enum), api_key (encrypted)
+      ☐ Relation: deployments() hasMany
+      ☐ Relation: tenantLinks() hasMany
+      ☐ Relation: webhooks() hasMany
+      ☐ Méthode: hasQuotaRemaining(): bool
+      ☐ Méthode: generateApiKey(): string
+      ☐ Boot: générer api_key si vide
+
+  ☐ 2.2 AgentDeployment.php
+      ☐ $fillable, $casts (config_overlay, branding as array)
+      ☐ Relation: agent() belongsTo
+      ☐ Relation: client() belongsTo
+      ☐ Relation: allowedDomains() hasMany
+      ☐ Relation: sessions() hasMany
+      ☐ Méthode: generateDeploymentKey(): string
+      ☐ Méthode: isDomainAllowed(string $domain): bool
+
+  ☐ 2.3 AllowedDomain.php
+      ☐ $fillable, $casts
+      ☐ Relation: deployment() belongsTo
+      ☐ Méthode: matches(string $host): bool
+
+  ☐ 2.4 UserTenantLink.php
+      ☐ $fillable, $casts (branding, permissions as array)
+      ☐ Relation: user() belongsTo
+      ☐ Relation: client() belongsTo
+      ☐ Relation: sessions() hasMany
+
+  ☐ 2.5 Modifier User.php
+      ☐ Ajouter $casts: role, branding
+      ☐ Relation: tenantLinks() hasMany
+      ☐ Méthode: isArtisan(): bool
+      ☐ Méthode: linkToClient(Client $client, array $data)
+
+  ☐ 2.6 Modifier AiSession.php
+      ☐ Relation: user() belongsTo (nullable)
+      ☐ Relation: tenantLink() belongsTo (nullable)
+      ☐ Relation: deployment() belongsTo (nullable)
+      ☐ Relation: files() hasMany
+```
+
+```
+☐ 3. FILAMENT RESOURCES
+  ☐ 3.1 ClientResource.php
+      ☐ Table: colonnes (logo, name, deployments_count, usage, status)
+      ☐ Table: filters (status, billing_type)
+      ☐ Table: actions (edit, view stats)
+      ☐ Form: sections (info, contact, billing, limites, API)
+      ☐ Form: api_key avec bouton régénérer
+      ☐ Page: Stats client (graphiques usage)
+
+  ☐ 3.2 AgentDeploymentResource.php
+      ☐ Table: colonnes (agent, client, domains_count, sessions, status)
+      ☐ Table: filters (client, agent, mode)
+      ☐ Form: section config_overlay (JSON editor ou champs)
+      ☐ Form: section branding (color picker, file upload)
+      ☐ Form: Repeater pour allowed_domains
+      ☐ Form: bouton "Copier code intégration"
+      ☐ Page: Tester le widget (preview)
+
+  ☐ 3.3 UserTenantLinkResource.php (ou inline dans UserResource)
+      ☐ Afficher les liens par utilisateur
+      ☐ Form: sélection client, external_id, branding
+```
+
+```
+☐ 4. MIDDLEWARES & SÉCURITÉ
+  ☐ 4.1 ValidateDeploymentDomain.php
+      ☐ Extraire deployment_key (header ou query)
+      ☐ Charger deployment avec allowedDomains
+      ☐ Vérifier is_active
+      ☐ Extraire Origin/Referer, parser host
+      ☐ Matcher contre domains (exact + wildcard)
+      ☐ Support localhost si environment=development
+      ☐ Injecter deployment dans request
+      ☐ Logging tentatives non autorisées
+
+  ☐ 4.2 DynamicCors.php
+      ☐ Lire deployment depuis request
+      ☐ Générer Access-Control-Allow-Origin dynamique
+      ☐ Gérer preflight OPTIONS
+
+  ☐ 4.3 RateLimitDeployment.php
+      ☐ Rate limit par IP (cache key avec deployment_id)
+      ☐ Respecter deployment.rate_limit_per_ip
+      ☐ Headers X-RateLimit-*
+
+  ☐ 4.4 CheckClientQuota.php
+      ☐ Vérifier quotas mensuels client
+      ☐ Incrémenter compteurs (atomic)
+      ☐ Retourner 429 si dépassé
+```
+
+---
+
+#### ☐ PHASE 2 : API & Widget
+
+```
+☐ 5. API ENDPOINTS
+  ☐ 5.1 POST /api/widget/v1/init
+      ☐ Request: deployment_key, context (optional)
+      ☐ Middleware: ValidateDeploymentDomain
+      ☐ Créer session (avec deployment_id, tenant_link_id si context)
+      ☐ Résoudre branding
+      ☐ Response: session_id, agent info, branding, welcome_message
+
+  ☐ 5.2 POST /api/widget/v1/message
+      ☐ Request: content, session_id
+      ☐ Headers: X-Session-ID
+      ☐ Valider session active
+      ☐ Créer message, dispatch job
+      ☐ Response: message_id, status: queued
+
+  ☐ 5.3 GET /api/widget/v1/message/{id}/status
+      ☐ Polling status (queued/processing/completed/failed)
+      ☐ Si completed: retourner content
+
+  ☐ 5.4 GET /api/widget/v1/session/{id}/messages
+      ☐ Liste messages de la session
+
+  ☐ 5.5 POST /api/client/sessions/create-link
+      ☐ Auth: API key client
+      ☐ Request: deployment_key, artisan_external_id, context, expires_in
+      ☐ Trouver tenant_link par external_id
+      ☐ Générer token sécurisé (signé)
+      ☐ Response: url, session_token, expires_at
+
+  ☐ 5.6 POST /api/client/users/link
+      ☐ Auth: API key client
+      ☐ Trouver user par email
+      ☐ Créer user_tenant_link
+      ☐ Response: link_id, success
+
+  ☐ 5.7 POST /api/client/users/create-and-link
+      ☐ Créer user (role=artisan, password null)
+      ☐ Créer user_tenant_link
+      ☐ Si send_invitation: envoyer email
+```
+
+```
+☐ 6. WIDGET JAVASCRIPT
+  ☐ 6.1 loader.js
+      ☐ Lire data-deployment-key ou window.AiManagerConfig
+      ☐ Créer iframe avec src vers widget.html
+      ☐ Injecter dans body ou containerSelector
+      ☐ Exposer window.AiManagerWidget
+
+  ☐ 6.2 widget.html (dans iframe)
+      ☐ CSS: reset, variables, responsive
+      ☐ HTML: header, messages, input, bouton flottant
+      ☐ JS: communication postMessage avec parent
+
+  ☐ 6.3 Communication iframe ↔ parent
+      ☐ Parent → iframe: init(config), open(), close(), sendMessage()
+      ☐ Iframe → parent: ready, opened, closed, message:sent, message:received
+      ☐ Valider origin des messages
+
+  ☐ 6.4 API publique widget
+      ☐ AiManagerWidget.open()
+      ☐ AiManagerWidget.close()
+      ☐ AiManagerWidget.toggle()
+      ☐ AiManagerWidget.sendMessage(text)
+      ☐ AiManagerWidget.setContext(data)
+      ☐ AiManagerWidget.on(event, callback)
+      ☐ AiManagerWidget.destroy()
+
+  ☐ 6.5 Page standalone /s/{token}
+      ☐ Route: web.php GET /s/{token}
+      ☐ Controller: valider token, extraire session
+      ☐ View: page HTML minimale, widget plein écran
+      ☐ Meta viewport pour mobile
+```
+
+```
+☐ 7. SERVICE BRANDING
+  ☐ 7.1 BrandingResolver.php
+      ☐ Méthode resolve(AiSession $session): array
+      ☐ Cascade: agent → deployment → user → tenant_link
+      ☐ Méthode interpolate(array $branding, array $vars): array
+      ☐ Variables: {user.name}, {client.name}, {agent.name}
+      ☐ Regex pour remplacer {xxx.yyy}
+      ☐ Gérer valeurs manquantes (supprimer placeholder)
+```
+
+---
+
+#### ☐ PHASE 3 : Upload & Webhooks
+
+```
+☐ 8. UPLOAD FICHIERS
+  ☐ 8.1 Migration session_files
+      ☐ session_id (FK), file_id, original_name
+      ☐ storage_path, mime_type, size_bytes
+      ☐ metadata (JSONB), created_at
+
+  ☐ 8.2 SessionFile.php model
+      ☐ Relation session()
+      ☐ Accessor url() (générer signed URL S3)
+      ☐ Accessor thumbnailUrl()
+
+  ☐ 8.3 POST /api/widget/v1/upload
+      ☐ Valider: mime type, taille max (10MB)
+      ☐ Valider: nombre fichiers session (max 10)
+      ☐ Upload vers S3 (path: uploads/{session_id}/{file_id})
+      ☐ Générer thumbnail si image
+      ☐ Créer SessionFile
+      ☐ Response: file_id, url, thumbnail_url
+
+  ☐ 8.4 FileUploadService.php
+      ☐ Méthode upload(UploadedFile, session_id): SessionFile
+      ☐ Méthode generateThumbnail(path): string
+      ☐ Config S3: bucket, region, credentials
+      ☐ Utiliser Intervention/Image pour thumbnails
+
+  ☐ 8.5 Widget: UI upload
+      ☐ Bouton clip/attachment dans input
+      ☐ Input file hidden (accept images)
+      ☐ Preview avant envoi
+      ☐ Progress bar upload
+      ☐ Afficher thumbnail dans messages
+```
+
+```
+☐ 9. WEBHOOKS
+  ☐ 9.1 Migration client_webhooks
+      ☐ client_id (FK), url, secret
+      ☐ events (array), is_active
+      ☐ retry_count, timeout_ms
+      ☐ last_triggered_at, last_status, failure_count
+
+  ☐ 9.2 ClientWebhook.php model
+      ☐ $casts: events as array
+      ☐ Relation client()
+      ☐ Méthode shouldTrigger(string $event): bool
+
+  ☐ 9.3 WebhookDispatcher.php service
+      ☐ Méthode dispatch(Client $client, string $event, array $data)
+      ☐ Trouver webhooks actifs pour cet event
+      ☐ Pour chaque webhook: dispatch job
+
+  ☐ 9.4 DispatchWebhookJob.php
+      ☐ Properties: webhook_id, event, payload
+      ☐ Générer signature HMAC-SHA256
+      ☐ HTTP POST avec timeout
+      ☐ Headers: X-AiManager-Signature, X-AiManager-Event
+      ☐ Retry logic (3 tentatives, backoff)
+      ☐ Logging résultat
+
+  ☐ 9.5 Events Laravel
+      ☐ SessionStarted (après création session)
+      ☐ SessionCompleted (après dernier message ou timeout)
+      ☐ MessageReceived (après réponse IA)
+      ☐ FileUploaded (après upload)
+      ☐ ProjectCreated (après structured output détecté)
+
+  ☐ 9.6 Listeners → WebhookDispatcher
+      ☐ Chaque listener appelle WebhookDispatcher
+
+  ☐ 9.7 Filament: gestion webhooks
+      ☐ Dans ClientResource: relation panel webhooks
+      ☐ Créer/éditer webhook (url, secret, events checkboxes)
+      ☐ Bouton "Tester webhook"
+      ☐ Historique: derniers envois avec status
+```
+
+---
+
+#### ☐ PHASE 4 : Structured Output & Validation
+
+```
+☐ 10. STRUCTURED OUTPUT
+  ☐ 10.1 StructuredOutputParser.php
+      ☐ Méthode parse(string $content): ?array
+      ☐ Regex pour trouver ```json-quote ... ```
+      ☐ Valider JSON
+      ☐ Retourner array ou null
+
+  ☐ 10.2 Schéma pré-devis
+      ☐ Config dans agent: output_schemas.pre_quote
+      ☐ Valider structure (project_type, items[], total_ht)
+      ☐ Nettoyer/normaliser les données
+
+  ☐ 10.3 Intégration prompt
+      ☐ Ajouter instructions dans system_prompt Expert BTP
+      ☐ Template du format JSON attendu
+      ☐ Tests avec différents projets
+
+  ☐ 10.4 Extraction dans webhook
+      ☐ Après réponse IA, parser le contenu
+      ☐ Si structured output trouvé: inclure dans webhook payload
+      ☐ Event: project.created avec data.pre_quote
+```
+
+```
+☐ 11. WORKFLOW VALIDATION
+  ☐ 11.1 Migration: ajouter status à ai_sessions
+      ☐ validation_status: pending, pending_client_review,
+        client_validated, pending_master_review, validated, rejected
+      ☐ validated_by (FK user), validated_at
+
+  ☐ 11.2 Config client: validation_workflow
+      ☐ Dans clients.settings (JSONB)
+      ☐ mode: client_first | direct_master | auto
+      ☐ client_validators: array emails
+      ☐ auto_promote_after_days: int
+
+  ☐ 11.3 ValidationWorkflow.php service
+      ☐ Méthode getNextStatus(session, action): string
+      ☐ Méthode canTransition(session, status): bool
+      ☐ Méthode transition(session, status, user): void
+
+  ☐ 11.4 Filament: Page validation client
+      ☐ Liste sessions pending_client_review
+      ☐ Voir détails projet, pré-devis
+      ☐ Boutons: Valider, Rejeter, Demander modifications
+      ☐ Anonymisation avant envoi master
+
+  ☐ 11.5 Filament: Page validation master
+      ☐ Liste sessions pending_master_review
+      ☐ Voir projet anonymisé
+      ☐ Valider/Rejeter avec commentaire
+      ☐ Option: promouvoir en learned response
+
+  ☐ 11.6 ProjectAnonymizer.php
+      ☐ Supprimer: artisan info, client IP, emails
+      ☐ Remplacer noms propres (NLP simple ou liste)
+      ☐ Optionnel: flouter visages (API Vision)
+```
+
+---
+
+#### ☐ PHASE 5 : Marketplace (si applicable)
+
+```
+☐ 12. INTÉGRATION MARKETPLACE
+  ☐ 12.1 POST /api/integration/v1/quote-signed
+      ☐ Auth: API key client
+      ☐ Request: session_id, quote_reference, items[], delivery_address
+      ☐ Valider session existe et appartient au client
+
+  ☐ 12.2 SkuMatchingService.php
+      ☐ Pour chaque item: chercher produit marketplace
+      ☐ Matching par label fuzzy ou SKU exact
+      ☐ Retourner produits trouvés + non trouvés
+
+  ☐ 12.3 MarketplaceOrder model + migration
+      ☐ session_id, user_id (artisan)
+      ☐ status: pending_validation, validated, ordered, delivered
+      ☐ items (JSONB), total, delivery_address
+
+  ☐ 12.4 Notification artisan
+      ☐ Email: "Nouvelle commande à valider"
+      ☐ Lien vers page validation
+
+  ☐ 12.5 UI artisan: valider commande
+      ☐ Voir produits matchés
+      ☐ Modifier quantités si besoin
+      ☐ Confirmer commande
+
+  ☐ 12.6 Intégration fournisseurs
+      ☐ API par fournisseur (abstraction)
+      ☐ Créer commande fournisseur
+      ☐ Suivi livraison
+```
+
+---
+
+### 16.5 Points d'Attention Critiques
+
+```
+⚠️ SÉCURITÉ
+  • API keys clients: toujours hasher/encrypter en DB
+  • Deployment keys: préfixer (dpl_) pour identification
+  • Webhooks: TOUJOURS vérifier signature HMAC côté client
+  • CORS: ne jamais retourner Access-Control-Allow-Origin: *
+  • Upload: valider MIME type côté serveur (pas juste extension)
+  • iframe: valider origin dans postMessage
+  • Tokens session: signer avec HMAC, expiration
+
+⚠️ PERFORMANCE
+  • Rate limiting: utiliser Redis (pas file cache)
+  • Compteurs: incréments atomiques (DB::raw ou Redis)
+  • Webhooks: toujours async (queue jobs)
+  • Branding: cacher le résultat résolu (cache 5min)
+  • Uploads: streaming vers S3 (pas de stockage local temp)
+
+⚠️ UX
+  • Widget: tester sur mobile (touch, clavier virtuel)
+  • Upload: feedback progress en temps réel
+  • Erreurs: messages clairs en français
+  • Branding: prévisualisation avant save
+
+⚠️ TESTS
+  • Middleware domaine: tester wildcards (*.example.com)
+  • Webhook retry: simuler échecs réseau
+  • Branding cascade: tester tous les cas (null values)
+  • Structured output: tester JSON malformé
+```
+
+---
+
+### 16.6 Ordre d'Implémentation Recommandé
+
+```
+Semaine 1 (Phase 1)
+├── Jour 1-2: Migrations + Models
+├── Jour 3-4: Filament Resources
+└── Jour 5: Middlewares sécurité
+
+Semaine 2 (Phase 2)
+├── Jour 1-2: API endpoints
+├── Jour 3-4: Widget JS + iframe
+└── Jour 5: BrandingResolver + tests
+
+Semaine 3 (Phase 3)
+├── Jour 1-2: Upload fichiers
+├── Jour 3-4: Webhooks système
+└── Jour 5: Tests intégration
+
+Semaine 4 (Phase 4 + Buffer)
+├── Jour 1-2: Structured output
+├── Jour 3-4: Workflow validation
+└── Jour 5: Bug fixes, polish
+
+→ Démo client possible fin semaine 3
+→ Production ready fin semaine 4
+```
+
+---
+
 **Fin du document**
