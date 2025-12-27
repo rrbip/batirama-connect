@@ -146,8 +146,9 @@ class WebCrawlResource extends Resource
 
                                         Forms\Components\TextInput::make('user_agent')
                                             ->label('User-Agent')
-                                            ->default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                                            ->helperText('User-Agent Chrome par défaut pour éviter les blocages'),
+                                            ->default(WebCrawl::DEFAULT_USER_AGENT)
+                                            ->placeholder(WebCrawl::DEFAULT_USER_AGENT)
+                                            ->helperText('Laissez vide pour le Chrome par défaut'),
                                     ])
                                     ->columns(2),
                             ]),

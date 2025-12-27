@@ -306,10 +306,12 @@ class CrawlUrlJob implements ShouldQueue
             return;
         }
 
-        if ($this->urlEntry->depth >= $this->crawl->max_depth) {
+        // Vérifier la profondeur max (0 = illimité)
+        if ($this->crawl->max_depth > 0 && $this->urlEntry->depth >= $this->crawl->max_depth) {
             Log::debug('Max depth reached for this branch', [
                 'crawl_id' => $this->crawl->id,
                 'depth' => $this->urlEntry->depth,
+                'max_depth' => $this->crawl->max_depth,
             ]);
 
             return;

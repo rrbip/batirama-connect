@@ -366,12 +366,12 @@ class FabricantCatalogResource extends Resource
                     ->requiresConfirmation()
                     ->modalDescription('Lancer un nouveau crawl du site fabricant pour extraire les produits ?')
                     ->action(function (FabricantCatalog $record) {
-                        // Create or reuse web crawl
+                        // Create or reuse web crawl - unlimited depth/pages for fabricant catalogs
                         $crawl = WebCrawl::create([
                             'start_url' => $record->website_url,
                             'allowed_domains' => [parse_url($record->website_url, PHP_URL_HOST)],
-                            'max_depth' => 5,
-                            'max_pages' => 1000,
+                            'max_depth' => 0,       // 0 = illimité
+                            'max_pages' => 0,       // 0 = illimité
                             'respect_robots_txt' => true,
                             'delay_ms' => 1000,
                             'status' => 'pending',

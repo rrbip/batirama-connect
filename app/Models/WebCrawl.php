@@ -20,8 +20,10 @@ class WebCrawl extends Model
 {
     use HasFactory;
 
+    public const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
     /**
-     * Boot the model - Auto-generate UUID on creation.
+     * Boot the model - Auto-generate UUID on creation and ensure user_agent has default.
      */
     protected static function boot(): void
     {
@@ -30,6 +32,15 @@ class WebCrawl extends Model
         static::creating(function (WebCrawl $crawl) {
             if (empty($crawl->uuid)) {
                 $crawl->uuid = (string) Str::uuid();
+            }
+            if (empty($crawl->user_agent)) {
+                $crawl->user_agent = self::DEFAULT_USER_AGENT;
+            }
+        });
+
+        static::saving(function (WebCrawl $crawl) {
+            if (empty($crawl->user_agent)) {
+                $crawl->user_agent = self::DEFAULT_USER_AGENT;
             }
         });
     }
