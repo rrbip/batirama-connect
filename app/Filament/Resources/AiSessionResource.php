@@ -69,15 +69,28 @@ class AiSessionResource extends Resource
                     ->numeric()
                     ->sortable(),
 
-                Tables\Columns\TextColumn::make('pending_count')
-                    ->label('À valider')
-                    ->badge()
-                    ->color(fn ($state) => $state > 0 ? 'warning' : 'gray')
-                    ->getStateUsing(fn ($record) => $record->messages()
-                        ->where('role', 'assistant')
-                        ->where('validation_status', 'pending')
-                        ->count()
-                    ),
+                Tables\Columns\TextColumn::make('validation_summary')
+                    ->label('Validation')
+                    ->getStateUsing(function ($record) {
+                        $stats = $record->messages()
+                            ->where('role', 'assistant')
+                            ->selectRaw("
+                                SUM(CASE WHEN validation_status = 'pending' THEN 1 ELSE 0 END) as pending,
+                                SUM(CASE WHEN validation_status = 'validated' THEN 1 ELSE 0 END) as validated,
+                                SUM(CASE WHEN validation_status = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                                SUM(CASE WHEN validation_status = 'learned' THEN 1 ELSE 0 END) as learned
+                            ")
+                            ->first();
+
+                        $parts = [];
+                        if ($stats->pending > 0) $parts[] = "⏳{$stats->pending}";
+                        if ($stats->validated > 0) $parts[] = "✅{$stats->validated}";
+                        if ($stats->rejected > 0) $parts[] = "❌{$stats->rejected}";
+                        if ($stats->learned > 0) $parts[] = "📚{$stats->learned}";
+
+                        return implode(' ', $parts) ?: '-';
+                    })
+                    ->html(),
 
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Statut')
@@ -113,6 +126,23 @@ class AiSessionResource extends Resource
                             ->where('role', 'assistant')
                     ))
                     ->toggle(),
+
+                Tables\Filters\SelectFilter::make('validation_status')
+                    ->label('Statut validation')
+                    ->options([
+                        'pending' => '⏳ En attente',
+                        'validated' => '✅ Validées',
+                        'rejected' => '❌ Rejetées',
+                        'learned' => '📚 Corrigées (apprentissage)',
+                    ])
+                    ->query(function (Builder $query, array $data) {
+                        if (!empty($data['value'])) {
+                            $query->whereHas('messages', function ($q) use ($data) {
+                                $q->where('role', 'assistant')
+                                    ->where('validation_status', $data['value']);
+                            });
+                        }
+                    }),
 
                 Tables\Filters\Filter::make('created_at')
                     ->form([
