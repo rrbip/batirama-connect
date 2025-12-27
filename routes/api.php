@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\PartnerApiController;
 use App\Http\Controllers\Api\PublicChatController;
 use App\Http\Controllers\Api\Whitelabel\EditorController;
+use App\Http\Controllers\Api\Whitelabel\MarketplaceController;
 use App\Http\Controllers\Api\Whitelabel\WidgetController;
 use App\Http\Middleware\PartnerApiAuth;
 use Illuminate\Support\Facades\Route;
@@ -89,6 +90,21 @@ Route::prefix('editor')
 
         // Stats
         Route::get('/stats', [EditorController::class, 'getStats']);
+
+        // Marketplace
+        Route::prefix('marketplace')->group(function () {
+            // Notification de devis signé
+            Route::post('/quote-signed', [MarketplaceController::class, 'quoteSigned']);
+
+            // Gestion des commandes
+            Route::get('/orders', [MarketplaceController::class, 'listOrders']);
+            Route::get('/orders/{orderId}', [MarketplaceController::class, 'getOrder']);
+            Route::post('/orders/{orderId}/validate', [MarketplaceController::class, 'validateOrder']);
+            Route::post('/orders/{orderId}/cancel', [MarketplaceController::class, 'cancelOrder']);
+
+            // Gestion des items
+            Route::patch('/orders/{orderId}/items/{itemId}', [MarketplaceController::class, 'updateOrderItem']);
+        });
     });
 
 // Public chat endpoints (no auth, token-based access)
