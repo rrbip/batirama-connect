@@ -87,10 +87,13 @@ class DetectProductLocalesJob implements ShouldQueue
         $query->chunkById(100, function ($products) use ($detector, $config, &$detected, &$failed) {
             foreach ($products as $product) {
                 try {
+                    // Build content from multiple sources
+                    $content = $this->buildContentForDetection($product);
+
                     $locale = $detector->detect(
                         $product->source_url,
                         $product->sku,
-                        $product->description ?? $product->name,
+                        $content,
                         $config
                     );
 
@@ -138,5 +141,68 @@ class DetectProductLocalesJob implements ShouldQueue
             'catalog:' . $this->catalog->id,
             'locale-detection',
         ];
+    }
+
+    /**
+     * Build content string from multiple product sources for better language detection.
+     */
+    private function buildContentForDetection(FabricantProduct $product): string
+    {
+        $parts = [];
+
+        // 1. Product name (always available)
+        if (!empty($product->name)) {
+            $parts[] = $product->name;
+        }
+
+        // 2. Description
+        if (!empty($product->description)) {
+            $parts[] = $product->description;
+        }
+
+        // 3. Short description
+        if (!empty($product->short_description)) {
+            $parts[] = $product->short_description;
+        }
+
+        // 4. Category
+        if (!empty($product->category)) {
+            $parts[] = $product->category;
+        }
+
+        // 5. Specifications (if array, extract text values)
+        if (!empty($product->specifications) && is_array($product->specifications)) {
+            foreach ($product->specifications as $key => $value) {
+                if (is_string($value)) {
+                    $parts[] = $value;
+                } elseif (is_array($value)) {
+                    $parts[] = implode(' ', array_filter($value, 'is_string'));
+                }
+            }
+        }
+
+        $content = implode(' ', $parts);
+
+        // If content is still too short (< 100 chars), try to get HTML content from crawled page
+        if (strlen($content) < 100 && $product->crawl_url_id) {
+            try {
+                $crawlUrl = $product->crawlUrl;
+                if ($crawlUrl) {
+                    $htmlText = $crawlUrl->getTextContent();
+                    if ($htmlText && strlen($htmlText) > strlen($content)) {
+                        // Use first 2000 chars of HTML text (enough for detection, not too slow)
+                        $content = mb_substr($htmlText, 0, 2000);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Ignore errors reading HTML content
+                Log::debug('DetectProductLocalesJob: Could not read HTML content', [
+                    'product_id' => $product->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $content;
     }
 }

@@ -837,15 +837,21 @@ class LanguageDetector
      */
     public function detectFromContent(?string $text): ?string
     {
-        if (empty($text) || strlen($text) < 50) {
+        if (empty($text) || strlen($text) < 20) {
             return null;
         }
 
-        $text = strtolower($text);
-        $words = preg_split('/\s+/', $text);
+        // First, try script-based detection for non-Latin scripts
+        $scriptLocale = $this->detectFromScript($text);
+        if ($scriptLocale) {
+            return $scriptLocale;
+        }
+
+        $text = mb_strtolower($text, 'UTF-8');
+        $words = preg_split('/\s+/u', $text);
         $wordCount = count($words);
 
-        if ($wordCount < 10) {
+        if ($wordCount < 5) {
             return null;
         }
 
@@ -854,8 +860,8 @@ class LanguageDetector
         foreach (self::getAllLocales() as $locale => $patterns) {
             $matchCount = 0;
             foreach ($patterns['common_words'] as $commonWord) {
-                // Count occurrences of common word (with word boundaries)
-                $matchCount += preg_match_all('/\b' . preg_quote($commonWord, '/') . '\b/u', $text);
+                // Count occurrences of common word (with word boundaries for unicode)
+                $matchCount += preg_match_all('/(?<![\\p{L}])' . preg_quote($commonWord, '/') . '(?![\\p{L}])/ui', $text);
             }
             // Normalize by number of common words to check
             $scores[$locale] = $matchCount / count($patterns['common_words']);
@@ -866,10 +872,58 @@ class LanguageDetector
         $bestLocale = array_key_first($scores);
         $bestScore = $scores[$bestLocale];
 
-        // Only return if score is significant (at least 2 matches per pattern on average)
-        if ($bestScore >= 0.5) {
+        // Lower threshold for detection (at least some matches)
+        if ($bestScore >= 0.2) {
             return $bestLocale;
         }
+
+        return null;
+    }
+
+    /**
+     * Detect language based on Unicode script (Cyrillic, Greek, Arabic, etc.)
+     */
+    private function detectFromScript(string $text): ?string
+    {
+        // Count characters by script
+        $cyrillicCount = preg_match_all('/[\p{Cyrillic}]/u', $text);
+        $greekCount = preg_match_all('/[\p{Greek}]/u', $text);
+        $arabicCount = preg_match_all('/[\p{Arabic}]/u', $text);
+        $hebrewCount = preg_match_all('/[\p{Hebrew}]/u', $text);
+        $thaiCount = preg_match_all('/[\p{Thai}]/u', $text);
+        $hangulCount = preg_match_all('/[\p{Hangul}]/u', $text);
+        $hiraganaCount = preg_match_all('/[\p{Hiragana}\p{Katakana}]/u', $text);
+        $hanCount = preg_match_all('/[\p{Han}]/u', $text);
+        $georgianCount = preg_match_all('/[\p{Georgian}]/u', $text);
+        $armenianCount = preg_match_all('/[\p{Armenian}]/u', $text);
+
+        $minChars = 3; // Minimum characters to consider
+
+        // Cyrillic scripts (Bulgarian, Russian, Ukrainian, etc.)
+        if ($cyrillicCount >= $minChars) {
+            // Try to distinguish between Cyrillic languages using common words
+            $bgScore = preg_match_all('/\b(и|на|за|от|се|да|не|по|при|до|е|в|с)\b/u', $text);
+            $ruScore = preg_match_all('/\b(и|в|на|с|для|это|что|как|по|не|из|от)\b/u', $text);
+            $ukScore = preg_match_all('/\b(і|в|на|з|для|це|що|як|не|до|та|є)\b/u', $text);
+
+            if ($bgScore >= $ruScore && $bgScore >= $ukScore) {
+                return 'bg';
+            } elseif ($ukScore > $ruScore) {
+                return 'uk';
+            } else {
+                return 'ru';
+            }
+        }
+
+        if ($greekCount >= $minChars) return 'el';
+        if ($arabicCount >= $minChars) return 'ar';
+        if ($hebrewCount >= $minChars) return 'he';
+        if ($thaiCount >= $minChars) return 'th';
+        if ($hangulCount >= $minChars) return 'ko';
+        if ($hiraganaCount >= $minChars) return 'ja';
+        if ($hanCount >= $minChars) return 'zh';
+        if ($georgianCount >= $minChars) return 'ka';
+        if ($armenianCount >= $minChars) return 'hy';
 
         return null;
     }

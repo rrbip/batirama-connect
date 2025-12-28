@@ -189,4 +189,49 @@ class WebCrawlUrl extends Model
     {
         return $this->http_status >= 500;
     }
+
+    /**
+     * Get the stored HTML content.
+     */
+    public function getContent(): ?string
+    {
+        if (empty($this->storage_path)) {
+            return null;
+        }
+
+        $path = storage_path('app/' . $this->storage_path);
+
+        if (!file_exists($path)) {
+            return null;
+        }
+
+        return file_get_contents($path);
+    }
+
+    /**
+     * Extract text content from HTML (removes tags, scripts, styles).
+     */
+    public function getTextContent(): ?string
+    {
+        $html = $this->getContent();
+
+        if (empty($html)) {
+            return null;
+        }
+
+        // Remove script and style tags
+        $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
+        $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
+
+        // Remove HTML tags
+        $text = strip_tags($html);
+
+        // Decode HTML entities
+        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Normalize whitespace
+        $text = preg_replace('/\s+/', ' ', $text);
+
+        return trim($text);
+    }
 }
