@@ -7,7 +7,7 @@ namespace App\Services\Marketplace;
 use App\Models\FabricantCatalog;
 use App\Models\FabricantProduct;
 use App\Models\WebCrawlUrl;
-use App\Services\AI\LlmService;
+use App\Services\AI\OllamaService;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\DomCrawler\Crawler;
@@ -23,11 +23,11 @@ use Symfony\Component\DomCrawler\Crawler;
  */
 class ProductMetadataExtractor
 {
-    private LlmService $llmService;
+    private OllamaService $ollamaService;
 
-    public function __construct(LlmService $llmService)
+    public function __construct(OllamaService $ollamaService)
     {
-        $this->llmService = $llmService;
+        $this->ollamaService = $ollamaService;
     }
 
     /**
@@ -571,10 +571,11 @@ HTML (nettoyé):
 PROMPT;
 
         try {
-            $response = $this->llmService->complete($prompt, [
+            $llmResponse = $this->ollamaService->generate($prompt, [
                 'max_tokens' => 2000,
                 'temperature' => 0.1,
             ]);
+            $response = $llmResponse->content;
 
             // Extract JSON from response
             if (preg_match('/\{[\s\S]*\}/', $response, $matches)) {
