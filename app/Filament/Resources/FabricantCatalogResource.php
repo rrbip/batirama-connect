@@ -399,12 +399,40 @@ class FabricantCatalogResource extends Resource
                     ->visible(fn ($record) => $record->webCrawl !== null && $record->status !== FabricantCatalog::STATUS_EXTRACTING)
                     ->requiresConfirmation()
                     ->action(function (FabricantCatalog $record) {
+                        // Check if there are pages to extract
+                        $crawl = $record->webCrawl;
+
+                        if ($crawl->status !== 'completed' && $crawl->status !== 'paused') {
+                            Notification::make()
+                                ->title('Crawl non terminé')
+                                ->body("Le crawl est en statut \"{$crawl->status}\". Attendez qu'il soit terminé avant d'extraire les produits.")
+                                ->warning()
+                                ->send();
+                            return;
+                        }
+
+                        $eligiblePages = $crawl->urls()
+                            ->where('http_status', 200)
+                            ->where('content_type', 'LIKE', 'text/html%')
+                            ->wherePivot('status', 'fetched')
+                            ->whereNotNull('storage_path')
+                            ->count();
+
+                        if ($eligiblePages === 0) {
+                            Notification::make()
+                                ->title('Aucune page à extraire')
+                                ->body('Le crawl ne contient aucune page HTML valide (status 200, contenu stocké). Vérifiez que le crawl a bien fonctionné.')
+                                ->danger()
+                                ->send();
+                            return;
+                        }
+
                         // Dispatch extraction job
                         \App\Jobs\ExtractFabricantProductsJob::dispatch($record);
 
                         Notification::make()
                             ->title('Extraction démarrée')
-                            ->body('L\'extraction des produits est en cours.')
+                            ->body("Analyse de {$eligiblePages} pages HTML en cours...")
                             ->success()
                             ->send();
                     }),
