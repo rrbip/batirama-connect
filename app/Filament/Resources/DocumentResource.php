@@ -525,40 +525,84 @@ class DocumentResource extends Resource
                                                     );
                                                 }
 
-                                                $html = '<div class="space-y-4">';
+                                                $html = '<div class="space-y-6">';
 
-                                                // Stats générales
-                                                $html .= '<div class="grid grid-cols-4 gap-4 text-sm">';
-                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
-                                                $html .= '<div class="text-gray-500 text-xs">HTML original</div>';
-                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['html_size'] ?? 0) . '</div>';
-                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                // 1. Étape Fetch HTML
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. Récupération HTML</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Source:</span><br><strong class="text-blue-600">URL crawlée</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Taille HTML:</span><br><strong>' . number_format($htmlData['html_size'] ?? 0) . ' chars</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">URL:</span><br><span class="text-xs text-gray-400 truncate block max-w-[200px]" title="' . e($record->source_url ?? '-') . '">' . e(\Illuminate\Support\Str::limit($record->source_url ?? '-', 40)) . '</span></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($htmlData['original_html'])) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-original\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100" title="Voir HTML original"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>HTML</button>';
+                                                }
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+                                                // Zone expandable pour HTML original
+                                                if (!empty($htmlData['original_html'])) {
+                                                    $html .= '<div id="html-original" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">HTML Original</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-original-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-original-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($htmlData['original_html'], 5000)) . '</pre>';
+                                                    $html .= '</div>';
+                                                }
                                                 $html .= '</div>';
 
-                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
-                                                $html .= '<div class="text-gray-500 text-xs">HTML nettoyé</div>';
-                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['cleaned_html_size'] ?? 0) . '</div>';
-                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                // 2. Étape Nettoyage HTML
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-orange-50 dark:bg-orange-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-orange-700 dark:text-orange-400">2. Nettoyage HTML</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Taille après nettoyage:</span><br><strong>' . number_format($htmlData['cleaned_html_size'] ?? 0) . ' chars</strong></div>';
+                                                $compressionRatio = $htmlData['compression_ratio'] ?? 0;
+                                                $html .= '<div><span class="text-gray-500">Compression:</span><br><strong class="text-green-600">' . $compressionRatio . '%</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Éléments supprimés:</span><br><strong>scripts, styles, nav</strong></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($htmlData['cleaned_html'])) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-cleaned\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-orange-600 bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400 rounded hover:bg-orange-100" title="Voir HTML nettoyé"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>HTML</button>';
+                                                }
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+                                                // Zone expandable pour HTML nettoyé
+                                                if (!empty($htmlData['cleaned_html'])) {
+                                                    $html .= '<div id="html-cleaned" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">HTML Nettoyé</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-cleaned-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-cleaned-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($htmlData['cleaned_html'], 5000)) . '</pre>';
+                                                    $html .= '</div>';
+                                                }
                                                 $html .= '</div>';
 
-                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
-                                                $html .= '<div class="text-gray-500 text-xs">Markdown final</div>';
-                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['markdown_size'] ?? 0) . '</div>';
-                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                // 3. Étape Conversion Markdown
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-purple-700 dark:text-purple-400">3. Conversion → Markdown</h4>';
                                                 $html .= '</div>';
-
-                                                $html .= '<div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">';
-                                                $html .= '<div class="text-gray-500 text-xs">Compression</div>';
-                                                $html .= '<div class="font-bold text-lg text-green-600">' . ($htmlData['compression_ratio'] ?? 0) . '%</div>';
-                                                $html .= '<div class="text-gray-400 text-xs">réduction</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Convertisseur:</span><br><strong class="text-purple-600">' . e($htmlData['converter'] ?? 'League HTML to Markdown') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Taille Markdown:</span><br><strong>' . number_format($htmlData['markdown_size'] ?? 0) . ' chars</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Temps:</span><br><strong>' . ($htmlData['processing_time_ms'] ?? 0) . 'ms</strong></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($record->extracted_text)) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-markdown\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100" title="Voir Markdown"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>MD</button>';
+                                                }
                                                 $html .= '</div>';
                                                 $html .= '</div>';
 
                                                 // Éléments détectés
                                                 $elements = $htmlData['elements_detected'] ?? [];
                                                 if (!empty($elements)) {
-                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">';
-                                                    $html .= '<div class="text-sm font-medium mb-3">Éléments structurels détectés</div>';
+                                                    $html .= '<div class="border-t border-gray-200 dark:border-gray-700 p-4">';
+                                                    $html .= '<div class="text-xs font-medium text-gray-500 mb-2">Éléments structurels détectés</div>';
                                                     $html .= '<div class="flex flex-wrap gap-2">';
                                                     foreach ($elements as $type => $count) {
                                                         $label = match ($type) {
@@ -571,7 +615,7 @@ class DocumentResource extends Resource
                                                             default => $type,
                                                         };
                                                         $html .= sprintf(
-                                                            '<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs">%s: <strong>%d</strong></span>',
+                                                            '<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded text-xs">%s: <strong>%d</strong></span>',
                                                             $label,
                                                             $count
                                                         );
@@ -579,14 +623,69 @@ class DocumentResource extends Resource
                                                     $html .= '</div></div>';
                                                 }
 
-                                                // Métadonnées
-                                                $html .= '<div class="text-xs text-gray-400">';
-                                                $html .= 'Convertisseur: ' . e($htmlData['converter'] ?? '-');
-                                                $html .= ' | Temps: ' . ($htmlData['processing_time_ms'] ?? 0) . 'ms';
-                                                if (!empty($htmlData['extracted_at'])) {
-                                                    $html .= ' | ' . \Carbon\Carbon::parse($htmlData['extracted_at'])->format('d/m/Y H:i');
+                                                // Zone expandable pour Markdown
+                                                if (!empty($record->extracted_text)) {
+                                                    $html .= '<div id="html-markdown" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">Markdown généré</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-markdown-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-markdown-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($record->extracted_text, 5000)) . '</pre>';
+                                                    $html .= '</div>';
                                                 }
                                                 $html .= '</div>';
+
+                                                // 4. Étape Chunking + Indexation
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // Timestamp
+                                                if (!empty($htmlData['extracted_at'])) {
+                                                    $html .= '<div class="text-xs text-gray-400 text-right">';
+                                                    $html .= 'Extrait le ' . \Carbon\Carbon::parse($htmlData['extracted_at'])->format('d/m/Y H:i');
+                                                    $html .= '</div>';
+                                                }
 
                                                 $html .= '</div>';
 
