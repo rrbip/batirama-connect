@@ -209,17 +209,6 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             return;
         }
 
-        // Vérifier que le crawl est terminé
-        if ($this->record->status !== 'completed') {
-            Notification::make()
-                ->title('Crawl en cours')
-                ->body('Attendez que le crawl soit terminé avant de lancer l\'indexation.')
-                ->warning()
-                ->send();
-
-            return;
-        }
-
         $config->update(['index_status' => 'indexing']);
 
         // Pour chaque URL du cache, dispatcher le job d'indexation
@@ -367,14 +356,19 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'index_status' => 'pending',
                     ]);
 
-                    // Si le crawl est terminé, lancer l'indexation pour cet agent
-                    if ($this->record->status === 'completed') {
+                    // Lancer l'indexation sur les URLs déjà crawlées
+                    $fetchedCount = $this->record->urlEntries()->where('status', 'fetched')->count();
+                    if ($fetchedCount > 0) {
                         $this->dispatchAgentIndexation($agentConfig);
                     }
 
+                    $message = $fetchedCount > 0
+                        ? "L'indexation démarre sur {$fetchedCount} URL(s) déjà crawlées."
+                        : 'L\'indexation démarrera dès que des URLs seront crawlées.';
+
                     Notification::make()
                         ->title('Agent ajouté')
-                        ->body('L\'agent a été lié au crawl. L\'indexation démarrera après le crawl.')
+                        ->body($message)
                         ->success()
                         ->send();
                 }),
