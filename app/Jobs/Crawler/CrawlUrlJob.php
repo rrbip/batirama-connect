@@ -283,6 +283,11 @@ class CrawlUrlJob implements ShouldQueue
                 'canonical_hash' => $canonicalUrl ? hash('sha256', $canonicalUrl) : null,
             ]);
 
+            // Détecter la langue du contenu HTML
+            if ($crawlUrl->isHtml()) {
+                $crawlUrl->detectAndSaveLocale();
+            }
+
             // Marquer comme récupéré
             $this->urlEntry->update([
                 'status' => 'fetched',

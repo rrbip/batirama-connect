@@ -25,6 +25,7 @@ class AgentWebCrawl extends Model
         'url_filter_mode',
         'url_patterns',
         'content_types',
+        'allowed_locales',
         'chunk_strategy',
         'index_status',
         'pages_indexed',
@@ -36,6 +37,7 @@ class AgentWebCrawl extends Model
     protected $casts = [
         'url_patterns' => 'array',
         'content_types' => 'array',
+        'allowed_locales' => 'array',
         'last_indexed_at' => 'datetime',
     ];
 
@@ -117,6 +119,26 @@ class AgentWebCrawl extends Model
         }
 
         return false;
+    }
+
+    /**
+     * Vérifie si une locale doit être indexée
+     */
+    public function shouldIndexLocale(?string $locale): bool
+    {
+        $allowedLocales = $this->allowed_locales ?? [];
+
+        // Empty array = all locales allowed
+        if (empty($allowedLocales)) {
+            return true;
+        }
+
+        // Null locale = include if we allow unknown languages (could add a setting for this)
+        if ($locale === null) {
+            return true; // By default, include URLs without detected locale
+        }
+
+        return in_array($locale, $allowedLocales, true);
     }
 
     /**

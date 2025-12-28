@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\Marketplace\LanguageDetector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,6 +27,7 @@ class WebCrawlUrl extends Model
         'http_status',
         'content_type',
         'content_length',
+        'locale',
         'last_modified',
         'etag',
     ];
@@ -233,5 +235,64 @@ class WebCrawlUrl extends Model
         $text = preg_replace('/\s+/', ' ', $text);
 
         return trim($text);
+    }
+
+    /**
+     * Detect and set the locale from HTML content.
+     */
+    public function detectLocale(): ?string
+    {
+        if (!$this->isHtml()) {
+            return null;
+        }
+
+        $html = $this->getContent();
+        if (empty($html)) {
+            return null;
+        }
+
+        $detector = app(LanguageDetector::class);
+
+        // Priority 1: HTML lang attribute (most reliable)
+        $locale = $detector->detectFromHtmlLangAttribute($html);
+
+        // Priority 2: URL patterns
+        if (!$locale) {
+            $locale = $detector->detectFromUrl($this->url);
+        }
+
+        // Priority 3: Content analysis (first 5000 chars)
+        if (!$locale) {
+            $locale = $detector->detectFromContent(mb_substr($html, 0, 5000));
+        }
+
+        return $locale;
+    }
+
+    /**
+     * Detect locale and save to database.
+     */
+    public function detectAndSaveLocale(): ?string
+    {
+        $locale = $this->detectLocale();
+
+        if ($locale && $locale !== $this->locale) {
+            $this->update(['locale' => $locale]);
+        }
+
+        return $locale;
+    }
+
+    /**
+     * Get locale name for display.
+     */
+    public function getLocaleNameAttribute(): ?string
+    {
+        if (!$this->locale) {
+            return null;
+        }
+
+        $detector = app(LanguageDetector::class);
+        return $detector->getLocaleName($this->locale);
     }
 }

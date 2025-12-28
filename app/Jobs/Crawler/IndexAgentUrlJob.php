@@ -121,6 +121,19 @@ class IndexAgentUrlJob implements ShouldQueue
                 return;
             }
 
+            // Vérifier la locale
+            if (! $this->agentConfig->shouldIndexLocale($this->crawlUrl->locale)) {
+                Log::debug('Locale not allowed for indexing', [
+                    'url' => $url,
+                    'locale' => $this->crawlUrl->locale,
+                    'allowed_locales' => $this->agentConfig->allowed_locales,
+                ]);
+
+                $this->markSkipped($urlEntry, 'locale_not_allowed');
+
+                return;
+            }
+
             // Déterminer le type de document
             $documentType = $crawlerService->getDocumentType($contentType);
 
