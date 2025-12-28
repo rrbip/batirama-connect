@@ -256,11 +256,12 @@ class VisionSettingsPage extends Page implements HasForms
                                 Select::make('storage_disk')
                                     ->label('Disque de stockage')
                                     ->options([
-                                        'local' => 'Local (storage/app)',
-                                        'public' => 'Public (accessible web)',
+                                        'public' => '✅ Public (accessible web) - Recommandé',
+                                        'local' => '⚠️ Local (storage/app) - Non accessible web',
                                         's3' => 'S3 (cloud)',
                                     ])
-                                    ->default('local'),
+                                    ->default('public')
+                                    ->helperText('⚠️ Utilisez "Public" pour pouvoir voir les images dans le pipeline'),
 
                                 TextInput::make('storage_path')
                                     ->label('Chemin de stockage')
