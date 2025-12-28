@@ -281,10 +281,11 @@ class DocumentResource extends Resource
                                                 $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
                                                 $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. PDF → Images</h4>';
                                                 $html .= '</div>';
-                                                $html .= '<div class="p-4 grid grid-cols-3 gap-4 text-sm">';
-                                                $html .= '<div><span class="text-gray-500">Pages totales:</span> <strong>' . ($visionData['total_pages'] ?? '-') . '</strong></div>';
-                                                $html .= '<div><span class="text-gray-500">DPI:</span> <strong>' . ($visionData['dpi'] ?? '300') . '</strong></div>';
-                                                $html .= '<div><span class="text-gray-500">Stockage images:</span> <strong>' . ($visionData['storage_path'] ?? '-') . '</strong></div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Outil:</span><br><strong class="text-blue-600">' . e($visionData['pdf_converter'] ?? 'pdftoppm') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Pages totales:</span><br><strong>' . ($visionData['total_pages'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">DPI:</span><br><strong>' . ($visionData['dpi'] ?? '300') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Stockage:</span><br><strong class="font-mono text-xs">' . e($visionData['storage_path'] ?? '-') . '</strong></div>';
                                                 $html .= '</div></div>';
 
                                                 // 2. Étape Images → Markdown (Vision LLM)
@@ -292,10 +293,11 @@ class DocumentResource extends Resource
                                                 $html .= '<div class="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 border-b border-gray-200 dark:border-gray-700">';
                                                 $html .= '<h4 class="font-medium text-purple-700 dark:text-purple-400">2. Images → Markdown (Vision IA)</h4>';
                                                 $html .= '</div>';
-                                                $html .= '<div class="p-4 grid grid-cols-3 gap-4 text-sm">';
-                                                $html .= '<div><span class="text-gray-500">Modèle:</span> <strong>' . e($visionData['model'] ?? '-') . '</strong></div>';
-                                                $html .= '<div><span class="text-gray-500">Pages traitées:</span> <strong>' . ($visionData['pages_processed'] ?? '-') . '</strong></div>';
-                                                $html .= '<div><span class="text-gray-500">Durée totale:</span> <strong>' . ($visionData['duration_seconds'] ?? '-') . 's</strong></div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Bibliothèque:</span><br><strong class="text-purple-600">' . e($visionData['vision_library'] ?? 'Ollama API') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Modèle:</span><br><strong class="text-purple-600">' . e($visionData['vision_model'] ?? $visionData['model'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Pages traitées:</span><br><strong>' . ($visionData['pages_processed'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Durée totale:</span><br><strong>' . ($visionData['duration_seconds'] ?? '-') . 's</strong></div>';
                                                 $html .= '</div></div>';
 
                                                 // 3. Détail par page
@@ -344,7 +346,29 @@ class DocumentResource extends Resource
                                                     $html .= '</div></div>';
                                                 }
 
-                                                // 4. Erreurs éventuelles
+                                                // 4. Étape Chunking + Indexation
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 5. Erreurs éventuelles
                                                 $errors = $visionData['errors'] ?? [];
                                                 if (!empty($errors)) {
                                                     $html .= '<div class="border border-red-200 dark:border-red-700 rounded-lg overflow-hidden">';

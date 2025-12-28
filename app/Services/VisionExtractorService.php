@@ -197,6 +197,13 @@ class VisionExtractorService
             'pages' => $pages,
             'errors' => $errors,
             'metadata' => [
+                // Étape 1: PDF → Images
+                'pdf_converter' => $imagesResult['tool'] ?? 'unknown',
+                'dpi' => $imagesResult['dpi'] ?? $this->settings->image_dpi,
+                // Étape 2: Images → Markdown
+                'vision_model' => $this->getModel(),
+                'vision_library' => 'Ollama API',
+                // Stats
                 'model' => $this->getModel(),
                 'total_pages' => count($imagesResult['images']),
                 'pages_processed' => count($pages),
@@ -323,12 +330,15 @@ class VisionExtractorService
             'pdf_path' => $pdfPath,
             'image_count' => count($images),
             'dpi' => $dpi,
+            'tool' => 'pdftoppm',
         ]);
 
         return [
             'success' => true,
             'images' => $images,
             'errors' => [],
+            'tool' => 'pdftoppm (poppler-utils)',
+            'dpi' => $dpi,
         ];
     }
 
@@ -372,6 +382,8 @@ class VisionExtractorService
             'success' => count($images) > 0,
             'images' => $images,
             'errors' => count($images) === 0 ? ['No images generated'] : [],
+            'tool' => 'ImageMagick (convert)',
+            'dpi' => $dpi,
         ];
     }
 
