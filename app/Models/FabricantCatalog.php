@@ -192,6 +192,8 @@ class FabricantCatalog extends Model
             'nl' => 'Nederlands',
             'pt' => 'Português',
             'pl' => 'Polski',
+            'bg' => 'Български',
+            'ru' => 'Русский',
         ];
     }
 

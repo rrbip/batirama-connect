@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\FabricantProductResource\Pages;
+use App\Models\FabricantCatalog;
 use App\Models\FabricantProduct;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -322,21 +323,13 @@ class FabricantProductResource extends Resource
                 Tables\Columns\TextColumn::make('locale')
                     ->label('Langue')
                     ->badge()
-                    ->formatStateUsing(fn ($state) => match($state) {
-                        'fr' => 'FR',
-                        'en' => 'EN',
-                        'de' => 'DE',
-                        'es' => 'ES',
-                        'it' => 'IT',
-                        'nl' => 'NL',
-                        'pt' => 'PT',
-                        'pl' => 'PL',
-                        default => $state ?? '-',
-                    })
+                    ->formatStateUsing(fn ($state) => strtoupper($state ?? '-'))
                     ->color(fn ($state) => match($state) {
                         'fr' => 'info',
                         'en' => 'success',
                         'de' => 'warning',
+                        'bg' => 'danger',
+                        'ru' => 'danger',
                         default => 'gray',
                     })
                     ->toggleable(),
@@ -440,16 +433,7 @@ class FabricantProductResource extends Resource
 
                 Tables\Filters\SelectFilter::make('locale')
                     ->label('Langue')
-                    ->options([
-                        'fr' => 'Francais',
-                        'en' => 'English',
-                        'de' => 'Deutsch',
-                        'es' => 'Espanol',
-                        'it' => 'Italiano',
-                        'nl' => 'Nederlands',
-                        'pt' => 'Portugues',
-                        'pl' => 'Polski',
-                    ]),
+                    ->options(FabricantCatalog::getSupportedLocales()),
 
                 Tables\Filters\Filter::make('no_locale')
                     ->label('Sans langue detectee')

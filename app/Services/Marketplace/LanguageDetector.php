@@ -67,6 +67,18 @@ class LanguageDetector
             'sku_patterns' => ['-PL', '_PL', '-pl', '_pl', '/PL', '/pl'],
             'common_words' => ['i', 'w', 'na', 'do', 'z', 'jest', 'to', 'nie', 'co', 'jak', 'dla', 'od'],
         ],
+        'bg' => [
+            'path_patterns' => ['/bg/', '/bg-bg/', '/bul/', '/bulgarian/'],
+            'tlds' => ['.bg'],
+            'sku_patterns' => ['-BG', '_BG', '-bg', '_bg', '/BG', '/bg'],
+            'common_words' => ['и', 'на', 'за', 'от', 'с', 'е', 'в', 'се', 'да', 'не', 'по', 'при', 'до'],
+        ],
+        'ru' => [
+            'path_patterns' => ['/ru/', '/ru-ru/', '/rus/', '/russian/'],
+            'tlds' => ['.ru'],
+            'sku_patterns' => ['-RU', '_RU', '-ru', '_ru', '/RU', '/ru'],
+            'common_words' => ['и', 'в', 'на', 'с', 'для', 'это', 'что', 'как', 'по', 'не', 'из', 'от'],
+        ],
     ];
 
     /**
