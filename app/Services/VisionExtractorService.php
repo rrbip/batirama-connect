@@ -210,6 +210,7 @@ class VisionExtractorService
                 'pages_processed' => count($pages),
                 'duration_seconds' => round($duration, 2),
                 'storage_path' => $storagePath,
+                'storage_disk' => $this->settings->storage_disk,
             ],
         ];
     }

@@ -137,7 +137,7 @@
                 Zone de calibration
             </x-slot>
             <x-slot name="description">
-                Testez différents prompts sur une image pour calibrer l'extraction
+                Testez différents prompts sur une image pour calibrer l'extraction. Le rapport généré peut être utilisé par une IA pour améliorer les prompts.
             </x-slot>
 
             <div class="space-y-6">
@@ -191,95 +191,33 @@
                     </div>
                 @endif
 
-                {{-- Prompts de calibration --}}
-                <div class="space-y-4">
+                {{-- JSON de calibration --}}
+                <div class="space-y-2">
                     <div class="flex items-center justify-between">
-                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Prompts à tester</h4>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                            Tests de calibration (JSON)
+                        </label>
                         <button
                             type="button"
-                            wire:click="addCalibrationPrompt"
-                            class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-primary-600 bg-primary-50 dark:bg-primary-900/30 dark:text-primary-400 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/50 transition"
+                            wire:click="resetCalibrationJson"
+                            class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition"
                         >
-                            <x-heroicon-o-plus class="w-4 h-4" />
-                            Ajouter un prompt
+                            <x-heroicon-o-arrow-path class="w-3 h-3" />
+                            Réinitialiser
                         </button>
                     </div>
-
-                    @foreach($calibrationPrompts as $index => $promptData)
-                        <div class="relative border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                            <div class="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                                <span class="font-medium text-gray-700 dark:text-gray-300">Prompt #{{ $index + 1 }}</span>
-                                <div class="flex items-center gap-2">
-                                    @if(isset($calibrationResults[$index]))
-                                        @if($calibrationResults[$index]['success'])
-                                            <span class="text-xs text-success-600 dark:text-success-400">
-                                                ✓ {{ $calibrationResults[$index]['processing_time'] }}s
-                                            </span>
-                                        @else
-                                            <span class="text-xs text-danger-600 dark:text-danger-400">
-                                                ✗ Erreur
-                                            </span>
-                                        @endif
-                                    @endif
-                                    @if(count($calibrationPrompts) > 1)
-                                        <button
-                                            type="button"
-                                            wire:click="removeCalibrationPrompt({{ $index }})"
-                                            class="text-danger-500 hover:text-danger-700"
-                                        >
-                                            <x-heroicon-o-trash class="w-4 h-4" />
-                                        </button>
-                                    @endif
-                                </div>
-                            </div>
-                            <textarea
-                                wire:model.lazy="calibrationPrompts.{{ $index }}.prompt"
-                                rows="8"
-                                class="block w-full border-0 bg-transparent focus:ring-0 text-sm font-mono resize-y dark:text-gray-100"
-                                placeholder="Entrez votre prompt ici..."
-                            ></textarea>
-
-                            {{-- Résultat pour ce prompt --}}
-                            @if(isset($calibrationResults[$index]))
-                                <div class="border-t border-gray-200 dark:border-gray-700">
-                                    <div class="px-4 py-2 bg-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-50 dark:bg-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-900/20 flex items-center justify-between">
-                                        <span class="text-sm font-medium text-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-700 dark:text-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-400">
-                                            @if($calibrationResults[$index]['success'])
-                                                Résultat ({{ strlen($calibrationResults[$index]['markdown']) }} chars)
-                                            @else
-                                                Erreur
-                                            @endif
-                                        </span>
-                                        @if($calibrationResults[$index]['success'])
-                                            <div class="flex items-center gap-2">
-                                                <button
-                                                    type="button"
-                                                    onclick="navigator.clipboard.writeText(document.getElementById('result-{{ $index }}').innerText)"
-                                                    class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                                                >
-                                                    Copier
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    wire:click="usePromptAsDefault({{ $index }})"
-                                                    class="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                                                >
-                                                    Utiliser comme défaut
-                                                </button>
-                                            </div>
-                                        @endif
-                                    </div>
-                                    <div class="p-4 max-h-96 overflow-y-auto bg-white dark:bg-gray-900">
-                                        @if($calibrationResults[$index]['success'])
-                                            <pre id="result-{{ $index }}" class="text-sm font-mono whitespace-pre-wrap text-gray-700 dark:text-gray-300">{{ $calibrationResults[$index]['markdown'] }}</pre>
-                                        @else
-                                            <p class="text-sm text-danger-600 dark:text-danger-400">{{ $calibrationResults[$index]['error'] }}</p>
-                                        @endif
-                                    </div>
-                                </div>
-                            @endif
-                        </div>
-                    @endforeach
+                    <textarea
+                        wire:model.lazy="calibrationJson"
+                        rows="15"
+                        class="block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 font-mono text-xs shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                        placeholder='[{"id": "test_1", "category": "OCR", "description": "Test basique", "prompt": "Votre prompt..."}]'
+                    ></textarea>
+                    <p class="text-xs text-gray-500">
+                        Format : tableau JSON avec objets contenant <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">id</code>,
+                        <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">category</code>,
+                        <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">description</code> et
+                        <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded">prompt</code>
+                    </p>
                 </div>
 
                 {{-- Bouton de lancement --}}
@@ -307,6 +245,98 @@
                             <x-heroicon-o-arrow-path class="w-5 h-5 text-blue-600 animate-spin" />
                             <span class="text-blue-700 dark:text-blue-400">Calibration en cours... Le modèle traite l'image avec chaque prompt.</span>
                         </div>
+                    </div>
+                @endif
+
+                {{-- Résultats de calibration --}}
+                @if(!empty($calibrationResults))
+                    <div class="space-y-4">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Résultats des tests</h4>
+
+                        {{-- Résumé rapide --}}
+                        @php
+                            $successCount = count(array_filter($calibrationResults, fn($r) => $r['success'] ?? false));
+                            $totalCount = count($calibrationResults);
+                        @endphp
+                        <div class="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg font-bold {{ $successCount === $totalCount ? 'text-success-600' : 'text-warning-600' }}">
+                                    {{ $successCount }}/{{ $totalCount }}
+                                </span>
+                                <span class="text-sm text-gray-600 dark:text-gray-400">tests réussis</span>
+                            </div>
+                        </div>
+
+                        {{-- Liste des résultats --}}
+                        <div class="grid gap-3">
+                            @foreach($calibrationResults as $index => $result)
+                                <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                    <div class="px-4 py-2 {{ $result['success'] ? 'bg-success-50 dark:bg-success-900/20' : 'bg-danger-50 dark:bg-danger-900/20' }} flex items-center justify-between">
+                                        <div class="flex items-center gap-3">
+                                            @if($result['success'])
+                                                <span class="text-success-600">✓</span>
+                                            @else
+                                                <span class="text-danger-600">✗</span>
+                                            @endif
+                                            <div>
+                                                <span class="font-medium text-gray-900 dark:text-gray-100">{{ $result['id'] }}</span>
+                                                <span class="ml-2 px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-600 rounded">{{ $result['category'] }}</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 text-xs">
+                                            <span class="text-gray-500">{{ $result['processing_time'] }}s</span>
+                                            @if($result['success'])
+                                                <button
+                                                    type="button"
+                                                    wire:click="usePromptAsDefault('{{ $result['id'] }}')"
+                                                    class="text-primary-600 hover:text-primary-700 dark:text-primary-400"
+                                                >
+                                                    Utiliser ce prompt
+                                                </button>
+                                            @endif
+                                        </div>
+                                    </div>
+                                    <div class="p-3 text-xs text-gray-600 dark:text-gray-400">
+                                        {{ $result['description'] }}
+                                    </div>
+                                    @if($result['success'] && $result['markdown'])
+                                        <details class="border-t border-gray-200 dark:border-gray-700">
+                                            <summary class="px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
+                                                Voir le résultat ({{ strlen($result['markdown']) }} chars)
+                                            </summary>
+                                            <pre class="p-3 bg-gray-50 dark:bg-gray-900 text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto">{{ $result['markdown'] }}</pre>
+                                        </details>
+                                    @elseif(!$result['success'])
+                                        <div class="px-4 py-2 text-xs text-danger-600 dark:text-danger-400 border-t border-gray-200 dark:border-gray-700">
+                                            Erreur : {{ $result['error'] }}
+                                        </div>
+                                    @endif
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
+                {{-- Rapport de calibration --}}
+                @if($calibrationReport)
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Rapport de calibration</h4>
+                            <button
+                                type="button"
+                                onclick="navigator.clipboard.writeText(document.getElementById('calibration-report').innerText).then(() => alert('Rapport copié !'))"
+                                class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition"
+                            >
+                                <x-heroicon-o-clipboard-document class="w-4 h-4" />
+                                Copier le rapport
+                            </button>
+                        </div>
+                        <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <pre id="calibration-report" class="p-4 bg-gray-50 dark:bg-gray-900 text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-96 overflow-y-auto text-gray-700 dark:text-gray-300">{{ $calibrationReport }}</pre>
+                        </div>
+                        <p class="text-xs text-gray-500">
+                            💡 Copiez ce rapport et partagez-le avec une IA pour obtenir des suggestions d'amélioration des prompts.
+                        </p>
                     </div>
                 @endif
             </div>

@@ -49,10 +49,11 @@ class VisionSettingsPage extends Page implements HasForms
 
     // Calibration properties
     public ?string $calibrationImageUrl = null;
-    public ?array $calibrationImageUpload = null;
-    public array $calibrationPrompts = [];
+    public $calibrationImageUpload = null;
+    public string $calibrationJson = '';
     public array $calibrationResults = [];
     public bool $isCalibrating = false;
+    public string $calibrationReport = '';
 
     public function mount(): void
     {
@@ -75,9 +76,76 @@ class VisionSettingsPage extends Page implements HasForms
 
         $this->refreshDiagnostics();
 
-        // Initialiser les prompts de calibration avec le prompt par défaut
-        $this->calibrationPrompts = [
-            ['prompt' => VisionSetting::getDefaultPrompt()],
+        // Initialiser le JSON de calibration avec les tests par défaut
+        $this->calibrationJson = json_encode($this->getDefaultCalibrationTests(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Tests de calibration par défaut
+     */
+    private function getDefaultCalibrationTests(): array
+    {
+        return [
+            [
+                'id' => 'basic_transcription_headers',
+                'category' => 'OCR & Structure Simple',
+                'description' => 'Teste la capacité à identifier des titres et des paragraphes simples dans un document texte.',
+                'prompt' => 'Convertis le contenu textuel de cette image en format Markdown. Utilise des dièses (#, ##) pour les titres visiblement plus grands et du texte normal pour les paragraphes. Ne rajoute aucun commentaire avant ou après le contenu markdown.',
+            ],
+            [
+                'id' => 'unordered_lists',
+                'category' => 'Listes',
+                'description' => 'Teste la détection et la conversion de listes à puces.',
+                'prompt' => 'Identifie la liste à puces présente dans l\'image et transcris-la en utilisant la syntaxe de liste Markdown (des astérisques * ou des tirets - pour chaque élément). Respecte l\'ordre des éléments.',
+            ],
+            [
+                'id' => 'ordered_lists_instructions',
+                'category' => 'Listes',
+                'description' => 'Teste la détection de listes numérotées (ex: une recette ou des instructions).',
+                'prompt' => 'Cette image contient des étapes numérotées. Transcris-les en une liste ordonnée Markdown (1., 2., 3., etc.). Assure-toi de capturer tout le texte de chaque étape.',
+            ],
+            [
+                'id' => 'simple_table_structure',
+                'category' => 'Tableaux (Stress Test)',
+                'description' => 'Teste crucial pour Moondream : peut-il générer la syntaxe de tableau Markdown sans casser la mise en page ?',
+                'prompt' => 'Analyse l\'image pour y trouver un tableau. Représente les données de ce tableau en utilisant strictement la syntaxe de tableau Markdown (avec les barres verticales | et la ligne de séparation header/contenu |---|). Si la structure est trop complexe, fais de ton mieux pour aligner les colonnes.',
+            ],
+            [
+                'id' => 'key_value_extraction',
+                'category' => 'Extraction Structurée (Formulaires)',
+                'description' => 'Teste l\'extraction de champs de type formulaire ou facture (ex: \'Total: 50€\') vers une liste structurée.',
+                'prompt' => 'L\'image contient des paires clé-valeur (comme des champs de formulaire ou des étiquettes et leurs données). Extrais-les dans une liste Markdown où la clé est en gras, suivie de la valeur. Exemple: \'- **Nom:** Jean Dupont\'.',
+            ],
+            [
+                'id' => 'code_block_ocr',
+                'category' => 'Code & Technique',
+                'description' => 'Vérifie si le modèle reconnaît du code informatique et le place dans des balises de code appropriées.',
+                'prompt' => 'Cette image contient un extrait de code informatique. Transcris ce code exactement comme il est écrit et place-le à l\'intérieur d\'un bloc de code Markdown (en utilisant les triples backticks ``` au début et à la fin).',
+            ],
+            [
+                'id' => 'visual_description_structured',
+                'category' => 'Description Visuelle Structurée',
+                'description' => 'Teste la capacité à décrire une scène visuelle (sans texte) en utilisant la structure Markdown pour organiser la réponse.',
+                'prompt' => 'Décris cette scène visuelle en utilisant une structure Markdown. Utilise un titre principal (#) pour le sujet global de l\'image, puis une liste à puces (*) pour détailler les principaux objets, couleurs ou actions que tu observes.',
+            ],
+            [
+                'id' => 'mixed_layout_article',
+                'category' => 'Mise en page complexe',
+                'description' => 'Teste la lecture d\'une page de magazine ou d\'un article web avec une image, un titre principal et un corps de texte.',
+                'prompt' => 'Analyse cette page d\'article. Extrais le titre principal en H1 (#), le sous-titre éventuel en H2 (##), et le corps du texte en paragraphes normaux. Ignore les publicités ou les éléments de navigation s\'il y en a.',
+            ],
+            [
+                'id' => 'emphasis_and_bold',
+                'category' => 'OCR & Formatage Riche',
+                'description' => 'Vérifie si le modèle détecte le texte en gras ou en italique dans l\'image source.',
+                'prompt' => 'Transcris le texte de l\'image. Si tu détectes des mots qui sont visuellement mis en évidence (en gras dans l\'image), entoure-les de doubles astérisques (**) dans la sortie Markdown pour conserver l\'emphase.',
+            ],
+            [
+                'id' => 'raw_text_fallback',
+                'category' => 'Failsafe',
+                'description' => 'Un test pour voir comment le modèle se comporte quand la structure est trop floue, doit-il juste cracher le texte ?',
+                'prompt' => 'Extrais tout le texte lisible de cette image et présente-le sous forme de paragraphes Markdown simples. Ne t\'inquiète pas pour la mise en forme complexe, concentre-toi sur la récupération maximale du texte.',
+            ],
         ];
     }
 
@@ -321,35 +389,53 @@ class VisionSettingsPage extends Page implements HasForms
     }
 
     /**
-     * Ajouter un prompt de calibration
+     * Réinitialiser le JSON de calibration
      */
-    public function addCalibrationPrompt(): void
+    public function resetCalibrationJson(): void
     {
-        $this->calibrationPrompts[] = ['prompt' => ''];
+        $this->calibrationJson = json_encode($this->getDefaultCalibrationTests(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $this->calibrationResults = [];
+        $this->calibrationReport = '';
+
+        Notification::make()
+            ->title('JSON réinitialisé')
+            ->body('Les tests de calibration par défaut ont été restaurés.')
+            ->info()
+            ->send();
     }
 
     /**
-     * Supprimer un prompt de calibration
-     */
-    public function removeCalibrationPrompt(int $index): void
-    {
-        unset($this->calibrationPrompts[$index]);
-        $this->calibrationPrompts = array_values($this->calibrationPrompts);
-
-        // Supprimer le résultat correspondant s'il existe
-        unset($this->calibrationResults[$index]);
-        $this->calibrationResults = array_values($this->calibrationResults);
-    }
-
-    /**
-     * Lancer la calibration pour tous les prompts
+     * Lancer la calibration pour tous les tests du JSON
      */
     public function runCalibration(): void
     {
         $this->isCalibrating = true;
         $this->calibrationResults = [];
+        $this->calibrationReport = '';
 
         try {
+            // Parser le JSON
+            $tests = json_decode($this->calibrationJson, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                Notification::make()
+                    ->title('Erreur JSON')
+                    ->body('Le JSON de calibration est invalide : ' . json_last_error_msg())
+                    ->danger()
+                    ->send();
+                $this->isCalibrating = false;
+                return;
+            }
+
+            if (empty($tests)) {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Aucun test défini dans le JSON')
+                    ->danger()
+                    ->send();
+                $this->isCalibrating = false;
+                return;
+            }
+
             // Récupérer l'image
             $imageContent = $this->getCalibrationImageContent();
 
@@ -364,11 +450,14 @@ class VisionSettingsPage extends Page implements HasForms
             }
 
             // Tester chaque prompt
-            foreach ($this->calibrationPrompts as $index => $promptData) {
-                $prompt = $promptData['prompt'] ?? '';
+            foreach ($tests as $index => $test) {
+                $prompt = $test['prompt'] ?? '';
 
                 if (empty($prompt)) {
                     $this->calibrationResults[$index] = [
+                        'id' => $test['id'] ?? "test_$index",
+                        'category' => $test['category'] ?? 'N/A',
+                        'description' => $test['description'] ?? '',
                         'success' => false,
                         'error' => 'Prompt vide',
                         'markdown' => '',
@@ -378,12 +467,20 @@ class VisionSettingsPage extends Page implements HasForms
                 }
 
                 $result = $this->testPromptWithImage($imageContent, $prompt);
-                $this->calibrationResults[$index] = $result;
+                $this->calibrationResults[$index] = array_merge([
+                    'id' => $test['id'] ?? "test_$index",
+                    'category' => $test['category'] ?? 'N/A',
+                    'description' => $test['description'] ?? '',
+                    'prompt' => $prompt,
+                ], $result);
             }
+
+            // Générer le rapport
+            $this->generateCalibrationReport();
 
             Notification::make()
                 ->title('Calibration terminée')
-                ->body(count($this->calibrationResults) . ' prompt(s) testés')
+                ->body(count($this->calibrationResults) . ' test(s) exécutés. Rapport généré.')
                 ->success()
                 ->send();
 
@@ -396,6 +493,79 @@ class VisionSettingsPage extends Page implements HasForms
         }
 
         $this->isCalibrating = false;
+    }
+
+    /**
+     * Générer le rapport de calibration au format Markdown
+     */
+    private function generateCalibrationReport(): void
+    {
+        $settings = VisionSetting::getInstance();
+        $successCount = count(array_filter($this->calibrationResults, fn($r) => $r['success'] ?? false));
+        $totalCount = count($this->calibrationResults);
+        $totalTime = array_sum(array_column($this->calibrationResults, 'processing_time'));
+
+        $report = "# Rapport de Calibration Vision\n\n";
+        $report .= "## Informations Générales\n\n";
+        $report .= "- **Date** : " . now()->format('d/m/Y H:i:s') . "\n";
+        $report .= "- **Modèle** : `{$settings->model}`\n";
+        $report .= "- **Serveur Ollama** : `{$settings->getOllamaUrl()}`\n";
+        $report .= "- **Image source** : " . ($this->calibrationImageUrl ?: 'Upload local') . "\n";
+        $report .= "- **Tests réussis** : {$successCount}/{$totalCount}\n";
+        $report .= "- **Temps total** : {$totalTime}s\n\n";
+
+        $report .= "## Résumé par Catégorie\n\n";
+
+        // Grouper par catégorie
+        $byCategory = [];
+        foreach ($this->calibrationResults as $result) {
+            $cat = $result['category'] ?? 'Autre';
+            if (!isset($byCategory[$cat])) {
+                $byCategory[$cat] = ['success' => 0, 'total' => 0, 'time' => 0];
+            }
+            $byCategory[$cat]['total']++;
+            $byCategory[$cat]['time'] += $result['processing_time'] ?? 0;
+            if ($result['success'] ?? false) {
+                $byCategory[$cat]['success']++;
+            }
+        }
+
+        $report .= "| Catégorie | Réussis | Temps moyen |\n";
+        $report .= "|-----------|---------|-------------|\n";
+        foreach ($byCategory as $cat => $stats) {
+            $avgTime = $stats['total'] > 0 ? round($stats['time'] / $stats['total'], 2) : 0;
+            $report .= "| {$cat} | {$stats['success']}/{$stats['total']} | {$avgTime}s |\n";
+        }
+        $report .= "\n";
+
+        $report .= "## Détails des Tests\n\n";
+
+        foreach ($this->calibrationResults as $result) {
+            $status = ($result['success'] ?? false) ? '✅' : '❌';
+            $report .= "### {$status} {$result['id']}\n\n";
+            $report .= "- **Catégorie** : {$result['category']}\n";
+            $report .= "- **Description** : {$result['description']}\n";
+            $report .= "- **Temps** : {$result['processing_time']}s\n\n";
+
+            $report .= "**Prompt utilisé :**\n```\n{$result['prompt']}\n```\n\n";
+
+            if ($result['success'] ?? false) {
+                $report .= "**Résultat obtenu :**\n```markdown\n{$result['markdown']}\n```\n\n";
+            } else {
+                $report .= "**Erreur :** {$result['error']}\n\n";
+            }
+
+            $report .= "---\n\n";
+        }
+
+        $report .= "## Recommandations pour l'amélioration\n\n";
+        $report .= "Sur la base des résultats ci-dessus, une IA peut analyser :\n";
+        $report .= "1. Les tests échoués et proposer des améliorations de prompts\n";
+        $report .= "2. La qualité du markdown généré vs attendu\n";
+        $report .= "3. Les patterns de succès/échec par catégorie\n";
+        $report .= "4. Des suggestions pour de nouveaux tests pertinents\n\n";
+
+        $this->calibrationReport = $report;
     }
 
     /**
@@ -504,23 +674,27 @@ class VisionSettingsPage extends Page implements HasForms
     }
 
     /**
-     * Copier le prompt du résultat vers le formulaire principal
+     * Utiliser un prompt de test comme prompt par défaut
      */
-    public function usePromptAsDefault(int $index): void
+    public function usePromptAsDefault(string $testId): void
     {
-        $prompt = $this->calibrationPrompts[$index]['prompt'] ?? '';
+        foreach ($this->calibrationResults as $result) {
+            if (($result['id'] ?? '') === $testId) {
+                $prompt = $result['prompt'] ?? '';
+                if (!empty($prompt)) {
+                    $this->form->fill([
+                        ...$this->form->getState(),
+                        'system_prompt' => $prompt,
+                    ]);
 
-        if (!empty($prompt)) {
-            $this->form->fill([
-                ...$this->form->getState(),
-                'system_prompt' => $prompt,
-            ]);
-
-            Notification::make()
-                ->title('Prompt appliqué')
-                ->body('Le prompt a été copié dans le formulaire. N\'oubliez pas de sauvegarder.')
-                ->success()
-                ->send();
+                    Notification::make()
+                        ->title('Prompt appliqué')
+                        ->body("Le prompt du test '{$testId}' a été copié. N'oubliez pas de sauvegarder.")
+                        ->success()
+                        ->send();
+                }
+                return;
+            }
         }
     }
 }
