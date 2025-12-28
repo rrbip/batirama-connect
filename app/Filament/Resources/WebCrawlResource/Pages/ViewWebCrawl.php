@@ -777,7 +777,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'fetched' => 'OK',
                         'error' => 'Erreur',
                         default => $state,
-                    }),
+                    })
+                    ->tooltip(fn ($record) => $record->error_message),
 
                 Tables\Columns\TextColumn::make('url.http_status')
                     ->label('HTTP')
