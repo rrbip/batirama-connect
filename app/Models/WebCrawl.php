@@ -60,6 +60,7 @@ class WebCrawl extends Model
         'custom_headers',
         'enable_deduplication',
         'dedup_mode',
+        'pdf_extraction_method',
         'status',
         'pages_discovered',
         'pages_crawled',

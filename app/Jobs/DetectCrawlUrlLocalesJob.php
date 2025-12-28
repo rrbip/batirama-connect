@@ -27,8 +27,12 @@ class DetectCrawlUrlLocalesJob implements ShouldQueue
 
     public function handle(): void
     {
+        // Get the PDF extraction method from crawl settings
+        $pdfExtractionMethod = $this->crawl->pdf_extraction_method ?? 'auto';
+
         Log::info('DetectCrawlUrlLocalesJob: Starting locale detection', [
             'crawl_id' => $this->crawl->id,
+            'pdf_extraction_method' => $pdfExtractionMethod,
         ]);
 
         $detected = 0;
@@ -43,7 +47,7 @@ class DetectCrawlUrlLocalesJob implements ShouldQueue
 
         foreach ($urls as $url) {
             try {
-                $locale = $url->detectAndSaveLocale();
+                $locale = $url->detectAndSaveLocale($pdfExtractionMethod);
                 if ($locale) {
                     $detected++;
                 } else {

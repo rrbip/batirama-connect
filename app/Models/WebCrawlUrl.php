@@ -213,10 +213,12 @@ class WebCrawlUrl extends Model
     /**
      * Extract text content from stored file.
      * For HTML: removes tags, scripts, styles.
-     * For PDF: uses pdftotext or pdfparser.
+     * For PDF: uses pdftotext or pdfparser (or OCR if specified).
      * For other types: returns null (no extraction available).
+     *
+     * @param string|null $pdfExtractionMethod Method for PDF: auto, text, ocr
      */
-    public function getTextContent(): ?string
+    public function getTextContent(?string $pdfExtractionMethod = null): ?string
     {
         $content = $this->getContent();
 
@@ -244,7 +246,7 @@ class WebCrawlUrl extends Model
 
         // For PDF, use proper text extraction
         if ($this->isPdf()) {
-            return $this->extractTextFromPdf();
+            return $this->extractTextFromPdf($pdfExtractionMethod ?? 'auto');
         }
 
         // For plain text files
@@ -258,9 +260,11 @@ class WebCrawlUrl extends Model
     }
 
     /**
-     * Extract text from PDF using pdftotext or pdfparser.
+     * Extract text from PDF using the specified method.
+     *
+     * @param string $method Extraction method: auto, text, ocr
      */
-    private function extractTextFromPdf(): ?string
+    private function extractTextFromPdf(string $method = 'auto'): ?string
     {
         if (empty($this->storage_path)) {
             return null;
@@ -272,7 +276,12 @@ class WebCrawlUrl extends Model
             return null;
         }
 
-        // Try pdftotext first (poppler-utils) - most reliable
+        // OCR mode: use Tesseract only
+        if ($method === 'ocr') {
+            return $this->extractPdfWithOcr($fullPath);
+        }
+
+        // Text mode or Auto mode: try text extraction first
         $text = $this->extractPdfWithPdftotext($fullPath);
 
         if (!empty($text)) {
@@ -292,7 +301,68 @@ class WebCrawlUrl extends Model
             // Silently fail, PDF might be encrypted or corrupted
         }
 
+        // Auto mode: if text extraction failed, try OCR as fallback
+        if ($method === 'auto') {
+            return $this->extractPdfWithOcr($fullPath);
+        }
+
         return null;
+    }
+
+    /**
+     * Extract PDF text using OCR (Tesseract via pdftoppm).
+     */
+    private function extractPdfWithOcr(string $path): ?string
+    {
+        // Check if pdftoppm and tesseract are available
+        $pdftoppmCheck = @shell_exec('pdftoppm -v 2>&1');
+        $tesseractCheck = @shell_exec('tesseract --version 2>&1');
+
+        if (!$pdftoppmCheck || !str_contains($tesseractCheck ?? '', 'tesseract')) {
+            return null;
+        }
+
+        $tempDir = sys_get_temp_dir() . '/pdf_ocr_' . uniqid();
+        @mkdir($tempDir, 0755, true);
+
+        try {
+            // Convert PDF to images (PNG, 300 DPI)
+            $escapedPath = escapeshellarg($path);
+            $escapedTempDir = escapeshellarg($tempDir);
+            $result = @shell_exec("pdftoppm -png -r 300 {$escapedPath} {$escapedTempDir}/page 2>&1");
+
+            // Find generated images
+            $images = glob($tempDir . '/page-*.png');
+            if (empty($images)) {
+                $images = glob($tempDir . '/page*.png');
+            }
+
+            if (empty($images)) {
+                return null;
+            }
+
+            sort($images);
+
+            // OCR each page
+            $fullText = '';
+            foreach ($images as $imagePath) {
+                $escapedImage = escapeshellarg($imagePath);
+                $pageText = @shell_exec("tesseract {$escapedImage} stdout -l fra+eng --psm 3 2>/dev/null");
+                if ($pageText) {
+                    $fullText .= $pageText . "\n\n";
+                }
+            }
+
+            return !empty($fullText) ? $this->cleanPdfText($fullText) : null;
+
+        } finally {
+            // Cleanup temp files
+            $files = glob($tempDir . '/*');
+            foreach ($files as $file) {
+                @unlink($file);
+            }
+            @rmdir($tempDir);
+        }
     }
 
     /**
@@ -336,8 +406,10 @@ class WebCrawlUrl extends Model
      * Detect and set the locale from content.
      * For HTML: uses lang attribute, URL patterns, then content analysis.
      * For other documents (PDF, etc.): uses URL patterns and content analysis.
+     *
+     * @param string|null $pdfExtractionMethod Method for PDF text extraction: auto, text, ocr
      */
-    public function detectLocale(): ?string
+    public function detectLocale(?string $pdfExtractionMethod = null): ?string
     {
         $detector = app(LanguageDetector::class);
         $locale = null;
@@ -357,7 +429,7 @@ class WebCrawlUrl extends Model
 
         // For non-HTML or if still no locale, try content analysis
         if (!$locale) {
-            $content = $this->getTextContent();
+            $content = $this->getTextContent($pdfExtractionMethod);
             if (!empty($content)) {
                 $locale = $detector->detectFromContent(mb_substr($content, 0, 5000));
             }
@@ -368,10 +440,12 @@ class WebCrawlUrl extends Model
 
     /**
      * Detect locale and save to database.
+     *
+     * @param string|null $pdfExtractionMethod Method for PDF text extraction: auto, text, ocr
      */
-    public function detectAndSaveLocale(): ?string
+    public function detectAndSaveLocale(?string $pdfExtractionMethod = null): ?string
     {
-        $locale = $this->detectLocale();
+        $locale = $this->detectLocale($pdfExtractionMethod);
 
         if ($locale && $locale !== $this->locale) {
             $this->update(['locale' => $locale]);
