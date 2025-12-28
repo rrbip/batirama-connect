@@ -179,22 +179,19 @@ class FabricantCatalog extends Model
     }
 
     /**
-     * Get supported locales for display.
+     * Get supported locales for display (delegates to LanguageDetector).
      */
     public static function getSupportedLocales(): array
     {
-        return [
-            'fr' => 'Français',
-            'en' => 'English',
-            'de' => 'Deutsch',
-            'es' => 'Español',
-            'it' => 'Italiano',
-            'nl' => 'Nederlands',
-            'pt' => 'Português',
-            'pl' => 'Polski',
-            'bg' => 'Български',
-            'ru' => 'Русский',
-        ];
+        return \App\Services\Marketplace\LanguageDetector::getLocaleNamesForForm();
+    }
+
+    /**
+     * Get locales grouped by continent for display in forms.
+     */
+    public static function getLocalesByContinent(): array
+    {
+        return \App\Services\Marketplace\LanguageDetector::getLocalesByContinent();
     }
 
     /**

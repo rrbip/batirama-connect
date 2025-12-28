@@ -186,19 +186,10 @@ class FabricantCatalogResource extends Resource
                                             ])
                                             ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled')),
 
-                                        Forms\Components\CheckboxList::make('extraction_config.locale_detection.allowed_locales')
-                                            ->label('Langues a detecter')
-                                            ->options(FabricantCatalog::getSupportedLocales())
-                                            ->default(fn () => array_keys(FabricantCatalog::getSupportedLocales()))
-                                            ->afterStateHydrated(function ($state, $set) {
-                                                // Empty array = all locales selected (for backwards compatibility)
-                                                if (empty($state)) {
-                                                    $set('extraction_config.locale_detection.allowed_locales', array_keys(FabricantCatalog::getSupportedLocales()));
-                                                }
-                                            })
-                                            ->columns(4)
+                                        Forms\Components\Fieldset::make('Langues à détecter')
+                                            ->schema(self::getLocaleCheckboxesByContinent())
                                             ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled'))
-                                            ->helperText('Décochez pour exclure certaines langues. Toutes cochées = détection automatique de toutes les langues disponibles.'),
+                                            ->columnSpanFull(),
 
                                         Forms\Components\Select::make('extraction_config.locale_detection.default_locale')
                                             ->label('Forcer une langue par defaut')
@@ -576,10 +567,15 @@ class FabricantCatalogResource extends Resource
                     ->icon('heroicon-o-language')
                     ->color('info')
                     ->visible(fn ($record) => $record->products()->whereNull('locale')->exists())
-                    ->requiresConfirmation()
+                    ->form([
+                        Forms\Components\Toggle::make('run_sync')
+                            ->label('Exécuter maintenant (synchrone)')
+                            ->helperText('Cochez pour exécuter immédiatement sans utiliser la queue. Peut prendre du temps si beaucoup de produits.')
+                            ->default(false),
+                    ])
                     ->modalHeading('Détecter les langues')
                     ->modalDescription('Lancer la détection automatique de langue pour tous les produits sans langue détectée ?')
-                    ->action(function (FabricantCatalog $record) {
+                    ->action(function (FabricantCatalog $record, array $data) {
                         $count = $record->products()->whereNull('locale')->count();
 
                         if ($count === 0) {
@@ -591,14 +587,28 @@ class FabricantCatalogResource extends Resource
                             return;
                         }
 
-                        // Dispatch the job
-                        \App\Jobs\DetectProductLocalesJob::dispatch($record);
+                        $runSync = $data['run_sync'] ?? false;
 
-                        Notification::make()
-                            ->title('Détection lancée')
-                            ->body("Détection de la langue pour {$count} produits en cours en arrière-plan...")
-                            ->success()
-                            ->send();
+                        if ($runSync) {
+                            // Run synchronously
+                            \App\Jobs\DetectProductLocalesJob::dispatchSync($record);
+
+                            $detected = $record->products()->whereNotNull('locale')->count();
+                            Notification::make()
+                                ->title('Détection terminée')
+                                ->body("Langue détectée pour {$detected} produits.")
+                                ->success()
+                                ->send();
+                        } else {
+                            // Dispatch to queue
+                            \App\Jobs\DetectProductLocalesJob::dispatch($record);
+
+                            Notification::make()
+                                ->title('Détection lancée en arrière-plan')
+                                ->body("Détection de la langue pour {$count} produits. Assurez-vous que le worker de queue est actif (php artisan queue:work).")
+                                ->success()
+                                ->send();
+                        }
                     }),
 
                 Tables\Actions\Action::make('viewProducts')
@@ -636,5 +646,64 @@ class FabricantCatalogResource extends Resource
     public static function getNavigationBadge(): ?string
     {
         return (string) static::getModel()::count();
+    }
+
+    /**
+     * Generate checkbox lists for locales grouped by continent.
+     */
+    private static function getLocaleCheckboxesByContinent(): array
+    {
+        $continents = \App\Services\Marketplace\LanguageDetector::getLocalesByContinent();
+        $allLocales = FabricantCatalog::getSupportedLocales();
+        $allLocaleKeys = array_keys($allLocales);
+
+        $components = [];
+
+        foreach ($continents as $continentKey => $continent) {
+            // Get locale codes for this continent
+            $continentLocaleCodes = array_keys($continent['locales']);
+
+            $components[] = Forms\Components\Section::make($continent['label'])
+                ->schema([
+                    Forms\Components\CheckboxList::make("extraction_config.locale_detection.allowed_locales_{$continentKey}")
+                        ->label('')
+                        ->options($continent['locales'])
+                        ->default(fn () => $continentLocaleCodes)
+                        ->afterStateHydrated(function ($state, $set, $get) use ($continentLocaleCodes, $continentKey) {
+                            // Check main state for allowed_locales
+                            $mainState = $get('extraction_config.locale_detection.allowed_locales');
+                            if (empty($mainState)) {
+                                // All selected by default
+                                $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", $continentLocaleCodes);
+                            } else {
+                                // Filter to only this continent's locales
+                                $filtered = array_intersect($mainState, $continentLocaleCodes);
+                                $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", array_values($filtered));
+                            }
+                        })
+                        ->columns(4),
+                ])
+                ->collapsed()
+                ->compact();
+        }
+
+        // Add a hidden field to aggregate all selected locales
+        $components[] = Forms\Components\Hidden::make('extraction_config.locale_detection.allowed_locales')
+            ->afterStateHydrated(function ($state, $set) use ($allLocaleKeys) {
+                if (empty($state)) {
+                    $set('extraction_config.locale_detection.allowed_locales', $allLocaleKeys);
+                }
+            })
+            ->dehydrateStateUsing(function ($state, $get) use ($continents) {
+                // Aggregate all continent selections
+                $allSelected = [];
+                foreach ($continents as $continentKey => $continent) {
+                    $continentSelection = $get("extraction_config.locale_detection.allowed_locales_{$continentKey}") ?? [];
+                    $allSelected = array_merge($allSelected, $continentSelection);
+                }
+                return array_values(array_unique($allSelected));
+            });
+
+        return $components;
     }
 }
