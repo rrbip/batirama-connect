@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Models\Agent;
+use App\Models\AgentDeployment;
 use App\Models\VisionSetting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -14,9 +16,68 @@ class VisionExtractorService
 {
     private VisionSetting $settings;
 
-    public function __construct()
+    /**
+     * Override config from Agent or Deployment
+     * @var array{host?: string, port?: int, model?: string}|null
+     */
+    private ?array $configOverride = null;
+
+    public function __construct(?array $configOverride = null)
     {
         $this->settings = VisionSetting::getInstance();
+        $this->configOverride = $configOverride;
+    }
+
+    /**
+     * Create a service instance configured for a specific Agent
+     */
+    public static function forAgent(Agent $agent): self
+    {
+        $config = $agent->getVisionConfig();
+
+        // Only set override if different from global
+        $globalSettings = VisionSetting::getInstance();
+        $hasOverride = $config['host'] !== $globalSettings->ollama_host
+            || $config['port'] !== $globalSettings->ollama_port
+            || $config['model'] !== $globalSettings->model;
+
+        return new self($hasOverride ? $config : null);
+    }
+
+    /**
+     * Create a service instance configured for a specific Deployment
+     */
+    public static function forDeployment(AgentDeployment $deployment): self
+    {
+        $config = $deployment->getVisionConfig();
+
+        return new self($config);
+    }
+
+    /**
+     * Get the effective Ollama URL (override > global)
+     */
+    private function getOllamaUrl(): string
+    {
+        if ($this->configOverride) {
+            $host = $this->configOverride['host'] ?? $this->settings->ollama_host;
+            $port = $this->configOverride['port'] ?? $this->settings->ollama_port;
+            return "http://{$host}:{$port}";
+        }
+
+        return $this->settings->getOllamaUrl();
+    }
+
+    /**
+     * Get the effective model (override > global)
+     */
+    private function getModel(): string
+    {
+        if ($this->configOverride && !empty($this->configOverride['model'])) {
+            return $this->configOverride['model'];
+        }
+
+        return $this->settings->model;
     }
 
     /**
@@ -40,7 +101,7 @@ class VisionExtractorService
         Log::info('Vision extraction started', [
             'pdf_path' => $pdfPath,
             'document_id' => $documentId,
-            'model' => $this->settings->model,
+            'model' => $this->getModel(),
         ]);
 
         // Étape 1: Convertir le PDF en images
@@ -136,7 +197,7 @@ class VisionExtractorService
             'pages' => $pages,
             'errors' => $errors,
             'metadata' => [
-                'model' => $this->settings->model,
+                'model' => $this->getModel(),
                 'total_pages' => count($imagesResult['images']),
                 'pages_processed' => count($pages),
                 'duration_seconds' => round($duration, 2),
@@ -167,8 +228,8 @@ class VisionExtractorService
 
             // Appel à Ollama
             $response = Http::timeout($this->settings->timeout_seconds)
-                ->post($this->settings->getOllamaUrl() . '/api/generate', [
-                    'model' => $this->settings->model,
+                ->post($this->getOllamaUrl() . '/api/generate', [
+                    'model' => $this->getModel(),
                     'prompt' => $this->settings->system_prompt ?? VisionSetting::getDefaultPrompt(),
                     'images' => [$base64Image],
                     'stream' => false,
@@ -330,11 +391,53 @@ class VisionExtractorService
     }
 
     /**
+     * Vérifie la connexion Ollama (avec override si configuré)
+     */
+    private function checkOllamaConnection(): array
+    {
+        try {
+            $url = $this->getOllamaUrl();
+            $model = $this->getModel();
+
+            $response = \Illuminate\Support\Facades\Http::timeout(5)
+                ->get($url . '/api/tags');
+
+            if ($response->successful()) {
+                $models = collect($response->json('models', []))
+                    ->pluck('name')
+                    ->toArray();
+
+                $hasConfiguredModel = in_array($model, $models) ||
+                    in_array($model . ':latest', $models);
+
+                return [
+                    'connected' => true,
+                    'url' => $url,
+                    'models_available' => $models,
+                    'configured_model_installed' => $hasConfiguredModel,
+                ];
+            }
+
+            return [
+                'connected' => false,
+                'url' => $url,
+                'error' => 'Ollama responded with status ' . $response->status(),
+            ];
+        } catch (\Exception $e) {
+            return [
+                'connected' => false,
+                'url' => $this->getOllamaUrl(),
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
      * Vérifie si le service est disponible
      */
     public function isAvailable(): bool
     {
-        $check = $this->settings->checkOllamaConnection();
+        $check = $this->checkOllamaConnection();
         return $check['connected'] && ($check['configured_model_installed'] ?? false);
     }
 
@@ -343,7 +446,7 @@ class VisionExtractorService
      */
     public function getDiagnostics(): array
     {
-        $ollamaCheck = $this->settings->checkOllamaConnection();
+        $ollamaCheck = $this->checkOllamaConnection();
 
         // Vérifier pdftoppm
         $pdftoppmResult = Process::run(['which', 'pdftoppm']);
@@ -353,11 +456,15 @@ class VisionExtractorService
         $convertResult = Process::run(['which', 'convert']);
         $hasImageMagick = $convertResult->successful();
 
+        $model = $this->getModel();
+        $modelInfo = VisionSetting::AVAILABLE_MODELS[$model] ?? null;
+
         return [
             'ollama' => $ollamaCheck,
-            'model' => $this->settings->model,
-            'model_info' => $this->settings->getModelInfo(),
-            'cpu_compatible' => $this->settings->isCpuCompatible(),
+            'model' => $model,
+            'model_info' => $modelInfo,
+            'cpu_compatible' => $modelInfo['cpu_compatible'] ?? false,
+            'has_override' => $this->configOverride !== null,
             'pdf_converter' => [
                 'pdftoppm' => $hasPdftoppm,
                 'imagemagick' => $hasImageMagick,

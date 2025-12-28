@@ -79,6 +79,14 @@ class Agent extends Model
         'default_extraction_method',
         'default_chunk_strategy',
         'use_category_filtering',
+        // Vision Ollama configuration
+        'vision_ollama_host',
+        'vision_ollama_port',
+        'vision_model',
+        // Chunking Ollama configuration
+        'chunking_ollama_host',
+        'chunking_ollama_port',
+        'chunking_model',
         // Whitelabel columns
         'deployment_mode',
         'is_whitelabel_enabled',
@@ -98,6 +106,8 @@ class Agent extends Model
         'use_category_filtering' => 'boolean',
         'is_whitelabel_enabled' => 'boolean',
         'whitelabel_config' => 'array',
+        'vision_ollama_port' => 'integer',
+        'chunking_ollama_port' => 'integer',
     ];
 
     public function tenant(): BelongsTo
@@ -164,6 +174,90 @@ class Agent extends Model
     public function getModel(): string
     {
         return $this->model ?? config('ai.ollama.default_model');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // VISION OLLAMA CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne l'URL Ollama pour Vision (Agent > Global VisionSetting)
+     */
+    public function getVisionOllamaUrl(): string
+    {
+        $host = $this->vision_ollama_host ?? VisionSetting::getInstance()->ollama_host;
+        $port = $this->vision_ollama_port ?? VisionSetting::getInstance()->ollama_port;
+
+        return "http://{$host}:{$port}";
+    }
+
+    /**
+     * Retourne le modèle Vision (Agent > Global VisionSetting)
+     */
+    public function getVisionModel(): string
+    {
+        return $this->vision_model ?? VisionSetting::getInstance()->model;
+    }
+
+    /**
+     * Retourne la config Vision complète (pour passer au service)
+     */
+    public function getVisionConfig(): array
+    {
+        $globalSettings = VisionSetting::getInstance();
+
+        return [
+            'host' => $this->vision_ollama_host ?? $globalSettings->ollama_host,
+            'port' => $this->vision_ollama_port ?? $globalSettings->ollama_port,
+            'model' => $this->vision_model ?? $globalSettings->model,
+        ];
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // CHUNKING OLLAMA CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne l'URL Ollama pour Chunking (Agent > Global LlmChunkingSetting)
+     */
+    public function getChunkingOllamaUrl(): string
+    {
+        $host = $this->chunking_ollama_host ?? LlmChunkingSetting::getInstance()->ollama_host;
+        $port = $this->chunking_ollama_port ?? LlmChunkingSetting::getInstance()->ollama_port;
+
+        return "http://{$host}:{$port}";
+    }
+
+    /**
+     * Retourne le modèle Chunking (Agent > Global LlmChunkingSetting > Agent model)
+     */
+    public function getChunkingModel(): string
+    {
+        if ($this->chunking_model) {
+            return $this->chunking_model;
+        }
+
+        $globalModel = LlmChunkingSetting::getInstance()->model;
+        if ($globalModel) {
+            return $globalModel;
+        }
+
+        // Fallback sur le modèle de chat de l'agent
+        return $this->getModel();
+    }
+
+    /**
+     * Retourne la config Chunking complète (pour passer au service)
+     */
+    public function getChunkingConfig(): array
+    {
+        $globalSettings = LlmChunkingSetting::getInstance();
+
+        return [
+            'host' => $this->chunking_ollama_host ?? $globalSettings->ollama_host,
+            'port' => $this->chunking_ollama_port ?? $globalSettings->ollama_port,
+            'model' => $this->getChunkingModel(),
+        ];
     }
 
     public function usesHydration(): bool

@@ -223,20 +223,16 @@ class AgentDeploymentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Configuration avancée')
                             ->icon('heroicon-o-cog-6-tooth')
                             ->schema([
-                                Forms\Components\Section::make('Override configuration agent')
-                                    ->description('Ces paramètres remplacent la configuration de l\'agent si autorisé')
+                                Forms\Components\Section::make('Override modèle & paramètres')
+                                    ->description('Ces paramètres remplacent la configuration de l\'agent')
                                     ->schema([
-                                        Forms\Components\TextInput::make('config_overlay.model')
-                                            ->label('Modèle LLM')
-                                            ->placeholder('Utiliser le modèle de l\'agent'),
-
                                         Forms\Components\TextInput::make('config_overlay.temperature')
                                             ->label('Température')
                                             ->numeric()
                                             ->step(0.1)
                                             ->minValue(0)
                                             ->maxValue(2)
-                                            ->placeholder('Utiliser la température de l\'agent'),
+                                            ->placeholder('Utiliser la valeur de l\'agent'),
 
                                         Forms\Components\TextInput::make('config_overlay.max_tokens')
                                             ->label('Max tokens réponse')
@@ -245,11 +241,72 @@ class AgentDeploymentResource extends Resource
 
                                         Forms\Components\Textarea::make('config_overlay.system_prompt_append')
                                             ->label('Texte à ajouter au system prompt')
-                                            ->rows(4)
+                                            ->rows(3)
                                             ->placeholder('Instructions supplémentaires...')
                                             ->columnSpanFull(),
                                     ])
-                                    ->columns(3),
+                                    ->columns(2),
+
+                                Forms\Components\Section::make('Override Ollama - Chat')
+                                    ->description('Serveur Ollama dédié pour ce déploiement (vide = config agent)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('config_overlay.chat_ollama_host')
+                                            ->label('Host')
+                                            ->placeholder('ollama'),
+
+                                        Forms\Components\TextInput::make('config_overlay.chat_ollama_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->placeholder('11434'),
+
+                                        Forms\Components\TextInput::make('config_overlay.chat_model')
+                                            ->label('Modèle')
+                                            ->placeholder('llama3.2'),
+                                    ])
+                                    ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Override Ollama - Vision')
+                                    ->description('Serveur Ollama pour l\'extraction Vision (vide = config agent)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('config_overlay.vision_ollama_host')
+                                            ->label('Host')
+                                            ->placeholder('ollama-vision'),
+
+                                        Forms\Components\TextInput::make('config_overlay.vision_ollama_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->placeholder('11434'),
+
+                                        Forms\Components\Select::make('config_overlay.vision_model')
+                                            ->label('Modèle Vision')
+                                            ->options(\App\Models\VisionSetting::getModelOptions())
+                                            ->placeholder('Config agent'),
+                                    ])
+                                    ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Override Ollama - Chunking')
+                                    ->description('Serveur Ollama pour le chunking LLM (vide = config agent)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('config_overlay.chunking_ollama_host')
+                                            ->label('Host')
+                                            ->placeholder('ollama-chunk'),
+
+                                        Forms\Components\TextInput::make('config_overlay.chunking_ollama_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->placeholder('11434'),
+
+                                        Forms\Components\TextInput::make('config_overlay.chunking_model')
+                                            ->label('Modèle')
+                                            ->placeholder('mistral'),
+                                    ])
+                                    ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(),
                             ]),
                     ])
                     ->columnSpanFull(),

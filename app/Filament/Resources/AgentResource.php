@@ -96,10 +96,11 @@ class AgentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Configuration IA')
                             ->icon('heroicon-o-cog-6-tooth')
                             ->schema([
-                                Forms\Components\Section::make('Modèle LLM')
+                                Forms\Components\Section::make('Ollama - Chat')
+                                    ->description('Serveur Ollama pour les conversations (vide = config globale)')
                                     ->schema([
                                         Forms\Components\TextInput::make('model')
-                                            ->label('Modèle principal')
+                                            ->label('Modèle')
                                             ->placeholder('llama3.2')
                                             ->helperText('Modèle Ollama à utiliser'),
 
@@ -108,15 +109,58 @@ class AgentResource extends Resource
                                             ->placeholder('mistral'),
 
                                         Forms\Components\TextInput::make('ollama_host')
-                                            ->label('Host Ollama')
+                                            ->label('Host')
                                             ->placeholder('ollama'),
 
                                         Forms\Components\TextInput::make('ollama_port')
-                                            ->label('Port Ollama')
+                                            ->label('Port')
                                             ->numeric()
                                             ->placeholder('11434'),
                                     ])
-                                    ->columns(2),
+                                    ->columns(4)
+                                    ->collapsible(),
+
+                                Forms\Components\Section::make('Ollama - Vision (extraction PDF)')
+                                    ->description('Serveur Ollama pour l\'extraction de texte par vision (vide = config globale)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('vision_ollama_host')
+                                            ->label('Host')
+                                            ->placeholder('ollama-vision'),
+
+                                        Forms\Components\TextInput::make('vision_ollama_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->placeholder('11434'),
+
+                                        Forms\Components\Select::make('vision_model')
+                                            ->label('Modèle Vision')
+                                            ->options(\App\Models\VisionSetting::getModelOptions())
+                                            ->placeholder('Utiliser config globale'),
+                                    ])
+                                    ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Ollama - Chunking LLM')
+                                    ->description('Serveur Ollama pour le découpage sémantique des documents (vide = config globale)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('chunking_ollama_host')
+                                            ->label('Host')
+                                            ->placeholder('ollama-chunk'),
+
+                                        Forms\Components\TextInput::make('chunking_ollama_port')
+                                            ->label('Port')
+                                            ->numeric()
+                                            ->placeholder('11434'),
+
+                                        Forms\Components\TextInput::make('chunking_model')
+                                            ->label('Modèle')
+                                            ->placeholder('mistral')
+                                            ->helperText('Vide = modèle chat de l\'agent'),
+                                    ])
+                                    ->columns(3)
+                                    ->collapsible()
+                                    ->collapsed(),
 
                                 Forms\Components\Section::make('Paramètres de génération')
                                     ->schema([

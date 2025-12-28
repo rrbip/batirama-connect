@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Agent;
+use App\Models\AgentDeployment;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentChunk;
@@ -19,9 +20,69 @@ class LlmChunkingService
     private LlmChunkingSetting $settings;
     private ?DocumentChunkerService $fallbackChunker = null;
 
-    public function __construct()
+    /**
+     * Override config from Agent or Deployment
+     * @var array{host?: string, port?: int, model?: string}|null
+     */
+    private ?array $configOverride = null;
+
+    public function __construct(?array $configOverride = null)
     {
         $this->settings = LlmChunkingSetting::getInstance();
+        $this->configOverride = $configOverride;
+    }
+
+    /**
+     * Create a service instance configured for a specific Agent
+     */
+    public static function forAgent(Agent $agent): self
+    {
+        $config = $agent->getChunkingConfig();
+
+        // Only set override if different from global
+        $globalSettings = LlmChunkingSetting::getInstance();
+        $hasOverride = $config['host'] !== $globalSettings->ollama_host
+            || $config['port'] !== $globalSettings->ollama_port
+            || $config['model'] !== $globalSettings->model;
+
+        return new self($hasOverride ? $config : null);
+    }
+
+    /**
+     * Create a service instance configured for a specific Deployment
+     */
+    public static function forDeployment(AgentDeployment $deployment): self
+    {
+        $config = $deployment->getChunkingConfig();
+
+        return new self($config);
+    }
+
+    /**
+     * Get the effective Ollama URL (override > global)
+     */
+    private function getOllamaUrl(): string
+    {
+        if ($this->configOverride) {
+            $host = $this->configOverride['host'] ?? $this->settings->ollama_host;
+            $port = $this->configOverride['port'] ?? $this->settings->ollama_port;
+            return "http://{$host}:{$port}";
+        }
+
+        return $this->settings->getOllamaUrl();
+    }
+
+    /**
+     * Get the effective model (override > global)
+     */
+    private function getModel(?Agent $agent = null): string
+    {
+        if ($this->configOverride && !empty($this->configOverride['model'])) {
+            return $this->configOverride['model'];
+        }
+
+        // Use settings method which handles Agent fallback
+        return $this->settings->getModelFor($agent);
     }
 
     /**
@@ -169,7 +230,7 @@ class LlmChunkingService
                 'llm_chunking' => [
                     'processed_at' => now()->toIso8601String(),
                     'window_count' => count($windows),
-                    'model' => $this->settings->getModelFor($document->agent),
+                    'model' => $this->getModel($document->agent),
                     'responses' => $llmResponses,
                 ],
             ]),
@@ -374,7 +435,7 @@ class LlmChunkingService
      */
     public function processWindowWithRaw(string $windowText, ?Agent $agent = null): array
     {
-        $model = $this->settings->getModelFor($agent);
+        $model = $this->getModel($agent);
         $prompt = $this->settings->buildPrompt($windowText);
 
         // Timeout: 0 = infini, sinon utiliser la valeur configurée
@@ -385,7 +446,7 @@ class LlmChunkingService
             'connect_timeout' => 30, // 30s pour la connexion uniquement
         ]);
 
-        $response = $request->post($this->settings->getOllamaUrl() . '/api/generate', [
+        $response = $request->post($this->getOllamaUrl() . '/api/generate', [
             'model' => $model,
             'prompt' => $prompt,
             'stream' => false,
@@ -584,10 +645,71 @@ class LlmChunkingService
     public function isAvailable(): bool
     {
         try {
-            $response = Http::timeout(5)->get($this->settings->getOllamaUrl() . '/api/tags');
+            $response = Http::timeout(5)->get($this->getOllamaUrl() . '/api/tags');
             return $response->successful();
         } catch (\Exception $e) {
             return false;
+        }
+    }
+
+    /**
+     * Retourne les informations de diagnostic
+     */
+    public function getDiagnostics(): array
+    {
+        $ollamaCheck = $this->checkOllamaConnection();
+
+        return [
+            'ollama' => $ollamaCheck,
+            'model' => $this->getModel(),
+            'has_override' => $this->configOverride !== null,
+            'settings' => [
+                'window_size' => $this->settings->window_size,
+                'overlap_percent' => $this->settings->overlap_percent,
+                'temperature' => $this->settings->temperature,
+                'timeout_seconds' => $this->settings->timeout_seconds,
+            ],
+        ];
+    }
+
+    /**
+     * Vérifie la connexion Ollama (avec override si configuré)
+     */
+    private function checkOllamaConnection(): array
+    {
+        try {
+            $url = $this->getOllamaUrl();
+            $model = $this->getModel();
+
+            $response = Http::timeout(5)->get($url . '/api/tags');
+
+            if ($response->successful()) {
+                $models = collect($response->json('models', []))
+                    ->pluck('name')
+                    ->toArray();
+
+                $hasConfiguredModel = in_array($model, $models) ||
+                    in_array($model . ':latest', $models);
+
+                return [
+                    'connected' => true,
+                    'url' => $url,
+                    'models_available' => $models,
+                    'configured_model_installed' => $hasConfiguredModel,
+                ];
+            }
+
+            return [
+                'connected' => false,
+                'url' => $url,
+                'error' => 'Ollama responded with status ' . $response->status(),
+            ];
+        } catch (\Exception $e) {
+            return [
+                'connected' => false,
+                'url' => $this->getOllamaUrl(),
+                'error' => $e->getMessage(),
+            ];
         }
     }
 
