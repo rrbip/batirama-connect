@@ -79,6 +79,7 @@ Cette plateforme s'intègre dans un écosystème plus large comprenant :
 | `mistral-small` | 24B | Support rapide, Q&A général | 32GB |
 | `mistral:7b` | 7B | Développement, tests | 8GB |
 | `nomic-embed-text` | - | Génération d'embeddings | 4GB |
+| `moondream` | 1.6B | Vision : extraction texte images/PDF | 4GB |
 
 ---
 

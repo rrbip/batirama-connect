@@ -161,7 +161,47 @@ CREATE INDEX idx_document_chunks_keywords ON document_chunks USING GIN(keywords)
 | `max_retries` | `1` | Tentatives avant échec |
 | `timeout_seconds` | `300` | Timeout par fenêtre (5 min) |
 
-### 4.2 Prompt système par défaut
+### 4.2 Configuration multi-niveaux Ollama
+
+La configuration Ollama (host, port, modèle) suit une **hiérarchie de priorité** pour le chunking :
+
+```
+┌────────────────────────────────────────────────┐
+│ 1. AgentDeployment (config_overlay)            │  ← Priorité maximale
+│    chunking_ollama_host, chunking_ollama_port  │
+│    chunking_model                              │
+├────────────────────────────────────────────────┤
+│ 2. Agent                                       │
+│    chunking_ollama_host, chunking_ollama_port  │
+│    chunking_model                              │
+├────────────────────────────────────────────────┤
+│ 3. LlmChunkingSetting (global)                 │  ← Fallback
+│    ollama_host, ollama_port, model             │
+└────────────────────────────────────────────────┘
+```
+
+**Cas d'usage** :
+- **Deployment** : Un client en marque blanche peut avoir son propre serveur Ollama
+- **Agent** : Un agent peut utiliser un modèle différent (plus puissant ou plus léger)
+- **Global** : Configuration par défaut pour tous les agents
+
+**Exemple de configuration** :
+```php
+// AgentDeployment avec override
+$deployment->config_overlay = [
+    'chunking_ollama_host' => '192.168.1.100',
+    'chunking_ollama_port' => 11434,
+    'chunking_model' => 'mistral:7b',
+];
+
+// L'agent utilisera cette config au lieu de la globale
+$config = $deployment->getChunkingConfig();
+// → ['host' => '192.168.1.100', 'port' => 11434, 'model' => 'mistral:7b']
+```
+
+**Note** : La même hiérarchie existe pour Vision (`getVisionConfig()`) et Chat (`getChatConfig()`).
+
+### 4.3 Prompt système par défaut
 
 ```markdown
 # Rôle

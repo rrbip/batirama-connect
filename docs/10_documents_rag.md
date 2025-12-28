@@ -249,17 +249,18 @@ Ce job exécute automatiquement toutes les étapes. En cas d'erreur, il retry 3 
 
 | Extension | Parser | Notes |
 |-----------|--------|-------|
-| **pdf** | pdftotext + smalot/pdfparser + OCR fallback | Plusieurs méthodes, meilleur résultat choisi |
+| **pdf** | pdftotext + smalot + OCR + Vision | Plusieurs méthodes, meilleur résultat choisi |
 | **txt** | Lecture directe | Encodage UTF-8 requis |
 | **md** | Lecture directe | Markdown |
+| **html, htm** | league/html-to-markdown | Conversion en Markdown structuré |
 | **docx** | ZipArchive + XML | Format Office moderne |
 | **doc** | Extraction basique | Format ancien, résultats variables |
-| **jpg, jpeg** | Tesseract OCR | Extraction texte via OCR |
-| **png** | Tesseract OCR | Extraction texte via OCR |
+| **jpg, jpeg** | Tesseract OCR ou Vision | Extraction texte via OCR ou modèle vision |
+| **png** | Tesseract OCR ou Vision | Extraction texte via OCR ou modèle vision |
 | **gif** | Tesseract OCR | Extraction texte via OCR |
 | **bmp** | Tesseract OCR | Extraction texte via OCR |
 | **tiff, tif** | Tesseract OCR | Extraction texte via OCR |
-| **webp** | Tesseract OCR | Extraction texte via OCR |
+| **webp** | Tesseract OCR ou Vision | Extraction texte via OCR ou modèle vision |
 
 ### Extraction PDF
 
@@ -307,6 +308,90 @@ Image → Tesseract OCR → Texte brut → Chunking → Indexation
 - Qualité dépend de la résolution de l'image (300 DPI recommandé)
 - Texte manuscrit mal reconnu
 - Tableaux et mise en page complexes peuvent être mal interprétés
+
+### Extraction Vision (Ollama)
+
+Le mode **Vision** utilise un modèle de vision Ollama (ex: `moondream`) pour extraire le texte des images et PDFs. Ce mode est particulièrement utile pour :
+- Documents complexes avec graphiques et tableaux
+- PDFs scannés de mauvaise qualité
+- Extraction de données structurées
+
+```
+PDF/Image → Conversion images → Modèle Vision Ollama → Markdown structuré
+```
+
+**Configuration** :
+- Modèle par défaut : `moondream` (configurable par agent)
+- Résolution : 300 DPI pour la conversion PDF→image
+- Sortie : Markdown avec structure préservée
+
+**Métadonnées traçage** :
+Les métadonnées d'extraction Vision sont stockées dans `extraction_metadata.vision_extraction` :
+```json
+{
+  "model": "moondream",
+  "pages_processed": 5,
+  "total_processing_time": 45.2,
+  "pages": [
+    {"page": 1, "success": true, "processing_time": 8.5},
+    ...
+  ]
+}
+```
+
+**Configuration multi-niveaux** :
+La configuration Vision suit une hiérarchie de priorité :
+1. **Deployment** (config_overlay) - Priorité maximale
+2. **Agent** (vision_ollama_host, vision_model) - Override par agent
+3. **VisionSetting** (global) - Configuration par défaut
+
+### Extraction HTML (Markdown)
+
+Les fichiers HTML sont convertis en **Markdown** via `league/html-to-markdown` pour préserver la structure sémantique :
+
+```
+HTML → Nettoyage (scripts, styles) → Conversion Markdown → Indexation
+```
+
+**Avantages du Markdown** :
+- Préserve les titres (`#`, `##`, etc.) pour la hiérarchie
+- Conserve les listes, tableaux et liens
+- Meilleure qualité d'embeddings pour le RAG
+- Texte plus propre que `strip_tags()`
+
+**Éléments préservés** :
+- Headings (h1-h6) → `# Titre`
+- Listes (ul, ol) → `- Item`
+- Tableaux → Markdown tables
+- Liens → `[texte](url)`
+- Gras/Italique → `**bold**` / `_italic_`
+
+**Éléments supprimés** :
+- `<script>`, `<style>`, `<noscript>`
+- `<nav>`, `<footer>`, `<aside>`, `<iframe>`
+- Commentaires HTML
+- Métadonnées `<head>`
+
+**Métadonnées traçage** :
+Les métadonnées sont stockées dans `extraction_metadata.html_extraction` :
+```json
+{
+  "converter": "league/html-to-markdown",
+  "html_size": 45000,
+  "cleaned_html_size": 35000,
+  "markdown_size": 12000,
+  "compression_ratio": 73.3,
+  "elements_detected": {
+    "headings": 5,
+    "lists": 3,
+    "tables": 1,
+    "links": 12,
+    "paragraphs": 15
+  },
+  "processing_time_ms": 45.2,
+  "extracted_at": "2025-12-28T10:30:00+00:00"
+}
+```
 
 ---
 
