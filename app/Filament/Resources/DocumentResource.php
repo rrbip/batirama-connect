@@ -316,6 +316,10 @@ class DocumentResource extends Resource
                                                 // 3. Détail par page
                                                 $pages = $visionData['pages'] ?? [];
                                                 $storagePath = $visionData['storage_path'] ?? '';
+
+                                                // Récupérer le disque de stockage configuré
+                                                $storageDisk = \App\Models\VisionSetting::getInstance()->storage_disk ?? 'public';
+
                                                 if (!empty($pages)) {
                                                     $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
                                                     $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
@@ -337,8 +341,8 @@ class DocumentResource extends Resource
 
                                                         // Générer l'URL de l'image si disponible
                                                         $imageUrl = '';
-                                                        if ($imagePath && \Storage::disk('public')->exists($imagePath)) {
-                                                            $imageUrl = \Storage::disk('public')->url($imagePath);
+                                                        if ($imagePath && \Storage::disk($storageDisk)->exists($imagePath)) {
+                                                            $imageUrl = \Storage::disk($storageDisk)->url($imagePath);
                                                         }
 
                                                         // Raccourcir les chemins pour l'affichage

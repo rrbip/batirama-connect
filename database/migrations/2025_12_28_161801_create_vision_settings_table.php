@@ -32,7 +32,7 @@ return new class extends Migration
             // Stockage des fichiers intermédiaires
             $table->boolean('store_images')->default(true);
             $table->boolean('store_markdown')->default(true);
-            $table->string('storage_disk')->default('local'); // local, s3, etc.
+            $table->string('storage_disk')->default('public'); // public, local, s3, etc.
             $table->string('storage_path')->default('vision-extraction');
 
             // Informations système (affichage uniquement)

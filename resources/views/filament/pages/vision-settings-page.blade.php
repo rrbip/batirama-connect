@@ -130,5 +130,186 @@
         <form wire:submit="save">
             {{ $this->form }}
         </form>
+
+        {{-- Zone de calibration --}}
+        <x-filament::section>
+            <x-slot name="heading">
+                Zone de calibration
+            </x-slot>
+            <x-slot name="description">
+                Testez différents prompts sur une image pour calibrer l'extraction
+            </x-slot>
+
+            <div class="space-y-6">
+                {{-- Sélection de l'image --}}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {{-- Upload de fichier --}}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Upload d'image
+                        </label>
+                        <input
+                            type="file"
+                            wire:model="calibrationImageUpload"
+                            accept="image/*"
+                            class="block w-full text-sm text-gray-500 dark:text-gray-400
+                                file:mr-4 file:py-2 file:px-4
+                                file:rounded-full file:border-0
+                                file:text-sm file:font-semibold
+                                file:bg-primary-50 file:text-primary-700
+                                hover:file:bg-primary-100
+                                dark:file:bg-primary-900/50 dark:file:text-primary-300"
+                        />
+                        <p class="mt-1 text-xs text-gray-500">PNG, JPG, WEBP jusqu'à 10MB</p>
+                    </div>
+
+                    {{-- URL de l'image --}}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Ou URL de l'image
+                        </label>
+                        <input
+                            type="url"
+                            wire:model="calibrationImageUrl"
+                            placeholder="https://example.com/image.png"
+                            class="block w-full rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white shadow-sm focus:border-primary-500 focus:ring-primary-500"
+                        />
+                        <p class="mt-1 text-xs text-gray-500">L'upload a la priorité sur l'URL</p>
+                    </div>
+                </div>
+
+                {{-- Aperçu de l'image --}}
+                @if($calibrationImageUpload)
+                    <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">Aperçu de l'image uploadée :</p>
+                        <img src="{{ $calibrationImageUpload->temporaryUrl() }}" alt="Image de calibration" class="max-h-64 rounded-lg shadow" />
+                    </div>
+                @elseif($calibrationImageUrl)
+                    <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">Aperçu de l'image URL :</p>
+                        <img src="{{ $calibrationImageUrl }}" alt="Image de calibration" class="max-h-64 rounded-lg shadow" />
+                    </div>
+                @endif
+
+                {{-- Prompts de calibration --}}
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Prompts à tester</h4>
+                        <button
+                            type="button"
+                            wire:click="addCalibrationPrompt"
+                            class="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-primary-600 bg-primary-50 dark:bg-primary-900/30 dark:text-primary-400 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/50 transition"
+                        >
+                            <x-heroicon-o-plus class="w-4 h-4" />
+                            Ajouter un prompt
+                        </button>
+                    </div>
+
+                    @foreach($calibrationPrompts as $index => $promptData)
+                        <div class="relative border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                            <div class="px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                                <span class="font-medium text-gray-700 dark:text-gray-300">Prompt #{{ $index + 1 }}</span>
+                                <div class="flex items-center gap-2">
+                                    @if(isset($calibrationResults[$index]))
+                                        @if($calibrationResults[$index]['success'])
+                                            <span class="text-xs text-success-600 dark:text-success-400">
+                                                ✓ {{ $calibrationResults[$index]['processing_time'] }}s
+                                            </span>
+                                        @else
+                                            <span class="text-xs text-danger-600 dark:text-danger-400">
+                                                ✗ Erreur
+                                            </span>
+                                        @endif
+                                    @endif
+                                    @if(count($calibrationPrompts) > 1)
+                                        <button
+                                            type="button"
+                                            wire:click="removeCalibrationPrompt({{ $index }})"
+                                            class="text-danger-500 hover:text-danger-700"
+                                        >
+                                            <x-heroicon-o-trash class="w-4 h-4" />
+                                        </button>
+                                    @endif
+                                </div>
+                            </div>
+                            <textarea
+                                wire:model.lazy="calibrationPrompts.{{ $index }}.prompt"
+                                rows="8"
+                                class="block w-full border-0 bg-transparent focus:ring-0 text-sm font-mono resize-y dark:text-gray-100"
+                                placeholder="Entrez votre prompt ici..."
+                            ></textarea>
+
+                            {{-- Résultat pour ce prompt --}}
+                            @if(isset($calibrationResults[$index]))
+                                <div class="border-t border-gray-200 dark:border-gray-700">
+                                    <div class="px-4 py-2 bg-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-50 dark:bg-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-900/20 flex items-center justify-between">
+                                        <span class="text-sm font-medium text-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-700 dark:text-{{ $calibrationResults[$index]['success'] ? 'success' : 'danger' }}-400">
+                                            @if($calibrationResults[$index]['success'])
+                                                Résultat ({{ strlen($calibrationResults[$index]['markdown']) }} chars)
+                                            @else
+                                                Erreur
+                                            @endif
+                                        </span>
+                                        @if($calibrationResults[$index]['success'])
+                                            <div class="flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onclick="navigator.clipboard.writeText(document.getElementById('result-{{ $index }}').innerText)"
+                                                    class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                                >
+                                                    Copier
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    wire:click="usePromptAsDefault({{ $index }})"
+                                                    class="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                                                >
+                                                    Utiliser comme défaut
+                                                </button>
+                                            </div>
+                                        @endif
+                                    </div>
+                                    <div class="p-4 max-h-96 overflow-y-auto bg-white dark:bg-gray-900">
+                                        @if($calibrationResults[$index]['success'])
+                                            <pre id="result-{{ $index }}" class="text-sm font-mono whitespace-pre-wrap text-gray-700 dark:text-gray-300">{{ $calibrationResults[$index]['markdown'] }}</pre>
+                                        @else
+                                            <p class="text-sm text-danger-600 dark:text-danger-400">{{ $calibrationResults[$index]['error'] }}</p>
+                                        @endif
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @endforeach
+                </div>
+
+                {{-- Bouton de lancement --}}
+                <div class="flex justify-center">
+                    <button
+                        type="button"
+                        wire:click="runCalibration"
+                        wire:loading.attr="disabled"
+                        class="inline-flex items-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-primary-600 rounded-xl hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    >
+                        <span wire:loading.remove wire:target="runCalibration">
+                            <x-heroicon-o-play class="w-5 h-5" />
+                        </span>
+                        <span wire:loading wire:target="runCalibration">
+                            <x-heroicon-o-arrow-path class="w-5 h-5 animate-spin" />
+                        </span>
+                        <span wire:loading.remove wire:target="runCalibration">Lancer la calibration</span>
+                        <span wire:loading wire:target="runCalibration">Traitement en cours...</span>
+                    </button>
+                </div>
+
+                @if($isCalibrating)
+                    <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <div class="flex items-center gap-3">
+                            <x-heroicon-o-arrow-path class="w-5 h-5 text-blue-600 animate-spin" />
+                            <span class="text-blue-700 dark:text-blue-400">Calibration en cours... Le modèle traite l'image avec chaque prompt.</span>
+                        </div>
+                    </div>
+                @endif
+            </div>
+        </x-filament::section>
     </div>
 </x-filament-panels::page>
