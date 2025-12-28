@@ -406,7 +406,7 @@ class DocumentResource extends Resource
                                             ->columnSpanFull(),
                                     ])
                                     ->collapsible()
-                                    ->visible(fn ($record) => $record?->extraction_method === 'vision'),
+                                    ->visible(fn ($record) => $record?->extraction_method === 'vision' || !empty($record?->extraction_metadata['vision_extraction'] ?? null)),
 
                                 // Section Pipeline HTML (uniquement pour extraction HTML)
                                 Forms\Components\Section::make('Pipeline d\'extraction HTML')
