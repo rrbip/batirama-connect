@@ -17,10 +17,22 @@ use Illuminate\Support\Facades\Log;
 class LlmChunkingService
 {
     private LlmChunkingSetting $settings;
+    private ?DocumentChunkerService $fallbackChunker = null;
 
     public function __construct()
     {
         $this->settings = LlmChunkingSetting::getInstance();
+    }
+
+    /**
+     * Get the fallback chunker for when LLM fails
+     */
+    private function getFallbackChunker(): DocumentChunkerService
+    {
+        if ($this->fallbackChunker === null) {
+            $this->fallbackChunker = app(DocumentChunkerService::class);
+        }
+        return $this->fallbackChunker;
     }
 
     /**
@@ -34,9 +46,15 @@ class LlmChunkingService
             throw new \RuntimeException('Le document n\'a pas de texte extrait');
         }
 
+        // Nettoyer le texte OCR avant traitement
+        $originalLength = mb_strlen($text);
+        $text = $this->cleanOcrText($text);
+
         Log::info('LLM Chunking started', [
             'document_id' => $document->id,
             'text_length' => mb_strlen($text),
+            'original_length' => $originalLength,
+            'contains_tables' => $this->containsTables($text),
         ]);
 
         // Créer les fenêtres de texte
@@ -132,6 +150,16 @@ class LlmChunkingService
             }
         }
 
+        // Si toutes les fenêtres ont échoué ou aucun chunk n'a été créé, fallback vers chunking simple
+        if (empty($allChunks) && count($errors) > 0) {
+            Log::warning('LLM Chunking failed completely, falling back to simple chunking', [
+                'document_id' => $document->id,
+                'errors_count' => count($errors),
+            ]);
+
+            return $this->fallbackToSimpleChunking($document, $windows, $errors);
+        }
+
         // Mettre à jour le document avec les métadonnées LLM
         $existingMetadata = $document->extraction_metadata ?? [];
         $document->update([
@@ -161,6 +189,43 @@ class LlmChunkingService
             'chunk_count' => $document->fresh()->chunk_count,
             'window_count' => count($windows),
             'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Fallback vers le chunking simple quand LLM échoue
+     */
+    private function fallbackToSimpleChunking(Document $document, array $windows, array $errors): array
+    {
+        // Utiliser le DocumentChunkerService avec stratégie 'recursive' (la plus intelligente)
+        $document->chunk_strategy = 'recursive';
+        $chunks = $this->getFallbackChunker()->chunk($document);
+
+        // Mettre à jour les métadonnées pour indiquer le fallback
+        $existingMetadata = $document->extraction_metadata ?? [];
+        $document->update([
+            'chunk_strategy' => 'simple_fallback',
+            'extraction_metadata' => array_merge($existingMetadata, [
+                'llm_chunking' => [
+                    'processed_at' => now()->toIso8601String(),
+                    'window_count' => count($windows),
+                    'fallback_reason' => 'LLM processing failed',
+                    'original_errors' => array_slice($errors, 0, 5), // Garder les 5 premières erreurs
+                ],
+            ]),
+        ]);
+
+        Log::info('Fallback chunking completed', [
+            'document_id' => $document->id,
+            'chunks_created' => count($chunks),
+        ]);
+
+        return [
+            'chunks' => $chunks,
+            'chunk_count' => count($chunks),
+            'window_count' => count($windows),
+            'errors' => $errors,
+            'fallback_used' => true,
         ];
     }
 
@@ -327,7 +392,7 @@ class LlmChunkingService
             'format' => 'json',
             'options' => [
                 'temperature' => $this->settings->temperature,
-                'num_predict' => 4096,
+                'num_predict' => 8192, // Increased to avoid truncation on long documents
             ],
         ]);
 
@@ -426,6 +491,91 @@ class LlmChunkingService
         // Approximation: 1 token ≈ 4 caractères ou 0.75 mots
         $wordCount = str_word_count($text);
         return (int) ceil($wordCount * 1.3);
+    }
+
+    /**
+     * Nettoie le texte OCR de ses artefacts courants
+     * - Caractères parasites (ligatures mal décodées, symboles incorrects)
+     * - Espaces multiples et sauts de ligne excessifs
+     * - Caractères de contrôle
+     */
+    public function cleanOcrText(string $text): string
+    {
+        // Remplacer les ligatures typographiques par leurs équivalents simples
+        // Note: œ et æ sont conservés car ce sont des caractères valides en français
+        $ligatures = [
+            'ﬁ' => 'fi',
+            'ﬂ' => 'fl',
+            'ﬀ' => 'ff',
+            'ﬃ' => 'ffi',
+            'ﬄ' => 'ffl',
+            'ﬅ' => 'st',
+            'ﬆ' => 'st',
+        ];
+        $text = strtr($text, $ligatures);
+
+        // Nettoyer les artefacts OCR courants (caractères parasites)
+        // Pattern: chiffre suivi de symboles non pertinents (ex: "1%", "2è°°")
+        $text = preg_replace('/(\d)[%°]{2,}/', '$1', $text);
+        $text = preg_replace('/(\d)[è°ê]{1,3}/', '$1', $text);
+
+        // Supprimer les caractères de contrôle (sauf newlines et tabs)
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+
+        // Normaliser les espaces (remplacer multiples par un seul)
+        $text = preg_replace('/[ \t]+/', ' ', $text);
+
+        // Normaliser les sauts de ligne (max 2 consécutifs)
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
+
+        // Nettoyer les lignes qui ne contiennent que des espaces
+        $text = preg_replace('/\n +\n/', "\n\n", $text);
+
+        // Supprimer les espaces en fin de ligne
+        $text = preg_replace('/ +\n/', "\n", $text);
+
+        // Supprimer les tirets de césure en fin de ligne (reconstituer les mots)
+        $text = preg_replace('/(\w)-\n(\w)/', '$1$2', $text);
+
+        return trim($text);
+    }
+
+    /**
+     * Détecte si le texte contient des tableaux (patterns de colonnes alignées)
+     */
+    public function containsTables(string $text): bool
+    {
+        // Détecter les patterns de tableaux :
+        // - Lignes avec | comme séparateurs
+        // - Lignes avec au moins 2 colonnes de chiffres alignés
+        // - Lignes avec tabulations multiples
+
+        // Pattern 1: Tableaux avec pipes
+        if (preg_match('/\|[^|]+\|[^|]+\|/', $text)) {
+            return true;
+        }
+
+        // Pattern 2: Multiples tabulations
+        if (preg_match('/\t.*\t.*\t/', $text)) {
+            return true;
+        }
+
+        // Pattern 3: Colonnes de chiffres (au moins 3 nombres sur la même ligne)
+        if (preg_match('/\d+[\s,]+\d+[\s,]+\d+/', $text)) {
+            return true;
+        }
+
+        // Pattern 4: Lignes avec structure répétitive (ex: "Produit   100   50   25")
+        $lines = explode("\n", $text);
+        $structuredLines = 0;
+        foreach ($lines as $line) {
+            // Ligne avec au moins 2 groupes d'espaces multiples séparant des valeurs
+            if (preg_match('/\S+\s{2,}\S+\s{2,}\S+/', $line)) {
+                $structuredLines++;
+            }
+        }
+        // Si plus de 3 lignes structurées, c'est probablement un tableau
+        return $structuredLines >= 3;
     }
 
     /**

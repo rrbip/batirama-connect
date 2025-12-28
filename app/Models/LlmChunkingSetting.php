@@ -117,11 +117,23 @@ Analyse le texte fourni et découpe-le en chunks sémantiques autonomes.
    - BON : "Le Directeur Financier a validé le budget marketing 2024."
    - Le chunk doit être compréhensible SEUL, sans contexte.
 
-3. **Fidélité** : Ne modifie JAMAIS les faits, chiffres ou le sens. Ajoute uniquement le contexte nécessaire.
+3. **Fidélité ABSOLUE** :
+   - Ne modifie JAMAIS les faits, chiffres, valeurs techniques ou le sens
+   - PRÉSERVE INTÉGRALEMENT tous les tableaux, données chiffrées et spécifications techniques
+   - Les valeurs numériques (dimensions, résistances, épaisseurs, poids, etc.) doivent être reproduites EXACTEMENT
 
-4. **Taille** : Vise des chunks de 3 à 6 phrases.
+4. **Tableaux et données techniques** :
+   - Les tableaux doivent être préservés dans leur intégralité dans un seul chunk
+   - Ne résume PAS les lignes d'un tableau - garde TOUTES les lignes
+   - Format texte pour les tableaux : utilise des séparateurs clairs (| ou tabulations)
+   - Un tableau = un chunk (ne pas découper un tableau en plusieurs chunks)
 
-5. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste fournie. Si aucune ne convient, propose une nouvelle catégorie dans "new_categories".
+5. **Taille** : Adapte la taille selon le contenu
+   - Texte descriptif : chunks de 4 à 10 phrases
+   - Tableau ou liste technique : inclure l'INTÉGRALITÉ même si plus long
+   - Ne JAMAIS tronquer du contenu technique
+
+6. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste fournie. Si aucune ne convient, propose une nouvelle catégorie dans "new_categories".
 
 # Catégories disponibles
 {CATEGORIES}
@@ -148,15 +160,15 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
   "new_categories": []
 }
 
-# Exemple de réponse correcte
+# Exemple avec tableau technique
 
 {
   "chunks": [
     {
-      "content": "Le logiciel ZOOMBAT permet de créer des devis et factures pour les travaux de construction. Il intègre une base de prix mise à jour annuellement.",
-      "keywords": ["ZOOMBAT", "devis", "factures", "construction"],
-      "summary": "ZOOMBAT est un logiciel de devis et facturation pour le BTP.",
-      "category": "Logiciels"
+      "content": "Plaque Knauf BA13 - Caractéristiques techniques :\n| Épaisseur | Largeur | Longueur | Poids |\n| 12,5 mm | 1200 mm | 2500 mm | 8,5 kg/m² |\n| 12,5 mm | 1200 mm | 2600 mm | 8,5 kg/m² |\n| 12,5 mm | 1200 mm | 3000 mm | 8,5 kg/m² |\nRésistance thermique R = 0,05 m².K/W. Classement au feu : A2-s1, d0.",
+      "keywords": ["BA13", "plaque plâtre", "dimensions", "poids", "résistance thermique"],
+      "summary": "Caractéristiques techniques complètes de la plaque Knauf BA13.",
+      "category": "Fiches techniques"
     }
   ],
   "new_categories": []
