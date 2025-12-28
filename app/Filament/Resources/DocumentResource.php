@@ -270,7 +270,20 @@ class DocumentResource extends Resource
                                                 $visionData = $metadata['vision_extraction'] ?? null;
 
                                                 if (!$visionData) {
-                                                    return 'Aucune donnée d\'extraction Vision disponible';
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
                                                 }
 
                                                 // Informations générales
@@ -393,7 +406,7 @@ class DocumentResource extends Resource
                                             ->columnSpanFull(),
                                     ])
                                     ->collapsed()
-                                    ->visible(fn ($record) => $record?->extraction_method === 'vision' && !empty($record?->extraction_metadata['vision_extraction'] ?? null)),
+                                    ->visible(fn ($record) => $record?->extraction_method === 'vision'),
 
                                 // Section Pipeline HTML (uniquement pour extraction HTML)
                                 Forms\Components\Section::make('Pipeline d\'extraction HTML')
@@ -406,7 +419,20 @@ class DocumentResource extends Resource
                                                 $htmlData = $metadata['html_extraction'] ?? null;
 
                                                 if (!$htmlData) {
-                                                    return 'Aucune donnée d\'extraction HTML disponible';
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
                                                 }
 
                                                 $html = '<div class="space-y-4">';
@@ -479,7 +505,7 @@ class DocumentResource extends Resource
                                             ->columnSpanFull(),
                                     ])
                                     ->collapsed()
-                                    ->visible(fn ($record) => !empty($record?->extraction_metadata['html_extraction'] ?? null)),
+                                    ->visible(fn ($record) => in_array($record?->document_type, ['html', 'htm']) || !empty($record?->extraction_metadata['html_extraction'] ?? null)),
 
                                 // Section Pipeline OCR (uniquement pour extraction OCR/Tesseract)
                                 Forms\Components\Section::make('Pipeline d\'extraction OCR')
@@ -492,7 +518,20 @@ class DocumentResource extends Resource
                                                 $ocrData = $metadata['ocr_extraction'] ?? null;
 
                                                 if (!$ocrData) {
-                                                    return 'Aucune donnée d\'extraction OCR disponible';
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
                                                 }
 
                                                 // Déterminer si c'est une image ou un PDF
@@ -619,7 +658,7 @@ class DocumentResource extends Resource
                                             ->columnSpanFull(),
                                     ])
                                     ->collapsed()
-                                    ->visible(fn ($record) => !empty($record?->extraction_metadata['ocr_extraction'] ?? null)),
+                                    ->visible(fn ($record) => $record?->extraction_method === 'ocr' || !empty($record?->extraction_metadata['ocr_extraction'] ?? null)),
 
                                 Forms\Components\Section::make('Texte extrait')
                                     ->description('Vous pouvez modifier le texte avant de le re-chunker')
