@@ -405,7 +405,7 @@ class DocumentResource extends Resource
                                             })
                                             ->columnSpanFull(),
                                     ])
-                                    ->collapsed()
+                                    ->collapsible()
                                     ->visible(fn ($record) => $record?->extraction_method === 'vision'),
 
                                 // Section Pipeline HTML (uniquement pour extraction HTML)
@@ -504,7 +504,7 @@ class DocumentResource extends Resource
                                             })
                                             ->columnSpanFull(),
                                     ])
-                                    ->collapsed()
+                                    ->collapsible()
                                     ->visible(fn ($record) => in_array($record?->document_type, ['html', 'htm']) || !empty($record?->extraction_metadata['html_extraction'] ?? null)),
 
                                 // Section Pipeline OCR (uniquement pour extraction OCR/Tesseract)
@@ -657,7 +657,7 @@ class DocumentResource extends Resource
                                             })
                                             ->columnSpanFull(),
                                     ])
-                                    ->collapsed()
+                                    ->collapsible()
                                     ->visible(fn ($record) => $record?->extraction_method === 'ocr' || !empty($record?->extraction_metadata['ocr_extraction'] ?? null)),
 
                                 Forms\Components\Section::make('Texte extrait')
