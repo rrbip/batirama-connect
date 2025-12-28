@@ -554,13 +554,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->label('Détecter langues')
                 ->icon('heroicon-o-language')
                 ->color('info')
-                ->visible(fn () => $this->record->isCompleted())
                 ->requiresConfirmation()
                 ->modalHeading('Détecter les langues')
-                ->modalDescription('Analyser toutes les pages HTML pour détecter automatiquement leur langue.')
+                ->modalDescription('Analyser toutes les pages HTML crawlées pour détecter automatiquement leur langue.')
                 ->action(function () {
                     $urls = WebCrawlUrl::query()
-                        ->whereHas('crawls', fn ($q) => $q->where('web_crawl_id', $this->record->id))
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
                         ->where('content_type', 'like', '%text/html%')
                         ->whereNull('locale')
                         ->get();
