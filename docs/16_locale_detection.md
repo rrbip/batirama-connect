@@ -40,19 +40,40 @@ Le système supporte **80+ langues** organisées par continent :
 
 La méthode `detectFromHtmlLangAttribute()` extrait l'attribut `lang` de la balise `<html>`.
 
-#### 2. Patterns URL (priorité haute)
+#### 2. Paramètres URL (priorité haute)
+
+```
+https://example.com/api/doc?locale=fr-FR    → fr
+https://example.com/page?lang=de            → de
+https://example.com/api?language=english    → en
+https://example.com/api?country=ES          → es
+```
+
+La méthode `detectFromUrl()` analyse d'abord les paramètres de requête :
+- `locale=` (ex: `fr-FR`, `en-US`)
+- `lang=` (ex: `fr`, `de`)
+- `language=` (ex: `french`, `german`)
+- `country=` (ex: `FR`, `DE`)
+
+#### 3. Patterns de chemin URL
 
 ```
 https://example.com/fr/produit      → fr
 https://example.com/en-gb/product   → en
-https://example.bg/article          → bg (via TLD .bg)
 ```
 
-La méthode `detectFromUrl()` analyse :
-- Les patterns de chemin (`/fr/`, `/de-de/`, `/english/`, etc.)
-- Les TLD de domaine (`.fr`, `.bg`, `.de`, etc.)
+Détection via les segments de chemin (`/fr/`, `/de-de/`, `/english/`, etc.)
 
-#### 3. Patterns SKU (pour les produits)
+#### 4. TLD de domaine
+
+```
+https://example.bg/article          → bg
+https://example.fr/page             → fr
+```
+
+Les TLD nationaux (`.fr`, `.bg`, `.de`, etc.) sont utilisés en dernier recours pour l'URL.
+
+#### 5. Patterns SKU (pour les produits)
 
 ```
 REF-12345-FR    → fr
@@ -62,7 +83,7 @@ PROD/BG/890     → bg
 
 La méthode `detectFromSku()` détecte les suffixes/préfixes de langue dans les références.
 
-#### 4. Analyse du contenu (fallback)
+#### 6. Analyse du contenu (fallback)
 
 ```php
 $detector->detectFromContent($text);
@@ -161,7 +182,7 @@ if ($crawlUrl->isHtml()) {
 
 ### DetectCrawlUrlLocalesJob
 
-Permet de lancer la détection sur toutes les URLs d'un crawl qui n'ont pas encore de locale.
+Permet de lancer la détection sur toutes les URLs d'un crawl.
 
 ```php
 class DetectCrawlUrlLocalesJob implements ShouldQueue
@@ -170,22 +191,32 @@ class DetectCrawlUrlLocalesJob implements ShouldQueue
 
     public int $timeout = 3600; // 1 heure max
 
-    public function __construct(private WebCrawl $crawl)
-    {
+    public function __construct(
+        private WebCrawl $crawl,
+        private bool $forceAll = false  // Re-détecter même si locale existe
+    ) {
         $this->onQueue('default');
     }
 
     public function handle(): void
     {
-        // Récupérer les URLs sans locale avec contenu stocké
-        $urls = WebCrawlUrl::query()
-            ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->crawl->id))
-            ->whereNotNull('storage_path')
-            ->whereNull('locale')
-            ->cursor(); // Memory efficient
+        $pdfExtractionMethod = $this->crawl->pdf_extraction_method ?? 'auto';
 
-        foreach ($urls as $url) {
-            $url->detectAndSaveLocale();
+        $query = WebCrawlUrl::query()
+            ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->crawl->id))
+            ->whereNotNull('storage_path');
+
+        // Si pas forceAll, seulement les URLs sans locale
+        if (!$this->forceAll) {
+            $query->whereNull('locale');
+        }
+
+        foreach ($query->cursor() as $url) {
+            // Reset locale si forceAll
+            if ($this->forceAll && $url->locale !== null) {
+                $url->update(['locale' => null]);
+            }
+            $url->detectAndSaveLocale($pdfExtractionMethod);
         }
     }
 }
@@ -193,21 +224,28 @@ class DetectCrawlUrlLocalesJob implements ShouldQueue
 
 ### Lancement depuis l'interface
 
-Le bouton "Détecter langues" est **toujours visible** dans la page de détail d'un crawl :
+Le bouton "Détecter langues" propose deux modes :
+
+| Mode | Description |
+|------|-------------|
+| **Nouveaux uniquement** | Détecte seulement les documents sans langue |
+| **Tout re-détecter** | Écrase les langues existantes et re-détecte tout |
+
+Un résumé est affiché avant lancement : "Total: X documents • Sans langue: Y • Avec langue: Z"
+
+### Action en masse sur les URLs sélectionnées
+
+L'action "Re-détecter la langue" est disponible dans les actions de masse de la table des URLs :
 
 ```php
-Actions\Action::make('detect_locales')
-    ->label('Détecter langues')
+Tables\Actions\BulkAction::make('redetect_locales')
+    ->label('Re-détecter la langue')
     ->icon('heroicon-o-language')
-    ->color('info')
-    ->requiresConfirmation()
-    ->action(function () {
-        DetectCrawlUrlLocalesJob::dispatch($this->record);
-        Notification::make()
-            ->title('Détection lancée')
-            ->body('La détection des langues est en cours en arrière-plan.')
-            ->success()
-            ->send();
+    ->action(function ($records) {
+        foreach ($records as $record) {
+            $record->url->update(['locale' => null]);
+            $record->url->detectAndSaveLocale($pdfExtractionMethod);
+        }
     }),
 ```
 
@@ -432,15 +470,27 @@ class DetectProductLocalesJob implements ShouldQueue
 ### Pour les pages HTML
 
 1. **Attribut `<html lang="xx">`** : Plus fiable (déclaré par le site)
-2. **Patterns URL** : `/fr/`, `/en-gb/`, etc.
-3. **TLD du domaine** : `.fr`, `.bg`, `.de`
-4. **Analyse du contenu** : Mots communs, scripts Unicode
+2. **Paramètres URL** : `?locale=fr-FR`, `?lang=de`, etc.
+3. **Patterns de chemin** : `/fr/`, `/en-gb/`, etc.
+4. **TLD du domaine** : `.fr`, `.bg`, `.de`
+5. **Analyse du contenu** : Mots communs, scripts Unicode
 
 ### Pour les documents non-HTML (PDF, etc.)
 
-1. **Patterns URL** : `/fr/`, `/en-gb/`, etc.
-2. **TLD du domaine** : `.fr`, `.bg`, `.de`
-3. **Analyse du contenu extrait** : Mots communs, scripts
+1. **Paramètres URL** : `?locale=fr-FR`, `?lang=de`, etc.
+2. **Patterns de chemin** : `/fr/`, `/en-gb/`, etc.
+3. **TLD du domaine** : `.fr`, `.bg`, `.de`
+4. **Analyse du contenu extrait** : Mots communs, scripts
+
+### Méthode d'extraction PDF configurable
+
+La méthode d'extraction du texte PDF est configurable par crawl :
+
+| Méthode | Description |
+|---------|-------------|
+| **Auto** | Essaie pdftotext, puis OCR si le PDF semble scanné |
+| **Text** | pdftotext uniquement (rapide, pour PDFs avec texte) |
+| **OCR** | Tesseract OCR uniquement (pour PDFs scannés) |
 
 ### Pour les produits
 
