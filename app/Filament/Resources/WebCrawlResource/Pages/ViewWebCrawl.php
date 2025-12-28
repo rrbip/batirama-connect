@@ -554,23 +554,45 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->label('Détecter langues')
                 ->icon('heroicon-o-language')
                 ->color('info')
-                ->requiresConfirmation()
                 ->modalHeading('Détecter les langues')
                 ->modalDescription(function () {
-                    $count = WebCrawlUrl::query()
+                    $totalCount = WebCrawlUrl::query()
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+                        ->whereNotNull('storage_path')
+                        ->count();
+
+                    $withoutLocale = WebCrawlUrl::query()
                         ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
                         ->whereNotNull('storage_path')
                         ->whereNull('locale')
                         ->count();
 
-                    return "Analyser {$count} documents (HTML, PDF, etc.) pour détecter automatiquement leur langue. Le traitement sera effectué en arrière-plan.";
+                    $withLocale = $totalCount - $withoutLocale;
+
+                    return "Total: {$totalCount} documents • Sans langue: {$withoutLocale} • Avec langue: {$withLocale}";
                 })
-                ->action(function () {
-                    $count = WebCrawlUrl::query()
+                ->form([
+                    Forms\Components\Radio::make('mode')
+                        ->label('Mode de détection')
+                        ->options([
+                            'new_only' => 'Nouveaux uniquement (documents sans langue détectée)',
+                            'force_all' => 'Tout re-détecter (écrase les langues existantes)',
+                        ])
+                        ->default('new_only')
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $forceAll = $data['mode'] === 'force_all';
+
+                    $query = WebCrawlUrl::query()
                         ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
-                        ->whereNotNull('storage_path')
-                        ->whereNull('locale')
-                        ->count();
+                        ->whereNotNull('storage_path');
+
+                    if (!$forceAll) {
+                        $query->whereNull('locale');
+                    }
+
+                    $count = $query->count();
 
                     if ($count === 0) {
                         Notification::make()
@@ -581,11 +603,15 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         return;
                     }
 
-                    \App\Jobs\DetectCrawlUrlLocalesJob::dispatch($this->record);
+                    \App\Jobs\DetectCrawlUrlLocalesJob::dispatch($this->record, $forceAll);
+
+                    $message = $forceAll
+                        ? "Re-détection de la langue pour {$count} documents en arrière-plan."
+                        : "Détection de la langue pour {$count} documents sans langue en arrière-plan.";
 
                     Notification::make()
                         ->title('Détection lancée')
-                        ->body("Détection de la langue pour {$count} documents en arrière-plan. Assurez-vous que le worker de queue est actif.")
+                        ->body($message . ' Assurez-vous que le worker de queue est actif.')
                         ->success()
                         ->send();
                 }),
