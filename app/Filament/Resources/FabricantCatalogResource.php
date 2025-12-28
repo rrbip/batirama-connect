@@ -300,6 +300,53 @@ class FabricantCatalogResource extends Resource
                                             }),
                                     ]),
 
+                                Forms\Components\Section::make('Détection des langues')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('locale_stats_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                if (!$record) return '-';
+
+                                                $total = $record->products()->count();
+                                                if ($total === 0) return 'Aucun produit';
+
+                                                $withLocale = $record->products()->whereNotNull('locale')->count();
+                                                $withoutLocale = $total - $withLocale;
+
+                                                $localeStats = $record->products()
+                                                    ->whereNotNull('locale')
+                                                    ->selectRaw('locale, COUNT(*) as cnt')
+                                                    ->groupBy('locale')
+                                                    ->pluck('cnt', 'locale')
+                                                    ->toArray();
+
+                                                $lines = [];
+                                                $lines[] = sprintf(
+                                                    "Langue détectée: %d / %d (%.0f%%)",
+                                                    $withLocale,
+                                                    $total,
+                                                    $total > 0 ? ($withLocale / $total * 100) : 0
+                                                );
+
+                                                if (!empty($localeStats)) {
+                                                    $breakdown = [];
+                                                    $localeNames = \App\Models\FabricantCatalog::getSupportedLocales();
+                                                    foreach ($localeStats as $locale => $count) {
+                                                        $name = $localeNames[$locale] ?? strtoupper($locale);
+                                                        $breakdown[] = "{$name}: {$count}";
+                                                    }
+                                                    $lines[] = implode(' | ', $breakdown);
+                                                }
+
+                                                if ($withoutLocale > 0) {
+                                                    $lines[] = "⚠️ {$withoutLocale} produit(s) sans langue détectée";
+                                                }
+
+                                                return implode("\n", $lines);
+                                            }),
+                                    ])
+                                    ->visible(fn ($record) => $record !== null),
+
                                 Forms\Components\Section::make('Doublons & Variantes linguistiques')
                                     ->schema([
                                         Forms\Components\Placeholder::make('duplicate_stats_display')
@@ -321,10 +368,10 @@ class FabricantCatalogResource extends Resource
                                                 // Duplicates
                                                 $duplicateCount = $stats['duplicate_sku_products'] + $stats['duplicate_name_products'] + $stats['duplicate_hash_products'];
                                                 if ($duplicateCount === 0) {
-                                                    $lines[] = 'Aucun doublon detecte';
+                                                    $lines[] = 'Aucun doublon détecté';
                                                 } else {
                                                     $lines[] = sprintf(
-                                                        "Doublons SKU: %d | Doublons Nom (meme langue): %d | Doublons Hash: %d",
+                                                        "Doublons SKU: %d | Doublons Nom (même langue): %d | Doublons Hash: %d",
                                                         $stats['duplicate_sku_products'],
                                                         $stats['duplicate_name_products'],
                                                         $stats['duplicate_hash_products']
@@ -514,6 +561,36 @@ class FabricantCatalogResource extends Resource
                         Notification::make()
                             ->title('Extraction démarrée')
                             ->body("Analyse de {$eligiblePages} pages HTML en cours...")
+                            ->success()
+                            ->send();
+                    }),
+
+                Tables\Actions\Action::make('detectLocales')
+                    ->label('Détecter langues')
+                    ->icon('heroicon-o-language')
+                    ->color('info')
+                    ->visible(fn ($record) => $record->products()->whereNull('locale')->exists())
+                    ->requiresConfirmation()
+                    ->modalHeading('Détecter les langues')
+                    ->modalDescription('Lancer la détection automatique de langue pour tous les produits sans langue détectée ?')
+                    ->action(function (FabricantCatalog $record) {
+                        $count = $record->products()->whereNull('locale')->count();
+
+                        if ($count === 0) {
+                            Notification::make()
+                                ->title('Aucun produit à traiter')
+                                ->body('Tous les produits ont déjà une langue détectée.')
+                                ->info()
+                                ->send();
+                            return;
+                        }
+
+                        // Dispatch the job
+                        \App\Jobs\DetectProductLocalesJob::dispatch($record);
+
+                        Notification::make()
+                            ->title('Détection lancée')
+                            ->body("Détection de la langue pour {$count} produits en cours en arrière-plan...")
                             ->success()
                             ->send();
                     }),
