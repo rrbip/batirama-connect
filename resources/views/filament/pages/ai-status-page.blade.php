@@ -594,15 +594,28 @@ php artisan queue:work --queue=default,llm-chunking
                                         {{ $doc['updated_at'] }}
                                     </td>
                                     <td class="px-4 py-3 text-center">
-                                        <button
-                                            wire:click="retryDocument({{ $doc['id'] }})"
-                                            wire:loading.attr="disabled"
-                                            wire:target="retryDocument({{ $doc['id'] }})"
-                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
-                                        >
-                                            <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryDocument({{ $doc['id'] }})" />
-                                            Relancer
-                                        </button>
+                                        <div class="flex items-center justify-center gap-2">
+                                            <button
+                                                wire:click="retryDocument({{ $doc['id'] }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="retryDocument({{ $doc['id'] }})"
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                                title="Relancer"
+                                            >
+                                                <x-heroicon-o-arrow-path class="w-3 h-3" wire:loading.class="animate-spin" wire:target="retryDocument({{ $doc['id'] }})" />
+                                                Relancer
+                                            </button>
+                                            <button
+                                                wire:click="deleteFailedDocument({{ $doc['id'] }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="deleteFailedDocument({{ $doc['id'] }})"
+                                                wire:confirm="Supprimer ce document en échec ? Cette action est irréversible."
+                                                class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                                title="Supprimer"
+                                            >
+                                                <x-heroicon-o-trash class="w-3 h-3" />
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             @endforeach
