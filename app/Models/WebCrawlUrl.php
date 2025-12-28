@@ -238,32 +238,34 @@ class WebCrawlUrl extends Model
     }
 
     /**
-     * Detect and set the locale from HTML content.
+     * Detect and set the locale from content.
+     * For HTML: uses lang attribute, URL patterns, then content analysis.
+     * For other documents (PDF, etc.): uses URL patterns and content analysis.
      */
     public function detectLocale(): ?string
     {
-        if (!$this->isHtml()) {
-            return null;
-        }
-
-        $html = $this->getContent();
-        if (empty($html)) {
-            return null;
-        }
-
         $detector = app(LanguageDetector::class);
+        $locale = null;
 
-        // Priority 1: HTML lang attribute (most reliable)
-        $locale = $detector->detectFromHtmlLangAttribute($html);
+        // For HTML pages, try lang attribute first (most reliable)
+        if ($this->isHtml()) {
+            $html = $this->getContent();
+            if (!empty($html)) {
+                $locale = $detector->detectFromHtmlLangAttribute($html);
+            }
+        }
 
-        // Priority 2: URL patterns
+        // Try URL patterns (works for all content types)
         if (!$locale) {
             $locale = $detector->detectFromUrl($this->url);
         }
 
-        // Priority 3: Content analysis (first 5000 chars)
+        // For non-HTML or if still no locale, try content analysis
         if (!$locale) {
-            $locale = $detector->detectFromContent(mb_substr($html, 0, 5000));
+            $content = $this->getTextContent();
+            if (!empty($content)) {
+                $locale = $detector->detectFromContent(mb_substr($content, 0, 5000));
+            }
         }
 
         return $locale;

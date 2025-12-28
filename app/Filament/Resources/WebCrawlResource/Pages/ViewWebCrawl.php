@@ -556,33 +556,36 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->color('info')
                 ->requiresConfirmation()
                 ->modalHeading('Détecter les langues')
-                ->modalDescription('Analyser toutes les pages HTML crawlées pour détecter automatiquement leur langue.')
-                ->action(function () {
-                    $urls = WebCrawlUrl::query()
+                ->modalDescription(function () {
+                    $count = WebCrawlUrl::query()
                         ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
-                        ->where('content_type', 'like', '%text/html%')
+                        ->whereNotNull('storage_path')
                         ->whereNull('locale')
-                        ->get();
+                        ->count();
 
-                    $detected = 0;
-                    $failed = 0;
+                    return "Analyser {$count} documents (HTML, PDF, etc.) pour détecter automatiquement leur langue. Le traitement sera effectué en arrière-plan.";
+                })
+                ->action(function () {
+                    $count = WebCrawlUrl::query()
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+                        ->whereNotNull('storage_path')
+                        ->whereNull('locale')
+                        ->count();
 
-                    foreach ($urls as $url) {
-                        try {
-                            $locale = $url->detectAndSaveLocale();
-                            if ($locale) {
-                                $detected++;
-                            } else {
-                                $failed++;
-                            }
-                        } catch (\Throwable $e) {
-                            $failed++;
-                        }
+                    if ($count === 0) {
+                        Notification::make()
+                            ->title('Aucun document à traiter')
+                            ->body('Tous les documents ont déjà une langue détectée.')
+                            ->info()
+                            ->send();
+                        return;
                     }
 
+                    \App\Jobs\DetectCrawlUrlLocalesJob::dispatch($this->record);
+
                     Notification::make()
-                        ->title('Détection terminée')
-                        ->body("Langue détectée pour {$detected} URLs. {$failed} URLs sans langue détectée.")
+                        ->title('Détection lancée')
+                        ->body("Détection de la langue pour {$count} documents en arrière-plan. Assurez-vous que le worker de queue est actif.")
                         ->success()
                         ->send();
                 }),
