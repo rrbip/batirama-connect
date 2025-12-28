@@ -221,12 +221,54 @@ class CrawlUrlJob implements ShouldQueue
                 return;
             }
 
-            // Si c'est du HTML, extraire les liens
+            // Si c'est du HTML, extraire les liens et la canonical URL
+            $canonicalUrl = null;
             if (str_contains($contentType, 'text/html')) {
                 $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer, $allowedDomains);
+                $canonicalUrl = $crawler->extractCanonicalUrl($result['body'], $url);
             }
 
-            // Stocker le contenu en cache (toujours, indépendamment des patterns)
+            // Calculer le hash du contenu
+            $oldContentHash = $crawlUrl->content_hash;
+            $newContentHash = hash('sha256', $result['body']);
+            $contentChanged = $oldContentHash !== $newContentHash;
+
+            // Vérifier les doublons (avant de stocker)
+            $duplicate = $crawler->checkForDuplicate(
+                $this->crawl,
+                $crawlUrl,
+                $result['body'],
+                $canonicalUrl
+            );
+
+            if ($duplicate) {
+                // Marquer comme doublon, ne pas stocker le contenu
+                $crawlUrl->update([
+                    'duplicate_of_id' => $duplicate->id,
+                    'content_hash' => $newContentHash,
+                    'canonical_url' => $canonicalUrl,
+                    'canonical_hash' => $canonicalUrl ? hash('sha256', $canonicalUrl) : null,
+                ]);
+
+                $this->urlEntry->update([
+                    'status' => 'fetched',
+                    'fetched_at' => now(),
+                    'error_message' => 'duplicate_of:' . $duplicate->id,
+                ]);
+                $this->crawl->increment('pages_crawled');
+                $this->crawl->increment('pages_skipped');
+
+                Log::info('URL marked as duplicate, skipping indexation', [
+                    'crawl_id' => $this->crawl->id,
+                    'url' => $url,
+                    'duplicate_of' => $duplicate->url,
+                ]);
+
+                $this->checkCrawlCompletion();
+                return;
+            }
+
+            // Stocker le contenu en cache (seulement si pas un doublon)
             $storagePath = $crawler->storeContent(
                 $result['body'],
                 $contentType,
@@ -234,13 +276,11 @@ class CrawlUrlJob implements ShouldQueue
             );
 
             // Mettre à jour l'URL avec le contenu
-            $oldContentHash = $crawlUrl->content_hash;
-            $newContentHash = hash('sha256', $result['body']);
-            $contentChanged = $oldContentHash !== $newContentHash;
-
             $crawlUrl->update([
                 'storage_path' => $storagePath,
                 'content_hash' => $newContentHash,
+                'canonical_url' => $canonicalUrl,
+                'canonical_hash' => $canonicalUrl ? hash('sha256', $canonicalUrl) : null,
             ]);
 
             // Marquer comme récupéré

@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -16,6 +17,9 @@ class WebCrawlUrl extends Model
     protected $fillable = [
         'url',
         'url_hash',
+        'canonical_url',
+        'canonical_hash',
+        'duplicate_of_id',
         'storage_path',
         'content_hash',
         'http_status',
@@ -61,6 +65,30 @@ class WebCrawlUrl extends Model
     public function documents(): HasMany
     {
         return $this->hasMany(Document::class, 'crawl_url_id');
+    }
+
+    /**
+     * L'URL originale dont celle-ci est un doublon
+     */
+    public function duplicateOf(): BelongsTo
+    {
+        return $this->belongsTo(WebCrawlUrl::class, 'duplicate_of_id');
+    }
+
+    /**
+     * Les URLs qui sont des doublons de celle-ci
+     */
+    public function duplicates(): HasMany
+    {
+        return $this->hasMany(WebCrawlUrl::class, 'duplicate_of_id');
+    }
+
+    /**
+     * Vérifie si cette URL est un doublon
+     */
+    public function isDuplicate(): bool
+    {
+        return $this->duplicate_of_id !== null;
     }
 
     /**

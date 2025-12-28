@@ -495,4 +495,119 @@ class WebCrawlerService
 
         return 'bin';
     }
+
+    /**
+     * Extract canonical URL from HTML content.
+     */
+    public function extractCanonicalUrl(string $html, string $baseUrl): ?string
+    {
+        try {
+            $crawler = new Crawler($html);
+            $canonical = $crawler->filter('link[rel="canonical"]');
+
+            if ($canonical->count() > 0) {
+                $href = $canonical->attr('href');
+                if ($href) {
+                    // Resolve relative URL
+                    if (!str_starts_with($href, 'http')) {
+                        $href = $this->urlNormalizer->resolve($href, $baseUrl);
+                    }
+                    return $this->urlNormalizer->normalize($href);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::debug('Failed to extract canonical URL', [
+                'url' => $baseUrl,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Find duplicate URL by content hash.
+     */
+    public function findDuplicateByContentHash(string $contentHash, ?int $excludeId = null): ?WebCrawlUrl
+    {
+        $query = WebCrawlUrl::where('content_hash', $contentHash);
+
+        if ($excludeId) {
+            $query->where('id', '!=', $excludeId);
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * Find duplicate URL by canonical URL hash.
+     */
+    public function findDuplicateByCanonical(string $canonicalHash, ?int $excludeId = null): ?WebCrawlUrl
+    {
+        $query = WebCrawlUrl::where('canonical_hash', $canonicalHash)
+            ->whereNull('duplicate_of_id'); // Only match originals
+
+        if ($excludeId) {
+            $query->where('id', '!=', $excludeId);
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * Check for duplicates based on crawl settings.
+     * Returns the original URL if duplicate found, null otherwise.
+     */
+    public function checkForDuplicate(
+        WebCrawl $crawl,
+        WebCrawlUrl $crawlUrl,
+        string $content,
+        ?string $canonicalUrl = null
+    ): ?WebCrawlUrl {
+        if (!$crawl->enable_deduplication) {
+            return null;
+        }
+
+        $mode = $crawl->dedup_mode ?? 'content_hash';
+        $contentHash = hash('sha256', $content);
+
+        // Check by canonical URL first (if applicable)
+        if (in_array($mode, ['canonical', 'both']) && $canonicalUrl) {
+            $canonicalHash = hash('sha256', $canonicalUrl);
+
+            // Update current URL's canonical info
+            $crawlUrl->update([
+                'canonical_url' => $canonicalUrl,
+                'canonical_hash' => $canonicalHash,
+            ]);
+
+            // If canonical URL is different from actual URL, it might be a duplicate
+            if ($this->urlNormalizer->normalize($crawlUrl->url) !== $canonicalUrl) {
+                $original = $this->findDuplicateByCanonical($canonicalHash, $crawlUrl->id);
+                if ($original) {
+                    Log::info('Duplicate found by canonical URL', [
+                        'url' => $crawlUrl->url,
+                        'canonical' => $canonicalUrl,
+                        'original_id' => $original->id,
+                    ]);
+                    return $original;
+                }
+            }
+        }
+
+        // Check by content hash
+        if (in_array($mode, ['content_hash', 'both'])) {
+            $original = $this->findDuplicateByContentHash($contentHash, $crawlUrl->id);
+            if ($original) {
+                Log::info('Duplicate found by content hash', [
+                    'url' => $crawlUrl->url,
+                    'content_hash' => $contentHash,
+                    'original_id' => $original->id,
+                ]);
+                return $original;
+            }
+        }
+
+        return null;
+    }
 }

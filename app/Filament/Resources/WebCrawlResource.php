@@ -151,6 +151,28 @@ class WebCrawlResource extends Resource
                                             ->helperText('Laissez vide pour le Chrome par défaut'),
                                     ])
                                     ->columns(2),
+
+                                Forms\Components\Section::make('Déduplication')
+                                    ->description('Évite d\'indexer plusieurs fois le même contenu')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('enable_deduplication')
+                                            ->label('Activer la déduplication')
+                                            ->default(true)
+                                            ->live()
+                                            ->helperText('Détecte et ignore les contenus dupliqués'),
+
+                                        Forms\Components\Select::make('dedup_mode')
+                                            ->label('Mode de détection')
+                                            ->options([
+                                                'content_hash' => 'Hash du contenu (exact)',
+                                                'canonical' => 'URL canonique',
+                                                'both' => 'Les deux (recommandé)',
+                                            ])
+                                            ->default('both')
+                                            ->visible(fn ($get) => $get('enable_deduplication'))
+                                            ->helperText('content_hash = doublons exacts, canonical = respect du SEO'),
+                                    ])
+                                    ->columns(2),
                             ]),
                     ])
                     ->columnSpanFull(),
