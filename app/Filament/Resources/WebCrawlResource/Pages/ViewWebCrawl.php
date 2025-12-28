@@ -960,6 +960,46 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                             ->success()
                             ->send();
                     }),
+
+                Tables\Actions\BulkAction::make('redetect_locales')
+                    ->label('Re-détecter la langue')
+                    ->icon('heroicon-o-language')
+                    ->color('info')
+                    ->requiresConfirmation()
+                    ->modalHeading('Re-détecter la langue')
+                    ->modalDescription(fn ($records) => "Re-détecter la langue pour {$records->count()} URL(s) sélectionnée(s). Les locales existantes seront écrasées.")
+                    ->action(function ($records) {
+                        $pdfExtractionMethod = $this->record->pdf_extraction_method ?? 'auto';
+                        $detected = 0;
+                        $failed = 0;
+
+                        foreach ($records as $record) {
+                            if (!$record->url?->storage_path) {
+                                $failed++;
+                                continue;
+                            }
+
+                            try {
+                                // Force locale to null to re-detect
+                                $record->url->update(['locale' => null]);
+                                $locale = $record->url->detectAndSaveLocale($pdfExtractionMethod);
+
+                                if ($locale) {
+                                    $detected++;
+                                } else {
+                                    $failed++;
+                                }
+                            } catch (\Throwable $e) {
+                                $failed++;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Détection terminée')
+                            ->body("{$detected} langue(s) détectée(s), {$failed} échec(s)")
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->defaultSort('created_at', 'desc')
             ->paginated([25, 50, 100, 250, 500])
