@@ -158,10 +158,18 @@ class AgentWebCrawl extends Model
             return true;
         }
 
+        // Extraire le path et la query string pour le matching
         $path = parse_url($url, PHP_URL_PATH) ?? '/';
+        $query = parse_url($url, PHP_URL_QUERY) ?? '';
+        $pathWithQuery = $query ? "{$path}?{$query}" : $path;
 
         foreach ($patterns as $pattern) {
-            if ($this->urlMatchesPattern($path, $pattern)) {
+            // Tester d'abord sur l'URL complète (path + query)
+            if ($this->urlMatchesPattern($pathWithQuery, $pattern)) {
+                return true;
+            }
+            // Puis sur le path seul (rétro-compatibilité)
+            if ($query && $this->urlMatchesPattern($path, $pattern)) {
                 return true;
             }
         }
