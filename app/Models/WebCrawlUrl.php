@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 class WebCrawlUrl extends Model
 {
@@ -199,13 +200,12 @@ class WebCrawlUrl extends Model
             return null;
         }
 
-        $path = storage_path('app/' . $this->storage_path);
-
-        if (!file_exists($path)) {
+        // Use Storage facade (same as admin preview) for consistency
+        if (!Storage::disk('local')->exists($this->storage_path)) {
             return null;
         }
 
-        return file_get_contents($path);
+        return Storage::disk('local')->get($this->storage_path);
     }
 
     /**
