@@ -279,14 +279,14 @@ class FabricantProduct extends Model
     {
         $total = static::where('catalog_id', $catalogId)->count();
 
-        // Count by SKU duplicates
+        // Count by SKU duplicates (use havingRaw for PostgreSQL compatibility)
         $skuDuplicates = \DB::table('fabricant_products')
             ->select('sku', \DB::raw('COUNT(*) as cnt'))
             ->where('catalog_id', $catalogId)
             ->whereNotNull('sku')
             ->whereNull('deleted_at')
             ->groupBy('sku')
-            ->having('cnt', '>', 1)
+            ->havingRaw('COUNT(*) > 1')
             ->get();
 
         // Count by name duplicates
@@ -295,7 +295,7 @@ class FabricantProduct extends Model
             ->where('catalog_id', $catalogId)
             ->whereNull('deleted_at')
             ->groupBy('name')
-            ->having('cnt', '>', 1)
+            ->havingRaw('COUNT(*) > 1')
             ->get();
 
         // Count by source_hash duplicates
@@ -305,7 +305,7 @@ class FabricantProduct extends Model
             ->whereNotNull('source_hash')
             ->whereNull('deleted_at')
             ->groupBy('source_hash')
-            ->having('cnt', '>', 1)
+            ->havingRaw('COUNT(*) > 1')
             ->get();
 
         return [
