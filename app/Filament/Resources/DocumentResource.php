@@ -259,6 +259,204 @@ class DocumentResource extends Resource
                                     ])
                                     ->columns(5),
 
+                                // Section Pipeline Vision (uniquement pour extraction vision)
+                                Forms\Components\Section::make('Pipeline d\'extraction Vision')
+                                    ->description('Détails du traitement PDF → Images → Markdown')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('vision_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $visionData = $metadata['vision_extraction'] ?? null;
+
+                                                if (!$visionData) {
+                                                    return 'Aucune donnée d\'extraction Vision disponible';
+                                                }
+
+                                                // Informations générales
+                                                $html = '<div class="space-y-6">';
+
+                                                // 1. Étape PDF → Images
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. PDF → Images</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-3 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Pages totales:</span> <strong>' . ($visionData['total_pages'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">DPI:</span> <strong>' . ($visionData['dpi'] ?? '300') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Stockage images:</span> <strong>' . ($visionData['storage_path'] ?? '-') . '</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 2. Étape Images → Markdown (Vision LLM)
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-purple-700 dark:text-purple-400">2. Images → Markdown (Vision IA)</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-3 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Modèle:</span> <strong>' . e($visionData['model'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Pages traitées:</span> <strong>' . ($visionData['pages_processed'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Durée totale:</span> <strong>' . ($visionData['duration_seconds'] ?? '-') . 's</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 3. Détail par page
+                                                $pages = $visionData['pages'] ?? [];
+                                                if (!empty($pages)) {
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-green-700 dark:text-green-400">3. Détail par page</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4">';
+                                                    $html .= '<table class="w-full text-sm">';
+                                                    $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-left py-2">Markdown</th><th class="text-right py-2">Taille MD</th><th class="text-right py-2">Temps</th></tr>';
+                                                    $html .= '</thead><tbody>';
+
+                                                    foreach ($pages as $page) {
+                                                        $imagePath = $page['image_path'] ?? '-';
+                                                        $mdPath = $page['markdown_path'] ?? '-';
+                                                        $mdLength = $page['markdown_length'] ?? 0;
+                                                        $time = $page['processing_time'] ?? 0;
+
+                                                        // Raccourcir les chemins pour l'affichage
+                                                        if ($imagePath !== '-') {
+                                                            $imagePath = basename($imagePath);
+                                                        }
+                                                        if ($mdPath !== '-') {
+                                                            $mdPath = basename($mdPath);
+                                                        }
+
+                                                        $html .= sprintf(
+                                                            '<tr class="border-b dark:border-gray-700 last:border-0">
+                                                                <td class="py-2 font-medium">%d</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
+                                                                <td class="py-2 text-right">%s</td>
+                                                                <td class="py-2 text-right">%ss</td>
+                                                            </tr>',
+                                                            $page['page'] ?? 0,
+                                                            e($imagePath),
+                                                            e($mdPath),
+                                                            number_format($mdLength) . ' chars',
+                                                            $time
+                                                        );
+                                                    }
+                                                    $html .= '</tbody></table>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 4. Erreurs éventuelles
+                                                $errors = $visionData['errors'] ?? [];
+                                                if (!empty($errors)) {
+                                                    $html .= '<div class="border border-red-200 dark:border-red-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-700">';
+                                                    $html .= '<h4 class="font-medium text-red-700 dark:text-red-400">Erreurs</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 space-y-2">';
+                                                    foreach ($errors as $error) {
+                                                        $html .= sprintf(
+                                                            '<div class="text-sm text-red-600 dark:text-red-400">Page %d: %s</div>',
+                                                            $error['page'] ?? 0,
+                                                            e($error['error'] ?? 'Erreur inconnue')
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsed()
+                                    ->visible(fn ($record) => $record?->extraction_method === 'vision' && !empty($record?->extraction_metadata['vision_extraction'] ?? null)),
+
+                                // Section Pipeline HTML (uniquement pour extraction HTML)
+                                Forms\Components\Section::make('Pipeline d\'extraction HTML')
+                                    ->description('Détails de la conversion HTML → Markdown')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('html_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $htmlData = $metadata['html_extraction'] ?? null;
+
+                                                if (!$htmlData) {
+                                                    return 'Aucune donnée d\'extraction HTML disponible';
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+
+                                                // Stats générales
+                                                $html .= '<div class="grid grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
+                                                $html .= '<div class="text-gray-500 text-xs">HTML original</div>';
+                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['html_size'] ?? 0) . '</div>';
+                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                $html .= '</div>';
+
+                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
+                                                $html .= '<div class="text-gray-500 text-xs">HTML nettoyé</div>';
+                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['cleaned_html_size'] ?? 0) . '</div>';
+                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                $html .= '</div>';
+
+                                                $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">';
+                                                $html .= '<div class="text-gray-500 text-xs">Markdown final</div>';
+                                                $html .= '<div class="font-bold text-lg">' . number_format($htmlData['markdown_size'] ?? 0) . '</div>';
+                                                $html .= '<div class="text-gray-400 text-xs">caractères</div>';
+                                                $html .= '</div>';
+
+                                                $html .= '<div class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">';
+                                                $html .= '<div class="text-gray-500 text-xs">Compression</div>';
+                                                $html .= '<div class="font-bold text-lg text-green-600">' . ($htmlData['compression_ratio'] ?? 0) . '%</div>';
+                                                $html .= '<div class="text-gray-400 text-xs">réduction</div>';
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+
+                                                // Éléments détectés
+                                                $elements = $htmlData['elements_detected'] ?? [];
+                                                if (!empty($elements)) {
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4">';
+                                                    $html .= '<div class="text-sm font-medium mb-3">Éléments structurels détectés</div>';
+                                                    $html .= '<div class="flex flex-wrap gap-2">';
+                                                    foreach ($elements as $type => $count) {
+                                                        $label = match ($type) {
+                                                            'headings' => 'Titres',
+                                                            'lists' => 'Listes',
+                                                            'tables' => 'Tableaux',
+                                                            'links' => 'Liens',
+                                                            'images' => 'Images',
+                                                            'paragraphs' => 'Paragraphes',
+                                                            default => $type,
+                                                        };
+                                                        $html .= sprintf(
+                                                            '<span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-xs">%s: <strong>%d</strong></span>',
+                                                            $label,
+                                                            $count
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // Métadonnées
+                                                $html .= '<div class="text-xs text-gray-400">';
+                                                $html .= 'Convertisseur: ' . e($htmlData['converter'] ?? '-');
+                                                $html .= ' | Temps: ' . ($htmlData['processing_time_ms'] ?? 0) . 'ms';
+                                                if (!empty($htmlData['extracted_at'])) {
+                                                    $html .= ' | ' . \Carbon\Carbon::parse($htmlData['extracted_at'])->format('d/m/Y H:i');
+                                                }
+                                                $html .= '</div>';
+
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsed()
+                                    ->visible(fn ($record) => !empty($record?->extraction_metadata['html_extraction'] ?? null)),
+
                                 Forms\Components\Section::make('Texte extrait')
                                     ->description('Vous pouvez modifier le texte avant de le re-chunker')
                                     ->schema([

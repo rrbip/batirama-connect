@@ -430,12 +430,15 @@ class DocumentExtractorService
             );
         }
 
-        // Stocker les métadonnées dans le document si disponible
+        // Stocker les métadonnées complètes dans le document (incluant pages et erreurs)
         if ($document) {
             $existingMetadata = $document->extraction_metadata ?? [];
             $document->update([
                 'extraction_metadata' => array_merge($existingMetadata, [
-                    'vision_extraction' => $result['metadata'],
+                    'vision_extraction' => array_merge($result['metadata'], [
+                        'pages' => $result['pages'] ?? [],
+                        'errors' => $result['errors'] ?? [],
+                    ]),
                 ]),
             ]);
         }
