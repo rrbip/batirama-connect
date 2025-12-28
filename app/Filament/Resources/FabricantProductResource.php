@@ -308,7 +308,9 @@ class FabricantProductResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->limit(40)
-                    ->tooltip(fn ($record) => $record->name),
+                    ->tooltip(fn ($record) => $record->name)
+                    ->icon(fn ($record) => $record->duplicate_of_id ? 'heroicon-o-document-duplicate' : null)
+                    ->iconColor('warning'),
 
                 Tables\Columns\TextColumn::make('sku')
                     ->label('SKU')
@@ -421,6 +423,34 @@ class FabricantProductResource extends Resource
                 Tables\Filters\Filter::make('has_image')
                     ->label('Avec image')
                     ->query(fn ($query) => $query->whereNotNull('main_image_url')),
+
+                Tables\Filters\Filter::make('is_duplicate')
+                    ->label('Est un doublon')
+                    ->query(fn ($query) => $query->whereNotNull('duplicate_of_id')),
+
+                Tables\Filters\Filter::make('has_duplicates')
+                    ->label('A des doublons potentiels')
+                    ->query(function ($query) {
+                        // Products where SKU appears more than once in same catalog
+                        return $query->whereIn('id', function ($subquery) {
+                            $subquery->select('fp1.id')
+                                ->from('fabricant_products as fp1')
+                                ->join('fabricant_products as fp2', function ($join) {
+                                    $join->on('fp1.catalog_id', '=', 'fp2.catalog_id')
+                                        ->on('fp1.id', '!=', 'fp2.id')
+                                        ->whereNull('fp2.deleted_at')
+                                        ->where(function ($q) {
+                                            $q->whereColumn('fp1.sku', 'fp2.sku')
+                                                ->orWhereColumn('fp1.name', 'fp2.name')
+                                                ->orWhere(function ($q2) {
+                                                    $q2->whereColumn('fp1.source_hash', 'fp2.source_hash')
+                                                        ->whereNotNull('fp1.source_hash');
+                                                });
+                                        });
+                                })
+                                ->whereNull('fp1.deleted_at');
+                        });
+                    }),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
@@ -444,6 +474,33 @@ class FabricantProductResource extends Resource
                     ->icon('heroicon-o-arrow-top-right-on-square')
                     ->url(fn ($record) => $record->source_url, true)
                     ->visible(fn ($record) => $record->source_url !== null),
+
+                Tables\Actions\Action::make('findDuplicates')
+                    ->label('Doublons')
+                    ->icon('heroicon-o-document-duplicate')
+                    ->color('warning')
+                    ->action(function (FabricantProduct $record) {
+                        $duplicates = $record->findPotentialDuplicates();
+
+                        if ($duplicates->isEmpty()) {
+                            Notification::make()
+                                ->title('Aucun doublon')
+                                ->body('Aucun doublon potentiel trouvé pour ce produit.')
+                                ->success()
+                                ->send();
+                            return;
+                        }
+
+                        $list = $duplicates->take(5)->map(fn ($p) => "- {$p->name} (SKU: {$p->sku})")->join("\n");
+                        $more = $duplicates->count() > 5 ? "\n... et " . ($duplicates->count() - 5) . " autres" : '';
+
+                        Notification::make()
+                            ->title($duplicates->count() . ' doublon(s) potentiel(s)')
+                            ->body($list . $more)
+                            ->warning()
+                            ->persistent()
+                            ->send();
+                    }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -465,6 +522,38 @@ class FabricantProductResource extends Resource
                         ->icon('heroicon-o-x-mark')
                         ->color('danger')
                         ->action(fn ($records) => $records->each->update(['status' => FabricantProduct::STATUS_INACTIVE])),
+
+                    Tables\Actions\BulkAction::make('markAsDuplicates')
+                        ->label('Marquer comme doublons')
+                        ->icon('heroicon-o-document-duplicate')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading('Marquer comme doublons')
+                        ->modalDescription('Le premier produit sélectionné sera conservé comme original. Les autres seront marqués comme doublons et archivés.')
+                        ->action(function ($records) {
+                            if ($records->count() < 2) {
+                                Notification::make()
+                                    ->title('Erreur')
+                                    ->body('Sélectionnez au moins 2 produits pour marquer des doublons.')
+                                    ->danger()
+                                    ->send();
+                                return;
+                            }
+
+                            $original = $records->first();
+                            $duplicates = $records->skip(1);
+
+                            foreach ($duplicates as $duplicate) {
+                                $duplicate->markAsDuplicateOf($original);
+                            }
+
+                            Notification::make()
+                                ->title('Doublons marqués')
+                                ->body($duplicates->count() . ' produit(s) marqué(s) comme doublons de "' . $original->name . '"')
+                                ->success()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
                 ]),
             ])
             ->defaultSort('created_at', 'desc');

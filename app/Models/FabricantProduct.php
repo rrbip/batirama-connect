@@ -78,6 +78,7 @@ class FabricantProduct extends Model
         'uuid',
         'catalog_id',
         'crawl_url_id',
+        'duplicate_of_id',
         'sku',
         'ean',
         'manufacturer_ref',
@@ -226,6 +227,123 @@ class FabricantProduct extends Model
     public function scopeForCatalog($query, int $catalogId)
     {
         return $query->where('catalog_id', $catalogId);
+    }
+
+    public function scopeDuplicates($query)
+    {
+        return $query->whereNotNull('duplicate_of_id');
+    }
+
+    public function scopeOriginals($query)
+    {
+        return $query->whereNull('duplicate_of_id');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // DUPLICATE DETECTION
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Find potential duplicates of this product within the same catalog.
+     */
+    public function findPotentialDuplicates(): \Illuminate\Database\Eloquent\Collection
+    {
+        $query = static::where('catalog_id', $this->catalog_id)
+            ->where('id', '!=', $this->id)
+            ->whereNull('duplicate_of_id');
+
+        return $query->where(function ($q) {
+            // Same SKU
+            if ($this->sku) {
+                $q->orWhere('sku', $this->sku);
+            }
+            // Same EAN
+            if ($this->ean) {
+                $q->orWhere('ean', $this->ean);
+            }
+            // Same source hash (identical extracted data)
+            if ($this->source_hash) {
+                $q->orWhere('source_hash', $this->source_hash);
+            }
+            // Very similar name (exact match)
+            if ($this->name) {
+                $q->orWhere('name', $this->name);
+            }
+        })->get();
+    }
+
+    /**
+     * Get duplicate statistics for a catalog.
+     */
+    public static function getDuplicateStats(int $catalogId): array
+    {
+        $total = static::where('catalog_id', $catalogId)->count();
+
+        // Count by SKU duplicates
+        $skuDuplicates = \DB::table('fabricant_products')
+            ->select('sku', \DB::raw('COUNT(*) as cnt'))
+            ->where('catalog_id', $catalogId)
+            ->whereNotNull('sku')
+            ->whereNull('deleted_at')
+            ->groupBy('sku')
+            ->having('cnt', '>', 1)
+            ->get();
+
+        // Count by name duplicates
+        $nameDuplicates = \DB::table('fabricant_products')
+            ->select('name', \DB::raw('COUNT(*) as cnt'))
+            ->where('catalog_id', $catalogId)
+            ->whereNull('deleted_at')
+            ->groupBy('name')
+            ->having('cnt', '>', 1)
+            ->get();
+
+        // Count by source_hash duplicates
+        $hashDuplicates = \DB::table('fabricant_products')
+            ->select('source_hash', \DB::raw('COUNT(*) as cnt'))
+            ->where('catalog_id', $catalogId)
+            ->whereNotNull('source_hash')
+            ->whereNull('deleted_at')
+            ->groupBy('source_hash')
+            ->having('cnt', '>', 1)
+            ->get();
+
+        return [
+            'total_products' => $total,
+            'duplicate_skus' => $skuDuplicates->count(),
+            'duplicate_sku_products' => $skuDuplicates->sum('cnt') - $skuDuplicates->count(),
+            'duplicate_names' => $nameDuplicates->count(),
+            'duplicate_name_products' => $nameDuplicates->sum('cnt') - $nameDuplicates->count(),
+            'duplicate_hashes' => $hashDuplicates->count(),
+            'duplicate_hash_products' => $hashDuplicates->sum('cnt') - $hashDuplicates->count(),
+        ];
+    }
+
+    /**
+     * Mark this product as a duplicate of another.
+     */
+    public function markAsDuplicateOf(self $original): void
+    {
+        $this->update([
+            'duplicate_of_id' => $original->id,
+            'status' => self::STATUS_ARCHIVED,
+        ]);
+    }
+
+    /**
+     * The original product if this is a duplicate.
+     */
+    public function duplicateOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'duplicate_of_id');
+    }
+
+    /**
+     * Products that are duplicates of this one.
+     */
+    public function duplicates(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(self::class, 'duplicate_of_id');
     }
 
     // ─────────────────────────────────────────────────────────────────
