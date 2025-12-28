@@ -196,7 +196,8 @@ class LanguageDetector
         }
 
         $methods = $config['methods'] ?? ['url' => true, 'sku' => true, 'content' => true];
-        $allowedLocales = $config['allowed_locales'] ?? array_keys(self::LOCALES);
+        // Empty array or missing = all available locales (allows adding new languages without updating old configs)
+        $allowedLocales = !empty($config['allowed_locales']) ? $config['allowed_locales'] : array_keys(self::LOCALES);
 
         $locale = null;
 

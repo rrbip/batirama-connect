@@ -189,10 +189,16 @@ class FabricantCatalogResource extends Resource
                                         Forms\Components\CheckboxList::make('extraction_config.locale_detection.allowed_locales')
                                             ->label('Langues a detecter')
                                             ->options(FabricantCatalog::getSupportedLocales())
-                                            ->default(['fr', 'en', 'de', 'es', 'it', 'nl', 'pt', 'pl'])
+                                            ->default(fn () => array_keys(FabricantCatalog::getSupportedLocales()))
+                                            ->afterStateHydrated(function ($state, $set) {
+                                                // Empty array = all locales selected (for backwards compatibility)
+                                                if (empty($state)) {
+                                                    $set('extraction_config.locale_detection.allowed_locales', array_keys(FabricantCatalog::getSupportedLocales()));
+                                                }
+                                            })
                                             ->columns(4)
                                             ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled'))
-                                            ->helperText('Seules ces langues seront detectees. Les autres seront ignorees.'),
+                                            ->helperText('Décochez pour exclure certaines langues. Toutes cochées = détection automatique de toutes les langues disponibles.'),
 
                                         Forms\Components\Select::make('extraction_config.locale_detection.default_locale')
                                             ->label('Forcer une langue par defaut')

@@ -171,7 +171,8 @@ class FabricantCatalog extends Model
                     'sku' => true,      // Detect from SKU patterns (-FR, -EN, etc.)
                     'content' => true,  // Detect from content analysis (common words)
                 ],
-                'allowed_locales' => ['fr', 'en', 'de', 'es', 'it', 'nl', 'pt', 'pl'],
+                // Empty array = all available locales (dynamically from LanguageDetector)
+                'allowed_locales' => [],
                 'default_locale' => null, // Force a specific locale for all products
             ],
         ];
