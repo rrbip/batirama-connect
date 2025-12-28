@@ -254,6 +254,30 @@ class FabricantCatalogResource extends Resource
                                                 );
                                             }),
                                     ]),
+
+                                Forms\Components\Section::make('Doublons détectés')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('duplicate_stats_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                if (!$record) return '-';
+                                                $stats = \App\Models\FabricantProduct::getDuplicateStats($record->id);
+                                                if ($stats['total_products'] === 0) {
+                                                    return 'Aucun produit';
+                                                }
+                                                $duplicateCount = $stats['duplicate_sku_products'] + $stats['duplicate_name_products'] + $stats['duplicate_hash_products'];
+                                                if ($duplicateCount === 0) {
+                                                    return '✓ Aucun doublon détecté';
+                                                }
+                                                return sprintf(
+                                                    "⚠ Doublons SKU: %d | Doublons Nom: %d | Doublons Hash: %d",
+                                                    $stats['duplicate_sku_products'],
+                                                    $stats['duplicate_name_products'],
+                                                    $stats['duplicate_hash_products']
+                                                );
+                                            }),
+                                    ])
+                                    ->visible(fn ($record) => $record !== null),
                             ]),
                     ])
                     ->columnSpanFull(),
