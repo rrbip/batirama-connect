@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Marketplace;
 
+use Illuminate\Support\Facades\Log;
+
 /**
  * Detects product language from various sources.
  *
@@ -895,35 +897,61 @@ class LanguageDetector
     public function detectFromHtmlLangAttribute(?string $html): ?string
     {
         if (empty($html)) {
+            Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Empty HTML');
             return null;
         }
+
+        Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Processing HTML', [
+            'html_length' => strlen($html),
+            'contains_html_tag' => str_contains($html, '<html'),
+            'contains_lang' => str_contains($html, 'lang='),
+            'preview' => mb_substr($html, 0, 200),
+        ]);
 
         // Match lang attribute on html tag: <html lang="fr"> or <html dir="ltr" lang="hr-BA">
         if (preg_match('/<html[^>]*\slang=["\']([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?)["\'][^>]*>/i', $html, $matches)) {
             $langCode = strtolower($matches[1]);
+            Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Found lang attribute', [
+                'lang_code' => $langCode,
+                'full_match' => $matches[0],
+            ]);
 
             // Normalize: hr-BA -> hr, en-US -> en-us, etc.
             // First check if the full code exists (like zh-tw, pt-br)
             if (isset(self::getAllLocales()[$langCode])) {
+                Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Found exact locale', ['locale' => $langCode]);
                 return $langCode;
             }
 
             // Then try the base language code (hr-BA -> hr)
             $baseLang = explode('-', $langCode)[0];
             if (isset(self::getAllLocales()[$baseLang])) {
+                Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Found base locale', ['locale' => $baseLang, 'original' => $langCode]);
                 return $baseLang;
             }
 
             // Check for regional variants we support (en-us, pt-br, etc.)
             $regionalVariants = ['en-us', 'en-gb', 'en-au', 'en-nz', 'en-ca', 'pt-br', 'es-mx', 'es-ar', 'es-co', 'fr-ca', 'zh-tw'];
             if (in_array($langCode, $regionalVariants)) {
+                Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Found regional variant', ['locale' => $langCode]);
                 return $langCode;
             }
 
             // Return base language if it's a valid locale
             if (isset(self::getAllLocales()[$baseLang])) {
+                Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Falling back to base locale', ['locale' => $baseLang]);
                 return $baseLang;
             }
+
+            Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Lang code not in allowed locales', [
+                'lang_code' => $langCode,
+                'base_lang' => $baseLang,
+            ]);
+        } else {
+            Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Regex did not match', [
+                'contains_html_tag' => str_contains($html, '<html'),
+                'contains_lang' => str_contains($html, 'lang='),
+            ]);
         }
 
         // Also check meta http-equiv Content-Language
@@ -931,10 +959,12 @@ class LanguageDetector
             $langCode = strtolower($matches[1]);
             $baseLang = explode('-', $langCode)[0];
             if (isset(self::getAllLocales()[$baseLang])) {
+                Log::debug('LanguageDetector::detectFromHtmlLangAttribute: Found Content-Language meta', ['locale' => $baseLang]);
                 return $baseLang;
             }
         }
 
+        Log::debug('LanguageDetector::detectFromHtmlLangAttribute: No language detected');
         return null;
     }
 
@@ -1003,11 +1033,13 @@ class LanguageDetector
     ): ?string {
         // Check if detection is enabled
         if (isset($config['enabled']) && !$config['enabled']) {
+            Log::debug('LanguageDetector::detect: Detection disabled, using default', ['default' => $config['default_locale'] ?? null]);
             return $config['default_locale'] ?? null;
         }
 
         // If default locale is forced, use it
         if (!empty($config['default_locale'])) {
+            Log::debug('LanguageDetector::detect: Using forced default locale', ['locale' => $config['default_locale']]);
             return $config['default_locale'];
         }
 
@@ -1015,11 +1047,22 @@ class LanguageDetector
         // Empty array or missing = all available locales (allows adding new languages without updating old configs)
         $allowedLocales = !empty($config['allowed_locales']) ? $config['allowed_locales'] : array_keys(self::getAllLocales());
 
+        Log::debug('LanguageDetector::detect: Starting detection', [
+            'has_url' => !empty($url),
+            'has_sku' => !empty($sku),
+            'has_content' => !empty($content),
+            'content_length' => strlen($content ?? ''),
+            'methods' => $methods,
+            'allowed_locales_count' => count($allowedLocales),
+            'allowed_locales_sample' => array_slice($allowedLocales, 0, 10),
+        ]);
+
         $locale = null;
 
         // Try URL first (most reliable)
         if ($methods['url'] ?? true) {
             $locale = $this->detectFromUrl($url);
+            Log::debug('LanguageDetector::detect: URL detection result', ['locale' => $locale, 'in_allowed' => $locale ? in_array($locale, $allowedLocales) : null]);
             if ($locale && in_array($locale, $allowedLocales)) {
                 return $locale;
             }
@@ -1028,6 +1071,7 @@ class LanguageDetector
         // Try SKU
         if ($methods['sku'] ?? true) {
             $locale = $this->detectFromSku($sku);
+            Log::debug('LanguageDetector::detect: SKU detection result', ['locale' => $locale, 'in_allowed' => $locale ? in_array($locale, $allowedLocales) : null]);
             if ($locale && in_array($locale, $allowedLocales)) {
                 return $locale;
             }
@@ -1036,11 +1080,13 @@ class LanguageDetector
         // Fall back to content analysis
         if ($methods['content'] ?? true) {
             $locale = $this->detectFromContent($content);
+            Log::debug('LanguageDetector::detect: Content detection result', ['locale' => $locale, 'in_allowed' => $locale ? in_array($locale, $allowedLocales) : null]);
             if ($locale && in_array($locale, $allowedLocales)) {
                 return $locale;
             }
         }
 
+        Log::debug('LanguageDetector::detect: No locale detected or not in allowed list');
         return null;
     }
 

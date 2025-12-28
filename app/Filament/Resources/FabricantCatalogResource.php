@@ -571,7 +571,7 @@ class FabricantCatalogResource extends Resource
                         Forms\Components\Toggle::make('run_sync')
                             ->label('Exécuter maintenant (synchrone)')
                             ->helperText('Décochez pour utiliser la queue en arrière-plan (nécessite un worker actif).')
-                            ->default(true),
+                            ->default(false),
                     ])
                     ->modalHeading('Détecter les langues')
                     ->modalDescription('Lancer la détection automatique de langue pour tous les produits sans langue détectée ?')
@@ -587,7 +587,7 @@ class FabricantCatalogResource extends Resource
                             return;
                         }
 
-                        $runSync = $data['run_sync'] ?? true;
+                        $runSync = $data['run_sync'] ?? false;
 
                         if ($runSync) {
                             // Run synchronously

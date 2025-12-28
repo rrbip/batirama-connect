@@ -154,11 +154,33 @@ class DetectProductLocalesJob implements ShouldQueue
             try {
                 $crawlUrl = $product->crawlUrl;
                 if ($crawlUrl) {
+                    Log::debug('DetectProductLocalesJob: Found crawlUrl', [
+                        'product_id' => $product->id,
+                        'crawl_url_id' => $product->crawl_url_id,
+                        'storage_path' => $crawlUrl->storage_path,
+                    ]);
+
                     $rawHtml = $crawlUrl->getContent();
                     if ($rawHtml) {
-                        // Return first 1000 chars of raw HTML (enough to capture <html lang="...">)
-                        return mb_substr($rawHtml, 0, 1000);
+                        // Return first 2000 chars of raw HTML (enough to capture <html lang="...">)
+                        $content = mb_substr($rawHtml, 0, 2000);
+                        Log::debug('DetectProductLocalesJob: Got raw HTML', [
+                            'product_id' => $product->id,
+                            'html_length' => strlen($rawHtml),
+                            'content_preview' => mb_substr($content, 0, 300),
+                        ]);
+                        return $content;
+                    } else {
+                        Log::debug('DetectProductLocalesJob: getContent() returned empty', [
+                            'product_id' => $product->id,
+                            'storage_path' => $crawlUrl->storage_path,
+                        ]);
                     }
+                } else {
+                    Log::debug('DetectProductLocalesJob: crawlUrl relationship is null', [
+                        'product_id' => $product->id,
+                        'crawl_url_id' => $product->crawl_url_id,
+                    ]);
                 }
             } catch (\Throwable $e) {
                 Log::debug('DetectProductLocalesJob: Could not read raw HTML content', [
@@ -166,6 +188,10 @@ class DetectProductLocalesJob implements ShouldQueue
                     'error' => $e->getMessage(),
                 ]);
             }
+        } else {
+            Log::debug('DetectProductLocalesJob: Product has no crawl_url_id', [
+                'product_id' => $product->id,
+            ]);
         }
 
         // PRIORITY 2: Fall back to product text content
