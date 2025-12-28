@@ -103,6 +103,21 @@ class WebCrawlResource extends Resource
                                             ->helperText('Minimum 100ms'),
                                     ])
                                     ->columns(4),
+
+                                Forms\Components\Section::make('Extraction de texte')
+                                    ->description('Configuration pour la détection automatique de langue')
+                                    ->schema([
+                                        Forms\Components\Select::make('pdf_extraction_method')
+                                            ->label('Méthode d\'extraction PDF')
+                                            ->options([
+                                                'auto' => 'Auto (texte puis OCR si nécessaire)',
+                                                'text' => 'Texte uniquement (pdftotext)',
+                                                'ocr' => 'OCR uniquement (Tesseract)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Auto: essaie d\'extraire le texte, puis OCR si le PDF est scanné'),
+                                    ])
+                                    ->columns(1),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Authentification')
@@ -149,18 +164,8 @@ class WebCrawlResource extends Resource
                                             ->default(WebCrawl::DEFAULT_USER_AGENT)
                                             ->placeholder(WebCrawl::DEFAULT_USER_AGENT)
                                             ->helperText('Laissez vide pour le Chrome par défaut'),
-
-                                        Forms\Components\Select::make('pdf_extraction_method')
-                                            ->label('Extraction texte PDF')
-                                            ->options([
-                                                'auto' => 'Auto (texte puis OCR si nécessaire)',
-                                                'text' => 'Texte uniquement (pdftotext)',
-                                                'ocr' => 'OCR uniquement (Tesseract)',
-                                            ])
-                                            ->default('auto')
-                                            ->helperText('Méthode pour extraire le texte des PDF (détection de langue)'),
                                     ])
-                                    ->columns(3),
+                                    ->columns(2),
 
                                 Forms\Components\Section::make('Déduplication')
                                     ->description('Évite d\'indexer plusieurs fois le même contenu')
