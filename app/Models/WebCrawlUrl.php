@@ -211,28 +211,123 @@ class WebCrawlUrl extends Model
     }
 
     /**
-     * Extract text content from HTML (removes tags, scripts, styles).
+     * Extract text content from stored file.
+     * For HTML: removes tags, scripts, styles.
+     * For PDF: uses pdftotext or pdfparser.
+     * For other types: returns null (no extraction available).
      */
     public function getTextContent(): ?string
     {
-        $html = $this->getContent();
+        $content = $this->getContent();
 
-        if (empty($html)) {
+        if (empty($content)) {
             return null;
         }
 
-        // Remove script and style tags
-        $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
-        $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
+        // For HTML, use the simple strip_tags approach
+        if ($this->isHtml()) {
+            // Remove script and style tags
+            $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $content);
+            $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
 
-        // Remove HTML tags
-        $text = strip_tags($html);
+            // Remove HTML tags
+            $text = strip_tags($html);
 
-        // Decode HTML entities
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            // Decode HTML entities
+            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        // Normalize whitespace
-        $text = preg_replace('/\s+/', ' ', $text);
+            // Normalize whitespace
+            $text = preg_replace('/\s+/', ' ', $text);
+
+            return trim($text);
+        }
+
+        // For PDF, use proper text extraction
+        if ($this->isPdf()) {
+            return $this->extractTextFromPdf();
+        }
+
+        // For plain text files
+        if (str_contains($this->content_type ?? '', 'text/plain') ||
+            str_contains($this->content_type ?? '', 'text/markdown')) {
+            return trim($content);
+        }
+
+        // For other types (images, binary docs), no text extraction available
+        return null;
+    }
+
+    /**
+     * Extract text from PDF using pdftotext or pdfparser.
+     */
+    private function extractTextFromPdf(): ?string
+    {
+        if (empty($this->storage_path)) {
+            return null;
+        }
+
+        $fullPath = Storage::disk('local')->path($this->storage_path);
+
+        if (!file_exists($fullPath)) {
+            return null;
+        }
+
+        // Try pdftotext first (poppler-utils) - most reliable
+        $text = $this->extractPdfWithPdftotext($fullPath);
+
+        if (!empty($text)) {
+            return $text;
+        }
+
+        // Fallback to smalot/pdfparser
+        try {
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($fullPath);
+            $text = $pdf->getText();
+
+            if (!empty($text)) {
+                return $this->cleanPdfText($text);
+            }
+        } catch (\Exception $e) {
+            // Silently fail, PDF might be encrypted or corrupted
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract PDF text using pdftotext command.
+     */
+    private function extractPdfWithPdftotext(string $path): ?string
+    {
+        // Check if pdftotext is available
+        $checkResult = @shell_exec('pdftotext -v 2>&1');
+        if ($checkResult === null || !str_contains($checkResult, 'pdftotext')) {
+            return null;
+        }
+
+        // Extract text with pdftotext
+        $escapedPath = escapeshellarg($path);
+        $output = @shell_exec("pdftotext -enc UTF-8 {$escapedPath} - 2>/dev/null");
+
+        if ($output === null || strlen(trim($output)) < 10) {
+            return null;
+        }
+
+        return $this->cleanPdfText($output);
+    }
+
+    /**
+     * Clean extracted PDF text.
+     */
+    private function cleanPdfText(string $text): string
+    {
+        // Normalize line endings
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+
+        // Remove excessive whitespace while keeping paragraph structure
+        $text = preg_replace('/[^\S\n]+/', ' ', $text);
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
 
         return trim($text);
     }
