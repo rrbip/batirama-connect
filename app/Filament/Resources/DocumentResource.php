@@ -315,6 +315,7 @@ class DocumentResource extends Resource
 
                                                 // 3. Détail par page
                                                 $pages = $visionData['pages'] ?? [];
+                                                $storagePath = $visionData['storage_path'] ?? '';
                                                 if (!empty($pages)) {
                                                     $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
                                                     $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
@@ -323,46 +324,79 @@ class DocumentResource extends Resource
                                                     $html .= '<div class="p-4">';
                                                     $html .= '<table class="w-full text-sm">';
                                                     $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
-                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-left py-2">Markdown</th><th class="text-right py-2">Taille MD</th><th class="text-right py-2">Temps</th></tr>';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-left py-2">Markdown</th><th class="text-right py-2">Taille MD</th><th class="text-right py-2">Temps</th><th class="text-center py-2">Actions</th></tr>';
                                                     $html .= '</thead><tbody>';
 
-                                                    foreach ($pages as $page) {
-                                                        $imagePath = $page['image_path'] ?? '-';
-                                                        $mdPath = $page['markdown_path'] ?? '-';
+                                                    foreach ($pages as $index => $page) {
+                                                        $imagePath = $page['image_path'] ?? '';
+                                                        $mdPath = $page['markdown_path'] ?? '';
+                                                        $mdContent = $page['markdown_content'] ?? null;
                                                         $mdLength = $page['markdown_length'] ?? 0;
                                                         $time = $page['processing_time'] ?? 0;
+                                                        $pageNum = $page['page'] ?? 0;
+
+                                                        // Générer l'URL de l'image si disponible
+                                                        $imageUrl = '';
+                                                        if ($imagePath && \Storage::disk('public')->exists($imagePath)) {
+                                                            $imageUrl = \Storage::disk('public')->url($imagePath);
+                                                        }
 
                                                         // Raccourcir les chemins pour l'affichage
-                                                        if ($imagePath !== '-') {
-                                                            $imagePath = basename($imagePath);
+                                                        $imageDisplay = $imagePath ? basename($imagePath) : '-';
+                                                        $mdDisplay = $mdPath ? basename($mdPath) : '-';
+
+                                                        // Boutons d'action
+                                                        $actions = '<div class="flex gap-1 justify-center">';
+                                                        if ($imageUrl) {
+                                                            $actions .= '<a href="' . e($imageUrl) . '" target="_blank" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50" title="Voir l\'image"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></a>';
                                                         }
-                                                        if ($mdPath !== '-') {
-                                                            $mdPath = basename($mdPath);
+                                                        if ($mdContent) {
+                                                            $actions .= '<button type="button" onclick="document.getElementById(\'md-content-' . $pageNum . '\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50" title="Voir le markdown"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>';
                                                         }
+                                                        $actions .= '</div>';
 
                                                         $html .= sprintf(
-                                                            '<tr class="border-b dark:border-gray-700 last:border-0">
+                                                            '<tr class="border-b dark:border-gray-700">
                                                                 <td class="py-2 font-medium">%d</td>
                                                                 <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
                                                                 <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
                                                                 <td class="py-2 text-right">%s</td>
                                                                 <td class="py-2 text-right">%ss</td>
+                                                                <td class="py-2 text-center">%s</td>
                                                             </tr>',
-                                                            $page['page'] ?? 0,
-                                                            e($imagePath),
-                                                            e($mdPath),
+                                                            $pageNum,
+                                                            e($imageDisplay),
+                                                            e($mdDisplay),
                                                             number_format($mdLength) . ' chars',
-                                                            $time
+                                                            $time,
+                                                            $actions
                                                         );
+
+                                                        // Ligne expandable pour le contenu markdown
+                                                        if ($mdContent) {
+                                                            $html .= '<tr id="md-content-' . $pageNum . '" class="hidden">';
+                                                            $html .= '<td colspan="6" class="p-0">';
+                                                            $html .= '<div class="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">';
+                                                            $html .= '<div class="flex items-center justify-between mb-2">';
+                                                            $html .= '<span class="text-xs font-medium text-gray-500">Markdown extrait - Page ' . $pageNum . '</span>';
+                                                            $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'md-text-' . $pageNum . '\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                            $html .= '</div>';
+                                                            $html .= '<pre id="md-text-' . $pageNum . '" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e($mdContent) . '</pre>';
+                                                            $html .= '</div></td></tr>';
+                                                        }
                                                     }
                                                     $html .= '</tbody></table>';
                                                     $html .= '</div></div>';
                                                 }
 
                                                 // 4. Étape Chunking + Indexation
+                                                $chunksUrl = '/admin/documents/' . $record->id . '/chunks';
                                                 $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
-                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">';
                                                 $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
+                                                $html .= '<a href="' . $chunksUrl . '" class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-full hover:bg-amber-200 transition">';
+                                                $html .= '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>';
+                                                $html .= 'Voir les chunks</a>';
                                                 $html .= '</div>';
                                                 $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
 

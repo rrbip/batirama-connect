@@ -155,6 +155,7 @@ class VisionExtractorService
                     'page' => $pageNumber,
                     'image_path' => $this->settings->store_images ? $imagePath : null,
                     'markdown_path' => $markdownPath,
+                    'markdown_content' => $markdown, // Stocker le contenu pour le debug/visualisation
                     'markdown_length' => strlen($markdown),
                     'processing_time' => $pageResult['processing_time'],
                 ];
