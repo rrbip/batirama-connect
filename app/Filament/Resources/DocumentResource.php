@@ -481,6 +481,146 @@ class DocumentResource extends Resource
                                     ->collapsed()
                                     ->visible(fn ($record) => !empty($record?->extraction_metadata['html_extraction'] ?? null)),
 
+                                // Section Pipeline OCR (uniquement pour extraction OCR/Tesseract)
+                                Forms\Components\Section::make('Pipeline d\'extraction OCR')
+                                    ->description('Détails du traitement PDF → Images → Texte (Tesseract)')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('ocr_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $ocrData = $metadata['ocr_extraction'] ?? null;
+
+                                                if (!$ocrData) {
+                                                    return 'Aucune donnée d\'extraction OCR disponible';
+                                                }
+
+                                                // Déterminer si c'est une image ou un PDF
+                                                $isImage = ($ocrData['source_type'] ?? null) === 'image';
+
+                                                $html = '<div class="space-y-6">';
+
+                                                if (!$isImage) {
+                                                    // 1. Étape PDF → Images (uniquement pour PDF)
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. PDF → Images</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                    $html .= '<div><span class="text-gray-500">Outil:</span><br><strong class="text-blue-600">' . e($ocrData['pdf_converter'] ?? 'pdftoppm (poppler-utils)') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">Pages totales:</span><br><strong>' . ($ocrData['total_pages'] ?? '-') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">DPI:</span><br><strong>' . ($ocrData['dpi'] ?? '300') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">Temps conversion:</span><br><strong>' . ($ocrData['pdf_conversion_time'] ?? '-') . 's</strong></div>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 2. Étape Images → Texte (OCR)
+                                                $stepNumber = $isImage ? 1 : 2;
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-orange-50 dark:bg-orange-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-orange-700 dark:text-orange-400">' . $stepNumber . '. ' . ($isImage ? 'Image' : 'Images') . ' → Texte (OCR)</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Moteur OCR:</span><br><strong class="text-orange-600">' . e($ocrData['ocr_engine'] ?? 'Tesseract OCR') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Langues:</span><br><strong>' . e($ocrData['ocr_languages'] ?? 'fra+eng') . '</strong></div>';
+                                                if (!$isImage) {
+                                                    $html .= '<div><span class="text-gray-500">Pages traitées:</span><br><strong>' . ($ocrData['pages_processed'] ?? '-') . '</strong></div>';
+                                                } else {
+                                                    $html .= '<div><span class="text-gray-500">Taille texte:</span><br><strong>' . number_format($ocrData['text_length'] ?? 0) . ' chars</strong></div>';
+                                                }
+                                                $html .= '<div><span class="text-gray-500">Durée totale:</span><br><strong>' . ($ocrData['total_processing_time'] ?? $ocrData['processing_time'] ?? '-') . 's</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 3. Détail par page (uniquement pour PDF multi-pages)
+                                                $pages = $ocrData['pages'] ?? [];
+                                                if (!$isImage && !empty($pages)) {
+                                                    $stepNumber++;
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-green-700 dark:text-green-400">' . $stepNumber . '. Détail par page</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4">';
+                                                    $html .= '<table class="w-full text-sm">';
+                                                    $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-right py-2">Taille texte</th><th class="text-right py-2">Temps OCR</th></tr>';
+                                                    $html .= '</thead><tbody>';
+
+                                                    foreach ($pages as $page) {
+                                                        $textLength = $page['text_length'] ?? 0;
+                                                        $time = $page['processing_time'] ?? 0;
+
+                                                        $html .= sprintf(
+                                                            '<tr class="border-b dark:border-gray-700 last:border-0">
+                                                                <td class="py-2 font-medium">%d</td>
+                                                                <td class="py-2 text-right">%s chars</td>
+                                                                <td class="py-2 text-right">%ss</td>
+                                                            </tr>',
+                                                            $page['page'] ?? 0,
+                                                            number_format($textLength),
+                                                            $time
+                                                        );
+                                                    }
+                                                    $html .= '</tbody></table>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 4. Étape Chunking + Indexation
+                                                $stepNumber = $isImage ? 2 : (empty($pages) ? 3 : 4);
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">' . $stepNumber . '. Chunking + Indexation</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 5. Erreurs éventuelles
+                                                $errors = $ocrData['errors'] ?? [];
+                                                if (!empty($errors)) {
+                                                    $html .= '<div class="border border-red-200 dark:border-red-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-700">';
+                                                    $html .= '<h4 class="font-medium text-red-700 dark:text-red-400">Erreurs</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 space-y-2">';
+                                                    foreach ($errors as $error) {
+                                                        $html .= sprintf(
+                                                            '<div class="text-sm text-red-600 dark:text-red-400">Page %d: %s</div>',
+                                                            $error['page'] ?? 0,
+                                                            e($error['error'] ?? 'Erreur inconnue')
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // Timestamp
+                                                if (!empty($ocrData['extracted_at'])) {
+                                                    $html .= '<div class="text-xs text-gray-400 text-right">';
+                                                    $html .= 'Extrait le ' . \Carbon\Carbon::parse($ocrData['extracted_at'])->format('d/m/Y H:i');
+                                                    $html .= '</div>';
+                                                }
+
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsed()
+                                    ->visible(fn ($record) => !empty($record?->extraction_metadata['ocr_extraction'] ?? null)),
+
                                 Forms\Components\Section::make('Texte extrait')
                                     ->description('Vous pouvez modifier le texte avant de le re-chunker')
                                     ->schema([

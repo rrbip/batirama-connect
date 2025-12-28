@@ -111,7 +111,7 @@ class DocumentExtractorService
             Log::info('Using forced OCR mode for PDF', ['path' => $path]);
 
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
 
                 if (!empty($ocrClean)) {
@@ -219,7 +219,7 @@ class DocumentExtractorService
             ]);
 
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
                 $ocrTruncatedRatio = $this->getTruncatedRatio($ocrClean);
 
@@ -250,7 +250,7 @@ class DocumentExtractorService
         if ($this->isOcrAvailable()) {
             Log::info('All text extraction failed, trying OCR as last resort', ['path' => $path]);
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
                 if (!empty($ocrClean)) {
                     return $ocrClean;
@@ -272,9 +272,24 @@ class DocumentExtractorService
     /**
      * Extrait le texte d'un PDF en utilisant OCR (Tesseract)
      * Convertit chaque page en image puis applique l'OCR
+     *
+     * @param string $path Chemin vers le fichier PDF
+     * @param Document|null $document Document pour stocker les métadonnées
+     * @return string Texte extrait
      */
-    private function extractFromPdfWithOcr(string $path): string
+    private function extractFromPdfWithOcr(string $path, ?Document $document = null): string
     {
+        $startTime = microtime(true);
+        $ocrMetadata = [
+            'method' => 'ocr',
+            'pdf_converter' => 'pdftoppm (poppler-utils)',
+            'ocr_engine' => 'Tesseract OCR',
+            'ocr_languages' => 'fra+eng',
+            'dpi' => 300,
+            'pages' => [],
+            'errors' => [],
+        ];
+
         // Vérifier si pdftoppm est disponible pour convertir PDF en images
         $checkResult = Process::run('pdftoppm -v 2>&1');
         if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftoppm')) {
@@ -285,6 +300,8 @@ class DocumentExtractorService
         mkdir($tempDir, 0755, true);
 
         try {
+            $pdfConversionStart = microtime(true);
+
             // Convertir le PDF en images PNG (une par page)
             $command = sprintf(
                 'pdftoppm -png -r 300 %s %s/page',
@@ -296,6 +313,8 @@ class DocumentExtractorService
             if (!$result->successful()) {
                 throw new \RuntimeException('Failed to convert PDF to images: ' . $result->errorOutput());
             }
+
+            $ocrMetadata['pdf_conversion_time'] = round(microtime(true) - $pdfConversionStart, 2);
 
             // Trouver toutes les images générées
             $images = glob($tempDir . '/page-*.png');
@@ -309,17 +328,48 @@ class DocumentExtractorService
             }
 
             sort($images); // Assurer l'ordre des pages
+            $ocrMetadata['total_pages'] = count($images);
 
             // Appliquer l'OCR sur chaque image
             $fullText = '';
             foreach ($images as $index => $imagePath) {
+                $pageNumber = $index + 1;
+                $pageStart = microtime(true);
+
                 Log::info('OCR processing page', [
-                    'page' => $index + 1,
+                    'page' => $pageNumber,
                     'total' => count($images),
                 ]);
 
-                $pageText = $this->extractFromImage($imagePath);
-                $fullText .= $pageText . "\n\n";
+                try {
+                    $pageText = $this->extractFromImageWithOcr($imagePath);
+                    $fullText .= $pageText . "\n\n";
+
+                    $ocrMetadata['pages'][] = [
+                        'page' => $pageNumber,
+                        'text_length' => strlen($pageText),
+                        'processing_time' => round(microtime(true) - $pageStart, 2),
+                    ];
+                } catch (\Exception $e) {
+                    $ocrMetadata['errors'][] = [
+                        'page' => $pageNumber,
+                        'error' => $e->getMessage(),
+                    ];
+                }
+            }
+
+            $ocrMetadata['total_processing_time'] = round(microtime(true) - $startTime, 2);
+            $ocrMetadata['pages_processed'] = count($ocrMetadata['pages']);
+            $ocrMetadata['extracted_at'] = now()->toIso8601String();
+
+            // Stocker les métadonnées dans le document
+            if ($document) {
+                $existingMetadata = $document->extraction_metadata ?? [];
+                $document->update([
+                    'extraction_metadata' => array_merge($existingMetadata, [
+                        'ocr_extraction' => $ocrMetadata,
+                    ]),
+                ]);
             }
 
             return trim($fullText);
@@ -332,6 +382,35 @@ class DocumentExtractorService
             }
             @rmdir($tempDir);
         }
+    }
+
+    /**
+     * Extrait le texte d'une image avec Tesseract OCR (méthode interne)
+     */
+    private function extractFromImageWithOcr(string $path): string
+    {
+        $tesseract = $this->findTesseractExecutable();
+        $escapedPath = escapeshellarg($path);
+
+        // Exécuter tesseract directement via shell_exec
+        // -l fra+eng : français + anglais
+        // --psm 3 : segmentation automatique
+        // --oem 3 : LSTM + Legacy engine
+        // stdout : sortie vers stdout au lieu d'un fichier
+        $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
+
+        $text = shell_exec($command);
+
+        if ($text === null) {
+            throw new \RuntimeException("La commande tesseract a échoué");
+        }
+
+        // Vérifier si c'est un message d'erreur
+        if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
+            throw new \RuntimeException("Erreur Tesseract: " . trim($text));
+        }
+
+        return $this->cleanText($text);
     }
 
     /**
@@ -357,38 +436,37 @@ class DocumentExtractorService
             );
         }
 
+        $startTime = microtime(true);
         Log::info('Extracting text from image with OCR', ['path' => $path]);
 
         try {
-            $tesseract = $this->findTesseractExecutable();
-            $escapedPath = escapeshellarg($path);
-
-            // Exécuter tesseract directement via shell_exec
-            // -l fra+eng : français + anglais
-            // --psm 3 : segmentation automatique
-            // --oem 3 : LSTM + Legacy engine
-            // stdout : sortie vers stdout au lieu d'un fichier
-            $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
-
-            Log::info('Running OCR command', ['command' => $command]);
-
-            $text = shell_exec($command);
-
-            if ($text === null) {
-                throw new \RuntimeException("La commande tesseract a échoué");
-            }
-
-            // Vérifier si c'est un message d'erreur
-            if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
-                throw new \RuntimeException("Erreur Tesseract: " . trim($text));
-            }
+            $text = $this->extractFromImageWithOcr($path);
+            $processingTime = round(microtime(true) - $startTime, 2);
 
             Log::info('OCR extraction successful', [
                 'path' => $path,
                 'text_length' => strlen($text),
             ]);
 
-            return $this->cleanText($text);
+            // Stocker les métadonnées si document disponible
+            if ($document) {
+                $existingMetadata = $document->extraction_metadata ?? [];
+                $document->update([
+                    'extraction_metadata' => array_merge($existingMetadata, [
+                        'ocr_extraction' => [
+                            'method' => 'ocr',
+                            'ocr_engine' => 'Tesseract OCR',
+                            'ocr_languages' => 'fra+eng',
+                            'source_type' => 'image',
+                            'text_length' => strlen($text),
+                            'processing_time' => $processingTime,
+                            'extracted_at' => now()->toIso8601String(),
+                        ],
+                    ]),
+                ]);
+            }
+
+            return $text;
 
         } catch (\Exception $e) {
             Log::error('OCR extraction failed', [
