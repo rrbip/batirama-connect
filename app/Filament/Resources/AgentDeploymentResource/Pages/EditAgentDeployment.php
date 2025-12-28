@@ -160,8 +160,9 @@ class EditAgentDeployment extends EditRecord
     /**
      * Test an Ollama endpoint
      */
-    protected function testOllamaEndpoint(string $host, int $port, ?string $model = null): array
+    protected function testOllamaEndpoint(string $host, int|string $port, ?string $model = null): array
     {
+        $port = (int) $port;
         $url = "http://{$host}:{$port}";
 
         try {
