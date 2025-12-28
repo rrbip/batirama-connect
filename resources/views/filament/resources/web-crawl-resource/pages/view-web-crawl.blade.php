@@ -91,6 +91,44 @@
                     <option value="llm_assisted">LLM (découpage intelligent)</option>
                 </select>
             </div>
+
+            {{-- Langues à indexer --}}
+            <div x-data="{ expanded: false }">
+                <button type="button" @click="expanded = !expanded" class="flex items-center gap-2 w-full text-left">
+                    <span class="fi-fo-field-wrp-label inline-flex items-center gap-x-3">
+                        <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
+                            Langues à indexer
+                        </span>
+                    </span>
+                    <x-heroicon-m-chevron-down class="w-4 h-4 text-gray-500 transition-transform" x-bind:class="{ 'rotate-180': expanded }" />
+                </button>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Laissez vide pour indexer toutes les langues</p>
+
+                <div x-show="expanded" x-collapse class="mt-3 space-y-3">
+                    @php
+                        $continents = \App\Services\Marketplace\LanguageDetector::getLocalesByContinent();
+                    @endphp
+
+                    @foreach($continents as $continentKey => $continent)
+                        <div x-data="{ open: false }" class="border border-gray-200 dark:border-gray-700 rounded-lg">
+                            <button type="button" @click="open = !open" class="flex items-center justify-between w-full px-3 py-2 text-left bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ $continent['label'] }}</span>
+                                <x-heroicon-m-chevron-down class="w-4 h-4 text-gray-500 transition-transform" x-bind:class="{ 'rotate-180': open }" />
+                            </button>
+                            <div x-show="open" x-collapse class="px-3 py-2 grid grid-cols-3 gap-2">
+                                @foreach($continent['locales'] as $code => $name)
+                                    <label class="flex items-center gap-2">
+                                        <input type="checkbox" value="{{ $code }}"
+                                            wire:model="editFormData.allowed_locales"
+                                            class="fi-checkbox-input rounded border-gray-300 text-primary-600 shadow-sm focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700">
+                                        <span class="text-xs text-gray-700 dark:text-gray-300">{{ $name }} ({{ strtoupper($code) }})</span>
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endforeach
+                </div>
+            </div>
         </div>
 
         <x-slot name="footerActions">

@@ -362,6 +362,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'url_filter_mode' => $data['url_filter_mode'],
                         'url_patterns' => $patterns,
                         'content_types' => $data['content_types'],
+                        'allowed_locales' => $data['allowed_locales'] ?? [],
                         'chunk_strategy' => $data['chunk_strategy'] ?: null,
                         'index_status' => 'pending',
                     ]);
