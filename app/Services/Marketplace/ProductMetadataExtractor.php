@@ -764,9 +764,10 @@ PROMPT;
 
         $catalog->markAsExtracting();
 
-        $urls = $catalog->webCrawl->crawledUrls()
+        $urls = $catalog->webCrawl->urls()
             ->where('http_status', 200)
             ->where('content_type', 'LIKE', 'text/html%')
+            ->wherePivot('status', 'fetched')
             ->cursor();
 
         foreach ($urls as $crawlUrl) {
