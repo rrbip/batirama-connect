@@ -9,16 +9,23 @@ use App\Filament\Resources\DocumentResource;
 use App\Filament\Resources\WebCrawlResource;
 use App\Jobs\ProcessDocumentJob;
 use App\Jobs\RebuildAgentIndexJob;
+use App\Jobs\RunVisionCalibrationJob;
 use App\Models\Agent;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\LlmChunkingSetting;
+use App\Models\VisionSetting;
 use App\Models\WebCrawl;
 use App\Services\AI\OllamaService;
 use App\Services\LlmChunkingService;
+use App\Services\VisionExtractorService;
+use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\Grid;
 use Filament\Forms\Components\MarkdownEditor;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -42,15 +49,19 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
+use Livewire\WithFileUploads;
 
 class GestionRagPage extends Page implements HasForms, HasTable
 {
     use InteractsWithForms;
     use InteractsWithTable;
+    use WithFileUploads;
 
     protected static ?string $navigationIcon = 'heroicon-o-circle-stack';
 
@@ -71,9 +82,34 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     public array $queueStats = [];
 
+    // Vision settings properties
+    public ?array $visionData = [];
+
+    public array $visionDiagnostics = [];
+
+    // Calibration properties
+    public ?string $calibrationImageUrl = null;
+
+    public $calibrationImageUpload = null;
+
+    public string $calibrationJson = '';
+
+    public array $calibrationResults = [];
+
+    public bool $isCalibrating = false;
+
+    public string $calibrationReport = '';
+
+    public ?string $calibrationId = null;
+
+    public int $calibrationProgress = 0;
+
+    public int $calibrationTotal = 0;
+
     public function mount(): void
     {
         $this->loadLlmSettings();
+        $this->loadVisionSettings();
         $this->refreshQueueStats();
     }
 
@@ -92,6 +128,31 @@ class GestionRagPage extends Page implements HasForms, HasTable
             'timeout_seconds' => $settings->timeout_seconds,
             'system_prompt' => $settings->system_prompt,
         ]);
+    }
+
+    protected function loadVisionSettings(): void
+    {
+        $settings = VisionSetting::getInstance();
+
+        $this->visionForm->fill([
+            'model' => $settings->model,
+            'ollama_host' => $settings->ollama_host,
+            'ollama_port' => $settings->ollama_port,
+            'image_dpi' => $settings->image_dpi,
+            'output_format' => $settings->output_format,
+            'max_pages' => $settings->max_pages,
+            'timeout_seconds' => $settings->timeout_seconds,
+            'system_prompt' => $settings->system_prompt,
+            'store_images' => $settings->store_images,
+            'store_markdown' => $settings->store_markdown,
+            'storage_disk' => $settings->storage_disk,
+            'storage_path' => $settings->storage_path,
+        ]);
+
+        $this->refreshVisionDiagnostics();
+
+        // Initialiser le JSON de calibration avec les tests par défaut
+        $this->calibrationJson = json_encode($this->getDefaultCalibrationTests(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     }
 
     public function refreshQueueStats(): void
@@ -433,7 +494,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
     }
 
     /**
-     * LLM Chunking Settings Form
+     * LLM Chunking Settings Form + Vision Form
      */
     protected function getForms(): array
     {
@@ -515,6 +576,106 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ]),
                 ])
                 ->statePath('llmData'),
+
+            'visionForm' => $this->makeForm()
+                ->schema([
+                    Section::make('Modèle Vision')
+                        ->description('Sélectionnez le modèle de vision pour l\'extraction de texte')
+                        ->schema([
+                            Select::make('model')
+                                ->label('Modèle')
+                                ->options(VisionSetting::getModelOptions())
+                                ->required(),
+
+                            Grid::make(2)
+                                ->schema([
+                                    TextInput::make('ollama_host')
+                                        ->label('Host Ollama')
+                                        ->required()
+                                        ->default('ollama'),
+
+                                    TextInput::make('ollama_port')
+                                        ->label('Port')
+                                        ->numeric()
+                                        ->required()
+                                        ->default(11434),
+                                ]),
+                        ]),
+
+                    Section::make('Paramètres d\'extraction')
+                        ->schema([
+                            Grid::make(3)
+                                ->schema([
+                                    TextInput::make('image_dpi')
+                                        ->label('Résolution (DPI)')
+                                        ->numeric()
+                                        ->required()
+                                        ->default(300)
+                                        ->helperText('300 DPI recommandé.'),
+
+                                    TextInput::make('max_pages')
+                                        ->label('Max pages')
+                                        ->numeric()
+                                        ->required()
+                                        ->default(50),
+
+                                    TextInput::make('timeout_seconds')
+                                        ->label('Timeout (secondes)')
+                                        ->numeric()
+                                        ->required()
+                                        ->default(120)
+                                        ->suffix('s'),
+                                ]),
+
+                            Select::make('output_format')
+                                ->label('Format de sortie')
+                                ->options([
+                                    'markdown' => 'Markdown (recommandé)',
+                                    'text' => 'Texte brut',
+                                    'json' => 'JSON structuré',
+                                ])
+                                ->default('markdown'),
+                        ]),
+
+                    Section::make('Stockage des fichiers intermédiaires')
+                        ->schema([
+                            Grid::make(2)
+                                ->schema([
+                                    Checkbox::make('store_images')
+                                        ->label('Conserver les images des pages'),
+
+                                    Checkbox::make('store_markdown')
+                                        ->label('Conserver le markdown extrait'),
+                                ]),
+
+                            Grid::make(2)
+                                ->schema([
+                                    Select::make('storage_disk')
+                                        ->label('Disque de stockage')
+                                        ->options([
+                                            'public' => '✅ Public (accessible web) - Recommandé',
+                                            'local' => '⚠️ Local - Non accessible web',
+                                            's3' => 'S3 (cloud)',
+                                        ])
+                                        ->default('public')
+                                        ->helperText('Utilisez "Public" pour voir les images'),
+
+                                    TextInput::make('storage_path')
+                                        ->label('Chemin de stockage')
+                                        ->default('vision-extraction'),
+                                ]),
+                        ]),
+
+                    Section::make('Prompt d\'extraction')
+                        ->schema([
+                            Textarea::make('system_prompt')
+                                ->label('')
+                                ->required()
+                                ->rows(10)
+                                ->columnSpanFull(),
+                        ]),
+                ])
+                ->statePath('visionData'),
         ];
     }
 
@@ -612,5 +773,300 @@ class GestionRagPage extends Page implements HasForms, HasTable
     {
         $this->activeTab = $tab;
         $this->resetTable();
+    }
+
+    // ==========================================
+    // Vision Settings Methods
+    // ==========================================
+
+    public function refreshVisionDiagnostics(): void
+    {
+        try {
+            $service = app(VisionExtractorService::class);
+            $this->visionDiagnostics = $service->getDiagnostics();
+        } catch (\Exception $e) {
+            $this->visionDiagnostics = [
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    public function saveVisionSettings(): void
+    {
+        $data = $this->visionForm->getState();
+
+        $settings = VisionSetting::getInstance();
+        $settings->update($data);
+
+        Notification::make()
+            ->title('Configuration Vision sauvegardée')
+            ->success()
+            ->send();
+    }
+
+    public function resetVisionPrompt(): void
+    {
+        $defaultPrompt = VisionSetting::getDefaultPrompt();
+
+        $this->visionForm->fill([
+            ...$this->visionForm->getState(),
+            'system_prompt' => $defaultPrompt,
+        ]);
+
+        Notification::make()
+            ->title('Prompt réinitialisé')
+            ->info()
+            ->send();
+    }
+
+    public function testVisionConnection(): void
+    {
+        try {
+            $service = app(VisionExtractorService::class);
+            $diagnostics = $service->getDiagnostics();
+
+            if ($diagnostics['ollama']['connected']) {
+                if ($diagnostics['ollama']['configured_model_installed'] ?? false) {
+                    Notification::make()
+                        ->title('Connexion réussie')
+                        ->body("Ollama accessible et modèle installé.")
+                        ->success()
+                        ->send();
+                } else {
+                    $models = implode(', ', $diagnostics['ollama']['models_available'] ?? []);
+                    Notification::make()
+                        ->title('Modèle non installé')
+                        ->body("Modèles disponibles: {$models}")
+                        ->warning()
+                        ->send();
+                }
+            } else {
+                Notification::make()
+                    ->title('Connexion échouée')
+                    ->body($diagnostics['ollama']['error'] ?? 'Impossible de contacter Ollama')
+                    ->danger()
+                    ->send();
+            }
+
+            $this->refreshVisionDiagnostics();
+
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    // ==========================================
+    // Calibration Methods
+    // ==========================================
+
+    private function getDefaultCalibrationTests(): array
+    {
+        return [
+            [
+                'id' => 'basic_transcription_headers',
+                'category' => 'OCR & Structure Simple',
+                'description' => 'Teste la capacité à identifier des titres et des paragraphes simples.',
+                'prompt' => 'Convertis le contenu textuel de cette image en format Markdown. Utilise des dièses (#, ##) pour les titres visiblement plus grands et du texte normal pour les paragraphes. Ne rajoute aucun commentaire.',
+            ],
+            [
+                'id' => 'unordered_lists',
+                'category' => 'Listes',
+                'description' => 'Teste la détection et la conversion de listes à puces.',
+                'prompt' => 'Identifie la liste à puces présente dans l\'image et transcris-la en utilisant la syntaxe de liste Markdown (- pour chaque élément).',
+            ],
+            [
+                'id' => 'simple_table_structure',
+                'category' => 'Tableaux',
+                'description' => 'Teste la génération de la syntaxe de tableau Markdown.',
+                'prompt' => 'Analyse l\'image pour y trouver un tableau. Représente les données en utilisant la syntaxe de tableau Markdown (avec |).',
+            ],
+            [
+                'id' => 'key_value_extraction',
+                'category' => 'Extraction Structurée',
+                'description' => 'Teste l\'extraction de champs de type formulaire.',
+                'prompt' => 'L\'image contient des paires clé-valeur. Extrais-les dans une liste Markdown où la clé est en gras. Exemple: \'- **Nom:** Jean Dupont\'.',
+            ],
+            [
+                'id' => 'raw_text_fallback',
+                'category' => 'Failsafe',
+                'description' => 'Test de récupération maximale du texte.',
+                'prompt' => 'Extrais tout le texte lisible de cette image et présente-le sous forme de paragraphes Markdown simples.',
+            ],
+        ];
+    }
+
+    public function resetCalibrationJson(): void
+    {
+        $this->calibrationJson = json_encode($this->getDefaultCalibrationTests(), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        $this->calibrationResults = [];
+        $this->calibrationReport = '';
+
+        Notification::make()
+            ->title('JSON réinitialisé')
+            ->info()
+            ->send();
+    }
+
+    public function runCalibration(): void
+    {
+        $tests = json_decode($this->calibrationJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Notification::make()
+                ->title('Erreur JSON')
+                ->body('Le JSON de calibration est invalide : ' . json_last_error_msg())
+                ->danger()
+                ->send();
+            return;
+        }
+
+        if (empty($tests)) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Aucun test défini dans le JSON')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $imageContent = $this->getCalibrationImageContent();
+
+        if (!$imageContent) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Veuillez fournir une image (upload ou URL)')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $this->calibrationId = Str::uuid()->toString();
+        $this->isCalibrating = true;
+        $this->calibrationResults = [];
+        $this->calibrationReport = '';
+        $this->calibrationProgress = 0;
+        $this->calibrationTotal = count($tests);
+
+        RunVisionCalibrationJob::dispatch(
+            $this->calibrationId,
+            $tests,
+            base64_encode($imageContent),
+            $this->calibrationImageUrl
+        );
+
+        Notification::make()
+            ->title('Calibration lancée')
+            ->body("Traitement de {$this->calibrationTotal} tests en arrière-plan...")
+            ->info()
+            ->send();
+    }
+
+    public function checkCalibrationStatus(): void
+    {
+        if (!$this->calibrationId || !$this->isCalibrating) {
+            return;
+        }
+
+        $status = Cache::get("calibration:{$this->calibrationId}");
+
+        if (!$status) {
+            return;
+        }
+
+        $this->calibrationProgress = $status['progress'] ?? 0;
+        $this->calibrationTotal = $status['total'] ?? 0;
+        $this->calibrationResults = $status['results'] ?? [];
+
+        if ($status['status'] === 'completed') {
+            $this->isCalibrating = false;
+            $this->calibrationReport = $status['report'] ?? '';
+
+            Notification::make()
+                ->title('Calibration terminée')
+                ->body(count($this->calibrationResults) . ' test(s) exécutés.')
+                ->success()
+                ->send();
+
+            Cache::forget("calibration:{$this->calibrationId}");
+        } elseif ($status['status'] === 'failed') {
+            $this->isCalibrating = false;
+
+            Notification::make()
+                ->title('Erreur de calibration')
+                ->body($status['error'] ?? 'Erreur inconnue')
+                ->danger()
+                ->send();
+
+            Cache::forget("calibration:{$this->calibrationId}");
+        }
+    }
+
+    public function cancelCalibration(): void
+    {
+        if ($this->calibrationId) {
+            Cache::forget("calibration:{$this->calibrationId}");
+        }
+        $this->isCalibrating = false;
+        $this->calibrationId = null;
+        $this->calibrationProgress = 0;
+        $this->calibrationTotal = 0;
+
+        Notification::make()
+            ->title('Calibration annulée')
+            ->warning()
+            ->send();
+    }
+
+    private function getCalibrationImageContent(): ?string
+    {
+        if (!empty($this->calibrationImageUpload)) {
+            $file = $this->calibrationImageUpload;
+
+            if ($file instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
+                return file_get_contents($file->getRealPath());
+            }
+
+            if (is_string($file) && Storage::disk('public')->exists($file)) {
+                return Storage::disk('public')->get($file);
+            }
+        }
+
+        if (!empty($this->calibrationImageUrl)) {
+            try {
+                $response = Http::timeout(30)->get($this->calibrationImageUrl);
+                if ($response->successful()) {
+                    return $response->body();
+                }
+            } catch (\Exception $e) {
+                // Log error but don't throw
+            }
+        }
+
+        return null;
+    }
+
+    public function usePromptAsDefault(string $testId): void
+    {
+        foreach ($this->calibrationResults as $result) {
+            if (($result['id'] ?? '') === $testId) {
+                $prompt = $result['prompt'] ?? '';
+                if (!empty($prompt)) {
+                    $this->visionForm->fill([
+                        ...$this->visionForm->getState(),
+                        'system_prompt' => $prompt,
+                    ]);
+
+                    Notification::make()
+                        ->title('Prompt appliqué')
+                        ->body("N'oubliez pas de sauvegarder.")
+                        ->success()
+                        ->send();
+                }
+                return;
+            }
+        }
     }
 }

@@ -46,6 +46,9 @@ class VisionSettingsPage extends Page implements HasForms
 
     protected static ?int $navigationSort = 6;
 
+    // Navigation disabled - moved to GestionRagPage as a tab
+    protected static bool $shouldRegisterNavigation = false;
+
     public ?array $data = [];
 
     public array $diagnostics = [];
