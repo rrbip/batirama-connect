@@ -209,20 +209,27 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             return;
         }
 
+        // Compter d'abord pour afficher l'estimation
+        $estimatedCount = $this->countUrlsToIndex($config);
+
+        if ($estimatedCount === 0) {
+            Notification::make()
+                ->title('Aucune URL à indexer')
+                ->body('Aucune URL ne correspond aux filtres configurés (patterns, types, langues).')
+                ->warning()
+                ->send();
+
+            return;
+        }
+
         $config->update(['index_status' => 'indexing']);
 
-        // Pour chaque URL du cache, dispatcher le job d'indexation
-        $count = 0;
-        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
-            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
-                IndexAgentUrlJob::dispatch($config, $entry->url);
-                $count++;
-            }
-        }
+        // Dispatcher les jobs (utilise la même logique de filtrage)
+        $this->dispatchAgentIndexation($config);
 
         Notification::make()
             ->title('Indexation lancée')
-            ->body("{$count} URL(s) vont être indexées pour l'agent {$config->agent->name}.")
+            ->body("{$estimatedCount} URL(s) vont être indexées pour l'agent {$config->agent->name}.")
             ->success()
             ->send();
     }
@@ -356,15 +363,18 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'index_status' => 'pending',
                     ]);
 
-                    // Lancer l'indexation sur les URLs déjà crawlées
-                    $fetchedCount = $this->record->urlEntries()->where('status', 'fetched')->count();
-                    if ($fetchedCount > 0) {
+                    // Compter les URLs qui correspondent aux filtres
+                    $matchingCount = $this->countUrlsToIndex($agentConfig);
+
+                    // Lancer l'indexation si des URLs correspondent
+                    if ($matchingCount > 0) {
+                        $agentConfig->update(['index_status' => 'indexing']);
                         $this->dispatchAgentIndexation($agentConfig);
                     }
 
-                    $message = $fetchedCount > 0
-                        ? "L'indexation démarre sur {$fetchedCount} URL(s) déjà crawlées."
-                        : 'L\'indexation démarrera dès que des URLs seront crawlées.';
+                    $message = $matchingCount > 0
+                        ? "L'indexation démarre sur {$matchingCount} URL(s) correspondant aux filtres."
+                        : 'Aucune URL ne correspond aux filtres actuels. Modifiez les filtres ou attendez plus de données.';
 
                     Notification::make()
                         ->title('Agent ajouté')
@@ -1034,14 +1044,58 @@ class ViewWebCrawl extends ViewRecord implements HasTable
      */
     protected function dispatchAgentIndexation(AgentWebCrawl $agentConfig): void
     {
-        $agentConfig->update(['index_status' => 'indexing']);
-
         // Pour chaque URL du cache, créer une entrée et dispatcher le job
+        // UNIQUEMENT si l'URL passe les filtres de l'agent
         foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
             if ($entry->status === 'fetched' && $entry->url?->storage_path) {
-                IndexAgentUrlJob::dispatch($agentConfig, $entry->url);
+                $url = $entry->url;
+
+                // Vérifier les filtres de l'agent AVANT de dispatcher le job
+                if (!$agentConfig->shouldIndexUrl($url->url)) {
+                    continue;
+                }
+
+                if ($url->content_type && !$agentConfig->shouldIndexContentType($url->content_type)) {
+                    continue;
+                }
+
+                if (!$agentConfig->shouldIndexLocale($url->locale)) {
+                    continue;
+                }
+
+                IndexAgentUrlJob::dispatch($agentConfig, $url);
             }
         }
+    }
+
+    /**
+     * Compte le nombre d'URLs qui seront indexées après application des filtres.
+     */
+    protected function countUrlsToIndex(AgentWebCrawl $agentConfig): int
+    {
+        $count = 0;
+
+        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
+            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
+                $url = $entry->url;
+
+                if (!$agentConfig->shouldIndexUrl($url->url)) {
+                    continue;
+                }
+
+                if ($url->content_type && !$agentConfig->shouldIndexContentType($url->content_type)) {
+                    continue;
+                }
+
+                if (!$agentConfig->shouldIndexLocale($url->locale)) {
+                    continue;
+                }
+
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     /**
