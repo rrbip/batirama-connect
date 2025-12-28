@@ -665,21 +665,48 @@ class FabricantCatalogResource extends Resource
 
             $components[] = Forms\Components\Section::make($continent['label'])
                 ->schema([
+                    Forms\Components\Toggle::make("select_all_{$continentKey}")
+                        ->label('Tout sélectionner / désélectionner')
+                        ->default(true)
+                        ->live()
+                        ->afterStateHydrated(function ($state, $set, $get) use ($continentLocaleCodes, $continentKey) {
+                            // Check if all locales of this continent are selected
+                            $selected = $get("extraction_config.locale_detection.allowed_locales_{$continentKey}") ?? [];
+                            $allSelected = count(array_intersect($selected, $continentLocaleCodes)) === count($continentLocaleCodes);
+                            $set("select_all_{$continentKey}", $allSelected);
+                        })
+                        ->afterStateUpdated(function ($state, $set) use ($continentLocaleCodes, $continentKey) {
+                            if ($state) {
+                                // Select all
+                                $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", $continentLocaleCodes);
+                            } else {
+                                // Deselect all
+                                $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", []);
+                            }
+                        })
+                        ->dehydrated(false),
+
                     Forms\Components\CheckboxList::make("extraction_config.locale_detection.allowed_locales_{$continentKey}")
                         ->label('')
                         ->options($continent['locales'])
-                        ->default(fn () => $continentLocaleCodes)
+                        ->default($continentLocaleCodes)
                         ->afterStateHydrated(function ($state, $set, $get) use ($continentLocaleCodes, $continentKey) {
                             // Check main state for allowed_locales
                             $mainState = $get('extraction_config.locale_detection.allowed_locales');
-                            if (empty($mainState)) {
-                                // All selected by default
+                            if ($mainState === null || (is_array($mainState) && empty($mainState))) {
+                                // All selected by default for new records
                                 $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", $continentLocaleCodes);
-                            } else {
+                            } elseif (is_array($mainState)) {
                                 // Filter to only this continent's locales
                                 $filtered = array_intersect($mainState, $continentLocaleCodes);
                                 $set("extraction_config.locale_detection.allowed_locales_{$continentKey}", array_values($filtered));
                             }
+                        })
+                        ->live()
+                        ->afterStateUpdated(function ($state, $set, $get) use ($continentLocaleCodes, $continentKey) {
+                            // Update the select all toggle based on selection
+                            $allSelected = count(array_intersect($state ?? [], $continentLocaleCodes)) === count($continentLocaleCodes);
+                            $set("select_all_{$continentKey}", $allSelected);
                         })
                         ->columns(4),
                 ])
@@ -690,7 +717,7 @@ class FabricantCatalogResource extends Resource
         // Add a hidden field to aggregate all selected locales
         $components[] = Forms\Components\Hidden::make('extraction_config.locale_detection.allowed_locales')
             ->afterStateHydrated(function ($state, $set) use ($allLocaleKeys) {
-                if (empty($state)) {
+                if ($state === null || (is_array($state) && empty($state))) {
                     $set('extraction_config.locale_detection.allowed_locales', $allLocaleKeys);
                 }
             })
@@ -700,6 +727,11 @@ class FabricantCatalogResource extends Resource
                 foreach ($continents as $continentKey => $continent) {
                     $continentSelection = $get("extraction_config.locale_detection.allowed_locales_{$continentKey}") ?? [];
                     $allSelected = array_merge($allSelected, $continentSelection);
+                }
+                // Return empty array if all are selected (means all available)
+                $allLocaleKeys = array_keys(FabricantCatalog::getSupportedLocales());
+                if (count($allSelected) === count($allLocaleKeys)) {
+                    return []; // Empty = all locales (dynamic)
                 }
                 return array_values(array_unique($allSelected));
             });
