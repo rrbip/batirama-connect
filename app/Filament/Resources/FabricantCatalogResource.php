@@ -570,8 +570,8 @@ class FabricantCatalogResource extends Resource
                     ->form([
                         Forms\Components\Toggle::make('run_sync')
                             ->label('Exécuter maintenant (synchrone)')
-                            ->helperText('Cochez pour exécuter immédiatement sans utiliser la queue. Peut prendre du temps si beaucoup de produits.')
-                            ->default(false),
+                            ->helperText('Décochez pour utiliser la queue en arrière-plan (nécessite un worker actif).')
+                            ->default(true),
                     ])
                     ->modalHeading('Détecter les langues')
                     ->modalDescription('Lancer la détection automatique de langue pour tous les produits sans langue détectée ?')
@@ -587,18 +587,33 @@ class FabricantCatalogResource extends Resource
                             return;
                         }
 
-                        $runSync = $data['run_sync'] ?? false;
+                        $runSync = $data['run_sync'] ?? true;
 
                         if ($runSync) {
                             // Run synchronously
-                            \App\Jobs\DetectProductLocalesJob::dispatchSync($record);
+                            try {
+                                \App\Jobs\DetectProductLocalesJob::dispatchSync($record);
 
-                            $detected = $record->products()->whereNotNull('locale')->count();
-                            Notification::make()
-                                ->title('Détection terminée')
-                                ->body("Langue détectée pour {$detected} produits.")
-                                ->success()
-                                ->send();
+                                $detected = $record->products()->whereNotNull('locale')->count();
+                                $remaining = $record->products()->whereNull('locale')->count();
+
+                                $message = "Langue détectée pour {$detected} produits.";
+                                if ($remaining > 0) {
+                                    $message .= " {$remaining} produits n'ont pas pu être détectés (pas de contenu HTML ou langue inconnue).";
+                                }
+
+                                Notification::make()
+                                    ->title('Détection terminée')
+                                    ->body($message)
+                                    ->success()
+                                    ->send();
+                            } catch (\Throwable $e) {
+                                Notification::make()
+                                    ->title('Erreur lors de la détection')
+                                    ->body($e->getMessage())
+                                    ->danger()
+                                    ->send();
+                            }
                         } else {
                             // Dispatch to queue
                             \App\Jobs\DetectProductLocalesJob::dispatch($record);
