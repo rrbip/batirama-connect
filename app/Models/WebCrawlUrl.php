@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Services\DocumentExtractorService;
 use App\Services\Marketplace\LanguageDetector;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class WebCrawlUrl extends Model
@@ -226,22 +228,9 @@ class WebCrawlUrl extends Model
             return null;
         }
 
-        // For HTML, use the simple strip_tags approach
+        // For HTML, convert to Markdown to preserve semantic structure
         if ($this->isHtml()) {
-            // Remove script and style tags
-            $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $content);
-            $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
-
-            // Remove HTML tags
-            $text = strip_tags($html);
-
-            // Decode HTML entities
-            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-
-            // Normalize whitespace
-            $text = preg_replace('/\s+/', ' ', $text);
-
-            return trim($text);
+            return $this->convertHtmlToMarkdown($content);
         }
 
         // For PDF, use proper text extraction
@@ -509,5 +498,48 @@ class WebCrawlUrl extends Model
 
         $detector = app(LanguageDetector::class);
         return $detector->getLocaleName($this->locale);
+    }
+
+    /**
+     * Convert HTML content to Markdown for better RAG indexing.
+     * Uses DocumentExtractorService for consistent conversion across the app.
+     * Original HTML is preserved on disk for product extraction.
+     *
+     * @param string $html Raw HTML content
+     * @return string Converted Markdown
+     */
+    private function convertHtmlToMarkdown(string $html): string
+    {
+        try {
+            $extractorService = app(DocumentExtractorService::class);
+            $result = $extractorService->convertHtmlToMarkdown($html);
+
+            Log::info('WebCrawlUrl: HTML to Markdown conversion', [
+                'url_id' => $this->id,
+                'url' => $this->url,
+                'html_size' => $result['metadata']['html_size'],
+                'markdown_size' => $result['metadata']['markdown_size'],
+                'compression_ratio' => $result['metadata']['compression_ratio'],
+                'elements' => $result['metadata']['elements_detected'],
+            ]);
+
+            return $result['markdown'];
+
+        } catch (\Exception $e) {
+            // Fallback to basic strip_tags if converter fails
+            Log::warning('WebCrawlUrl: HTML to Markdown failed, using fallback', [
+                'url_id' => $this->id,
+                'url' => $this->url,
+                'error' => $e->getMessage(),
+            ]);
+
+            $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
+            $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
+            $text = strip_tags($html);
+            $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = preg_replace('/\s+/', ' ', $text);
+
+            return trim($text);
+        }
     }
 }

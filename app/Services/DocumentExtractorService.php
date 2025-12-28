@@ -8,6 +8,7 @@ use App\Models\Document;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use League\HTMLToMarkdown\HtmlConverter;
 use Smalot\PdfParser\Parser as PdfParser;
 use thiagoalessio\TesseractOCR\TesseractOCR;
 
@@ -66,7 +67,7 @@ class DocumentExtractorService
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
             'doc' => $this->extractFromDoc($fullPath),
-            'html', 'htm' => $this->extractFromHtml($fullPath),
+            'html', 'htm' => $this->extractFromHtml($fullPath, $document),
             'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath, $extractionMethod, $document),
             default => throw new \RuntimeException("Type de document non supporté: {$extension}"),
         };
@@ -781,9 +782,13 @@ class DocumentExtractorService
     }
 
     /**
-     * Extrait le texte d'un fichier HTML
+     * Extrait le texte d'un fichier HTML en le convertissant en Markdown
+     * Conserve la structure sémantique (titres, listes, tableaux, liens)
+     *
+     * @param string $path Chemin vers le fichier HTML
+     * @param Document|null $document Document pour stocker les métadonnées
      */
-    private function extractFromHtml(string $path): string
+    private function extractFromHtml(string $path, ?Document $document = null): string
     {
         $content = file_get_contents($path);
 
@@ -791,20 +796,115 @@ class DocumentExtractorService
             throw new \RuntimeException("Impossible de lire le fichier HTML");
         }
 
-        // Supprimer les balises script et style
-        $content = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $content);
-        $content = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $content);
+        $result = $this->convertHtmlToMarkdown($content);
 
-        // Convertir les balises de bloc en sauts de ligne
-        $content = preg_replace('/<(br|p|div|h[1-6]|li)[^>]*>/i', "\n", $content);
+        // Stocker les métadonnées d'extraction si document disponible
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'html_extraction' => $result['metadata'],
+                ]),
+            ]);
+        }
 
-        // Supprimer toutes les balises HTML restantes
-        $text = strip_tags($content);
+        Log::info('HTML to Markdown extraction completed', [
+            'path' => $path,
+            'html_size' => $result['metadata']['html_size'],
+            'markdown_size' => $result['metadata']['markdown_size'],
+            'compression_ratio' => $result['metadata']['compression_ratio'],
+        ]);
 
-        // Décoder les entités HTML
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return $result['markdown'];
+    }
 
-        return $this->cleanText($text);
+    /**
+     * Convertit du HTML en Markdown avec métadonnées de traçage
+     *
+     * @param string $html Contenu HTML brut
+     * @return array{markdown: string, metadata: array}
+     */
+    public function convertHtmlToMarkdown(string $html): array
+    {
+        $startTime = microtime(true);
+        $originalSize = strlen($html);
+
+        // Supprimer les balises script et style avant conversion
+        $cleanedHtml = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
+        $cleanedHtml = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $cleanedHtml);
+        $cleanedHtml = preg_replace('/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $cleanedHtml);
+
+        // Supprimer les commentaires HTML
+        $cleanedHtml = preg_replace('/<!--.*?-->/s', '', $cleanedHtml);
+
+        // Compter les éléments structurels avant conversion
+        $elementCounts = [
+            'headings' => preg_match_all('/<h[1-6]\b/i', $cleanedHtml),
+            'lists' => preg_match_all('/<[uo]l\b/i', $cleanedHtml),
+            'tables' => preg_match_all('/<table\b/i', $cleanedHtml),
+            'links' => preg_match_all('/<a\b/i', $cleanedHtml),
+            'images' => preg_match_all('/<img\b/i', $cleanedHtml),
+            'paragraphs' => preg_match_all('/<p\b/i', $cleanedHtml),
+        ];
+
+        // Configurer le convertisseur HTML → Markdown
+        $converter = new HtmlConverter([
+            'strip_tags' => true,
+            'remove_nodes' => 'head meta nav footer aside iframe script style noscript',
+            'hard_break' => true,
+            'header_style' => 'atx', // # Style headers
+            'bold_style' => '**',
+            'italic_style' => '_',
+            'list_item_style' => '-',
+        ]);
+
+        // Convertir en Markdown
+        $markdown = $converter->convert($cleanedHtml);
+
+        // Nettoyer le Markdown résultant
+        $markdown = $this->cleanMarkdown($markdown);
+
+        $processingTime = round((microtime(true) - $startTime) * 1000, 2);
+        $markdownSize = strlen($markdown);
+
+        return [
+            'markdown' => $markdown,
+            'metadata' => [
+                'converter' => 'league/html-to-markdown',
+                'html_size' => $originalSize,
+                'cleaned_html_size' => strlen($cleanedHtml),
+                'markdown_size' => $markdownSize,
+                'compression_ratio' => $originalSize > 0
+                    ? round((1 - $markdownSize / $originalSize) * 100, 1)
+                    : 0,
+                'elements_detected' => $elementCounts,
+                'processing_time_ms' => $processingTime,
+                'extracted_at' => now()->toIso8601String(),
+            ],
+        ];
+    }
+
+    /**
+     * Nettoie le Markdown généré
+     */
+    private function cleanMarkdown(string $markdown): string
+    {
+        // Normaliser les retours à la ligne
+        $markdown = str_replace(["\r\n", "\r"], "\n", $markdown);
+
+        // Supprimer les lignes vides multiples (max 2 newlines)
+        $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
+
+        // Supprimer les espaces en fin de ligne
+        $markdown = preg_replace('/[ \t]+$/m', '', $markdown);
+
+        // Supprimer les espaces multiples (mais pas les newlines)
+        $markdown = preg_replace('/[^\S\n]+/', ' ', $markdown);
+
+        // Supprimer les lignes ne contenant que des espaces
+        $markdown = preg_replace('/^\s+$/m', '', $markdown);
+
+        return trim($markdown);
     }
 
     /**
