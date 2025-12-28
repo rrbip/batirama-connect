@@ -163,6 +163,34 @@ class FabricantCatalog extends Model
                 'image' => '.product-image img, .gallery img, [itemprop="image"]',
                 'specs' => '.specifications, .technical-specs, .caractéristiques',
             ],
+            // Locale detection configuration
+            'locale_detection' => [
+                'enabled' => true,
+                'methods' => [
+                    'url' => true,      // Detect from URL patterns (/fr/, /en/, etc.)
+                    'sku' => true,      // Detect from SKU patterns (-FR, -EN, etc.)
+                    'content' => true,  // Detect from content analysis (common words)
+                ],
+                'allowed_locales' => ['fr', 'en', 'de', 'es', 'it', 'nl', 'pt', 'pl'],
+                'default_locale' => null, // Force a specific locale for all products
+            ],
+        ];
+    }
+
+    /**
+     * Get supported locales for display.
+     */
+    public static function getSupportedLocales(): array
+    {
+        return [
+            'fr' => 'Français',
+            'en' => 'English',
+            'de' => 'Deutsch',
+            'es' => 'Español',
+            'it' => 'Italiano',
+            'nl' => 'Nederlands',
+            'pt' => 'Português',
+            'pl' => 'Polski',
         ];
     }
 

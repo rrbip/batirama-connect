@@ -90,7 +90,7 @@ class ProductMetadataExtractor
         }
 
         // Create or update product
-        return $this->createOrUpdateProduct($catalog, $crawlUrl, $productData);
+        return $this->createOrUpdateProduct($catalog, $crawlUrl, $productData, $config);
     }
 
     /**
@@ -655,7 +655,8 @@ PROMPT;
     private function createOrUpdateProduct(
         FabricantCatalog $catalog,
         WebCrawlUrl $crawlUrl,
-        array $data
+        array $data,
+        array $config = []
     ): FabricantProduct {
         // Generate source hash for change detection
         $sourceHash = hash('sha256', json_encode($data));
@@ -670,11 +671,13 @@ PROMPT;
             })
             ->first();
 
-        // Detect locale from URL, SKU, or content
+        // Detect locale from URL, SKU, or content using catalog config
+        $localeConfig = $config['locale_detection'] ?? [];
         $locale = $this->languageDetector->detect(
             $crawlUrl->url,
             $data['sku'] ?? null,
-            $data['description'] ?? $data['name'] ?? null
+            $data['description'] ?? $data['name'] ?? null,
+            $localeConfig
         );
 
         $productData = [

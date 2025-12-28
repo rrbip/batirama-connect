@@ -173,23 +173,67 @@ class LanguageDetector
     /**
      * Detect locale using all available sources.
      * Priority: URL > SKU > Content
+     *
+     * @param string|null $url Source URL
+     * @param string|null $sku Product SKU
+     * @param string|null $content Text content (description)
+     * @param array $config Detection configuration from catalog
      */
-    public function detect(?string $url = null, ?string $sku = null, ?string $content = null): ?string
-    {
+    public function detect(
+        ?string $url = null,
+        ?string $sku = null,
+        ?string $content = null,
+        array $config = []
+    ): ?string {
+        // Check if detection is enabled
+        if (isset($config['enabled']) && !$config['enabled']) {
+            return $config['default_locale'] ?? null;
+        }
+
+        // If default locale is forced, use it
+        if (!empty($config['default_locale'])) {
+            return $config['default_locale'];
+        }
+
+        $methods = $config['methods'] ?? ['url' => true, 'sku' => true, 'content' => true];
+        $allowedLocales = $config['allowed_locales'] ?? array_keys(self::LOCALES);
+
+        $locale = null;
+
         // Try URL first (most reliable)
-        $locale = $this->detectFromUrl($url);
-        if ($locale) {
-            return $locale;
+        if ($methods['url'] ?? true) {
+            $locale = $this->detectFromUrl($url);
+            if ($locale && in_array($locale, $allowedLocales)) {
+                return $locale;
+            }
         }
 
         // Try SKU
-        $locale = $this->detectFromSku($sku);
-        if ($locale) {
-            return $locale;
+        if ($methods['sku'] ?? true) {
+            $locale = $this->detectFromSku($sku);
+            if ($locale && in_array($locale, $allowedLocales)) {
+                return $locale;
+            }
         }
 
         // Fall back to content analysis
-        return $this->detectFromContent($content);
+        if ($methods['content'] ?? true) {
+            $locale = $this->detectFromContent($content);
+            if ($locale && in_array($locale, $allowedLocales)) {
+                return $locale;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Detect locale using simple method (no config).
+     * For use in model methods where catalog config is not available.
+     */
+    public function detectSimple(?string $url = null, ?string $sku = null, ?string $content = null): ?string
+    {
+        return $this->detect($url, $sku, $content, []);
     }
 
     /**

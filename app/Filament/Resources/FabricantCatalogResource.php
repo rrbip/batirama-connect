@@ -157,6 +157,51 @@ class FabricantCatalogResource extends Resource
                                     ])
                                     ->columns(2)
                                     ->collapsed(),
+
+                                Forms\Components\Section::make('Detection de la langue')
+                                    ->description('Configuration de la detection automatique de la langue des produits.')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('extraction_config.locale_detection.enabled')
+                                            ->label('Activer la detection de langue')
+                                            ->default(true)
+                                            ->live()
+                                            ->helperText('Detecte automatiquement la langue des produits pour distinguer les variantes linguistiques'),
+
+                                        Forms\Components\Grid::make(3)
+                                            ->schema([
+                                                Forms\Components\Toggle::make('extraction_config.locale_detection.methods.url')
+                                                    ->label('Detection par URL')
+                                                    ->default(true)
+                                                    ->helperText('/fr/, /en/, /de/...'),
+
+                                                Forms\Components\Toggle::make('extraction_config.locale_detection.methods.sku')
+                                                    ->label('Detection par SKU')
+                                                    ->default(true)
+                                                    ->helperText('-FR, -EN, _DE...'),
+
+                                                Forms\Components\Toggle::make('extraction_config.locale_detection.methods.content')
+                                                    ->label('Detection par contenu')
+                                                    ->default(true)
+                                                    ->helperText('Analyse des mots frequents'),
+                                            ])
+                                            ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled')),
+
+                                        Forms\Components\CheckboxList::make('extraction_config.locale_detection.allowed_locales')
+                                            ->label('Langues a detecter')
+                                            ->options(FabricantCatalog::getSupportedLocales())
+                                            ->default(['fr', 'en', 'de', 'es', 'it', 'nl', 'pt', 'pl'])
+                                            ->columns(4)
+                                            ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled'))
+                                            ->helperText('Seules ces langues seront detectees. Les autres seront ignorees.'),
+
+                                        Forms\Components\Select::make('extraction_config.locale_detection.default_locale')
+                                            ->label('Forcer une langue par defaut')
+                                            ->options(array_merge(['' => '-- Aucune (detection auto) --'], FabricantCatalog::getSupportedLocales()))
+                                            ->default(null)
+                                            ->visible(fn ($get) => $get('extraction_config.locale_detection.enabled'))
+                                            ->helperText('Si definie, tous les produits auront cette langue (ignore la detection)'),
+                                    ])
+                                    ->collapsible(),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Web Crawl')
