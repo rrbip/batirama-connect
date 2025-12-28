@@ -841,7 +841,15 @@ class LanguageDetector
             return null;
         }
 
-        // First, try script-based detection for non-Latin scripts
+        // First, try to detect from HTML lang attribute if this looks like HTML
+        if (str_contains($text, '<html') || str_contains($text, '<!DOCTYPE')) {
+            $htmlLang = $this->detectFromHtmlLangAttribute($text);
+            if ($htmlLang) {
+                return $htmlLang;
+            }
+        }
+
+        // Then, try script-based detection for non-Latin scripts
         $scriptLocale = $this->detectFromScript($text);
         if ($scriptLocale) {
             return $scriptLocale;
@@ -875,6 +883,56 @@ class LanguageDetector
         // Lower threshold for detection (at least some matches)
         if ($bestScore >= 0.2) {
             return $bestLocale;
+        }
+
+        return null;
+    }
+
+    /**
+     * Detect language from HTML lang attribute.
+     * Looks for <html lang="xx"> or <html lang="xx-YY">
+     */
+    public function detectFromHtmlLangAttribute(?string $html): ?string
+    {
+        if (empty($html)) {
+            return null;
+        }
+
+        // Match lang attribute on html tag: <html lang="fr"> or <html dir="ltr" lang="hr-BA">
+        if (preg_match('/<html[^>]*\slang=["\']([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?)["\'][^>]*>/i', $html, $matches)) {
+            $langCode = strtolower($matches[1]);
+
+            // Normalize: hr-BA -> hr, en-US -> en-us, etc.
+            // First check if the full code exists (like zh-tw, pt-br)
+            if (isset(self::getAllLocales()[$langCode])) {
+                return $langCode;
+            }
+
+            // Then try the base language code (hr-BA -> hr)
+            $baseLang = explode('-', $langCode)[0];
+            if (isset(self::getAllLocales()[$baseLang])) {
+                return $baseLang;
+            }
+
+            // Check for regional variants we support (en-us, pt-br, etc.)
+            $regionalVariants = ['en-us', 'en-gb', 'en-au', 'en-nz', 'en-ca', 'pt-br', 'es-mx', 'es-ar', 'es-co', 'fr-ca', 'zh-tw'];
+            if (in_array($langCode, $regionalVariants)) {
+                return $langCode;
+            }
+
+            // Return base language if it's a valid locale
+            if (isset(self::getAllLocales()[$baseLang])) {
+                return $baseLang;
+            }
+        }
+
+        // Also check meta http-equiv Content-Language
+        if (preg_match('/<meta[^>]*http-equiv=["\']Content-Language["\'][^>]*content=["\']([a-zA-Z]{2,3}(?:-[a-zA-Z]{2,4})?)["\'][^>]*>/i', $html, $matches)) {
+            $langCode = strtolower($matches[1]);
+            $baseLang = explode('-', $langCode)[0];
+            if (isset(self::getAllLocales()[$baseLang])) {
+                return $baseLang;
+            }
         }
 
         return null;

@@ -148,6 +148,27 @@ class DetectProductLocalesJob implements ShouldQueue
      */
     private function buildContentForDetection(FabricantProduct $product): string
     {
+        // PRIORITY 1: Try to get raw HTML content to detect lang attribute
+        // This is the most reliable method
+        if ($product->crawl_url_id) {
+            try {
+                $crawlUrl = $product->crawlUrl;
+                if ($crawlUrl) {
+                    $rawHtml = $crawlUrl->getContent();
+                    if ($rawHtml) {
+                        // Return first 1000 chars of raw HTML (enough to capture <html lang="...">)
+                        return mb_substr($rawHtml, 0, 1000);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::debug('DetectProductLocalesJob: Could not read raw HTML content', [
+                    'product_id' => $product->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // PRIORITY 2: Fall back to product text content
         $parts = [];
 
         // 1. Product name (always available)
@@ -181,28 +202,6 @@ class DetectProductLocalesJob implements ShouldQueue
             }
         }
 
-        $content = implode(' ', $parts);
-
-        // If content is still too short (< 100 chars), try to get HTML content from crawled page
-        if (strlen($content) < 100 && $product->crawl_url_id) {
-            try {
-                $crawlUrl = $product->crawlUrl;
-                if ($crawlUrl) {
-                    $htmlText = $crawlUrl->getTextContent();
-                    if ($htmlText && strlen($htmlText) > strlen($content)) {
-                        // Use first 2000 chars of HTML text (enough for detection, not too slow)
-                        $content = mb_substr($htmlText, 0, 2000);
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Ignore errors reading HTML content
-                Log::debug('DetectProductLocalesJob: Could not read HTML content', [
-                    'product_id' => $product->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        return $content;
+        return implode(' ', $parts);
     }
 }
