@@ -784,9 +784,53 @@ class LanguageDetector
             return null;
         }
 
+        $originalUrl = $url;
         $url = strtolower($url);
+        $parsedUrl = parse_url($url);
 
-        // Check path patterns first (most reliable)
+        // Check query parameters first (most reliable for API URLs)
+        // Supports: locale=fr-FR, lang=fr, language=french, country=fr
+        if (!empty($parsedUrl['query'])) {
+            parse_str($parsedUrl['query'], $queryParams);
+
+            // Check locale parameter (e.g., locale=fr-FR, locale=fr)
+            if (!empty($queryParams['locale'])) {
+                $localeParam = strtolower($queryParams['locale']);
+                $detected = $this->normalizeLocaleCode($localeParam);
+                if ($detected) {
+                    return $detected;
+                }
+            }
+
+            // Check lang parameter (e.g., lang=fr, lang=en)
+            if (!empty($queryParams['lang'])) {
+                $langParam = strtolower($queryParams['lang']);
+                $detected = $this->normalizeLocaleCode($langParam);
+                if ($detected) {
+                    return $detected;
+                }
+            }
+
+            // Check language parameter (e.g., language=french)
+            if (!empty($queryParams['language'])) {
+                $languageParam = strtolower($queryParams['language']);
+                $detected = $this->normalizeLocaleCode($languageParam);
+                if ($detected) {
+                    return $detected;
+                }
+            }
+
+            // Check country parameter as fallback (e.g., country=fr)
+            if (!empty($queryParams['country'])) {
+                $countryParam = strtolower($queryParams['country']);
+                // Country codes often match locale codes for major languages
+                if (isset(self::getAllLocales()[$countryParam])) {
+                    return $countryParam;
+                }
+            }
+        }
+
+        // Check path patterns (most reliable for regular URLs)
         foreach (self::getAllLocales() as $locale => $patterns) {
             foreach ($patterns['path_patterns'] as $pattern) {
                 if (str_contains($url, $pattern)) {
@@ -796,7 +840,6 @@ class LanguageDetector
         }
 
         // Check TLD (less reliable, some sites use .com for all languages)
-        $parsedUrl = parse_url($url);
         $host = $parsedUrl['host'] ?? '';
 
         foreach (self::getAllLocales() as $locale => $patterns) {
@@ -807,6 +850,45 @@ class LanguageDetector
                         return $locale;
                     }
                 }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalize a locale code to our supported format.
+     * Handles formats like: fr-FR, fr_FR, fr, french, français
+     */
+    private function normalizeLocaleCode(string $code): ?string
+    {
+        $code = strtolower(trim($code));
+
+        // Direct match (fr, en, de, bg, etc.)
+        if (isset(self::getAllLocales()[$code])) {
+            return $code;
+        }
+
+        // Handle hyphenated codes (fr-FR -> fr, en-US -> en-us or en)
+        if (str_contains($code, '-')) {
+            // First check if full code exists (zh-tw, pt-br, en-us, etc.)
+            $normalizedCode = str_replace('_', '-', $code);
+            if (isset(self::getAllLocales()[$normalizedCode])) {
+                return $normalizedCode;
+            }
+
+            // Try base language code
+            $baseLang = explode('-', $code)[0];
+            if (isset(self::getAllLocales()[$baseLang])) {
+                return $baseLang;
+            }
+        }
+
+        // Handle underscored codes (fr_FR -> fr)
+        if (str_contains($code, '_')) {
+            $baseLang = explode('_', $code)[0];
+            if (isset(self::getAllLocales()[$baseLang])) {
+                return $baseLang;
             }
         }
 
