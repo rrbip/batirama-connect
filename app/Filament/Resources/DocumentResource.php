@@ -117,9 +117,10 @@ class DocumentResource extends Resource
                                                 'auto' => 'Automatique (recommandé)',
                                                 'text' => 'Texte uniquement',
                                                 'ocr' => 'OCR (Tesseract)',
+                                                'vision' => 'Vision IA (tableaux)',
                                             ])
                                             ->default('auto')
-                                            ->helperText('Utilisez OCR si le PDF a des problèmes de ligatures (lettres manquantes).')
+                                            ->helperText('Vision: préserve la structure des tableaux. OCR: pour les PDF scannés.')
                                             ->columnSpanFull(),
                                     ])
                                     ->columns(2),
@@ -239,6 +240,7 @@ class DocumentResource extends Resource
                                                 'auto' => 'Automatique',
                                                 'text' => 'Texte uniquement',
                                                 'ocr' => 'OCR (Tesseract)',
+                                                'vision' => 'Vision IA',
                                                 null => '-',
                                                 default => $record?->extraction_method,
                                             }),

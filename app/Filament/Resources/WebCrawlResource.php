@@ -113,9 +113,10 @@ class WebCrawlResource extends Resource
                                                 'auto' => 'Auto (texte puis OCR si nécessaire)',
                                                 'text' => 'Texte uniquement (pdftotext)',
                                                 'ocr' => 'OCR uniquement (Tesseract)',
+                                                'vision' => 'Vision IA (préserve tableaux)',
                                             ])
                                             ->default('auto')
-                                            ->helperText('Auto: essaie d\'extraire le texte, puis OCR si le PDF est scanné'),
+                                            ->helperText('Vision: utilise un modèle IA pour extraire le texte en préservant la structure des tableaux'),
                                     ])
                                     ->columns(1),
                             ]),

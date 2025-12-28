@@ -262,7 +262,7 @@ class WebCrawlUrl extends Model
     /**
      * Extract text from PDF using the specified method.
      *
-     * @param string $method Extraction method: auto, text, ocr
+     * @param string $method Extraction method: auto, text, ocr, vision
      */
     private function extractTextFromPdf(string $method = 'auto'): ?string
     {
@@ -274,6 +274,11 @@ class WebCrawlUrl extends Model
 
         if (!file_exists($fullPath)) {
             return null;
+        }
+
+        // Vision mode: use Ollama Vision model
+        if ($method === 'vision') {
+            return $this->extractPdfWithVision($fullPath);
         }
 
         // OCR mode: use Tesseract only
@@ -385,6 +390,45 @@ class WebCrawlUrl extends Model
         }
 
         return $this->cleanPdfText($output);
+    }
+
+    /**
+     * Extract PDF text using Ollama Vision model.
+     */
+    private function extractPdfWithVision(string $path): ?string
+    {
+        try {
+            $visionService = app(\App\Services\VisionExtractorService::class);
+
+            if (!$visionService->isAvailable()) {
+                \Illuminate\Support\Facades\Log::warning('Vision service not available for PDF extraction', [
+                    'url' => $this->url,
+                ]);
+                return null;
+            }
+
+            $documentId = 'webcrawl_' . $this->id;
+            $result = $visionService->extractFromPdf($path, $documentId);
+
+            if ($result['success'] && !empty($result['markdown'])) {
+                \Illuminate\Support\Facades\Log::info('Vision PDF extraction successful', [
+                    'url' => $this->url,
+                    'pages_processed' => $result['metadata']['pages_processed'] ?? 0,
+                    'markdown_length' => strlen($result['markdown']),
+                ]);
+
+                return $result['markdown'];
+            }
+
+            return null;
+
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Vision PDF extraction failed', [
+                'url' => $this->url,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
     }
 
     /**

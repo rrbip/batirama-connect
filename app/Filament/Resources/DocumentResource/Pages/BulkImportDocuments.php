@@ -78,9 +78,10 @@ class BulkImportDocuments extends Page
                                 'auto' => 'Automatique (recommandé)',
                                 'text' => 'Texte uniquement',
                                 'ocr' => 'OCR (Tesseract)',
+                                'vision' => 'Vision IA (tableaux)',
                             ])
                             ->default('auto')
-                            ->helperText('OCR : convertit les pages PDF en images puis applique Tesseract.'),
+                            ->helperText('Vision: préserve les tableaux. OCR: pour les PDF scannés.'),
 
                         Forms\Components\Select::make('chunk_strategy')
                             ->label('Stratégie de chunking')

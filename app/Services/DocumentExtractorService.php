@@ -19,6 +19,19 @@ class DocumentExtractorService
      */
     private const OCR_FALLBACK_THRESHOLD = 0.05; // 5%
 
+    private ?VisionExtractorService $visionService = null;
+
+    /**
+     * Get the vision service (lazy loaded)
+     */
+    private function getVisionService(): VisionExtractorService
+    {
+        if ($this->visionService === null) {
+            $this->visionService = app(VisionExtractorService::class);
+        }
+        return $this->visionService;
+    }
+
     /**
      * Extrait le texte d'un document
      */
@@ -49,12 +62,12 @@ class DocumentExtractorService
         $extractionMethod = $document->extraction_method ?? 'auto';
 
         $text = match ($extension) {
-            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod),
+            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod, $document),
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
             'doc' => $this->extractFromDoc($fullPath),
             'html', 'htm' => $this->extractFromHtml($fullPath),
-            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath),
+            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath, $extractionMethod, $document),
             default => throw new \RuntimeException("Type de document non supporté: {$extension}"),
         };
 
@@ -70,14 +83,20 @@ class DocumentExtractorService
      * Extrait le texte d'un fichier PDF
      *
      * @param string $path Chemin vers le fichier PDF
-     * @param string $method Méthode d'extraction: 'auto', 'text', ou 'ocr'
+     * @param string $method Méthode d'extraction: 'auto', 'text', 'ocr', ou 'vision'
+     * @param Document|null $document Document pour stocker les métadonnées vision
      */
-    private function extractFromPdf(string $path, string $method = 'auto'): string
+    private function extractFromPdf(string $path, string $method = 'auto', ?Document $document = null): string
     {
         Log::info('PDF extraction starting', [
             'path' => $path,
             'method' => $method,
         ]);
+
+        // Mode Vision : utiliser un modèle de vision pour extraire le texte
+        if ($method === 'vision') {
+            return $this->extractFromPdfWithVision($path, $document);
+        }
 
         // Mode OCR forcé : convertir le PDF en images et appliquer Tesseract
         if ($method === 'ocr') {
@@ -315,12 +334,21 @@ class DocumentExtractorService
     }
 
     /**
-     * Extrait le texte d'une image avec Tesseract OCR
+     * Extrait le texte d'une image avec Tesseract OCR ou Vision
      * Utilise shell_exec directement car la librairie TesseractOCR a des problèmes
      * avec proc_open dans certains environnements PHP-FPM
+     *
+     * @param string $path Chemin vers l'image
+     * @param string $method Méthode: 'ocr' (default) ou 'vision'
+     * @param Document|null $document Document pour stocker les métadonnées
      */
-    private function extractFromImage(string $path): string
+    private function extractFromImage(string $path, string $method = 'ocr', ?Document $document = null): string
     {
+        // Mode Vision pour les images
+        if ($method === 'vision') {
+            return $this->extractFromImageWithVision($path, $document);
+        }
+
         if (!$this->isOcrAvailable()) {
             throw new \RuntimeException(
                 "Tesseract OCR n'est pas installé ou non détecté. " .
@@ -369,6 +397,99 @@ class DocumentExtractorService
 
             throw new \RuntimeException("Erreur OCR: {$e->getMessage()}");
         }
+    }
+
+    /**
+     * Extrait le texte d'un PDF en utilisant un modèle de vision
+     */
+    private function extractFromPdfWithVision(string $path, ?Document $document = null): string
+    {
+        $visionService = $this->getVisionService();
+
+        if (!$visionService->isAvailable()) {
+            throw new \RuntimeException(
+                "Le service Vision n'est pas disponible. " .
+                "Vérifiez qu'Ollama est accessible et qu'un modèle vision est installé."
+            );
+        }
+
+        $documentId = $document?->uuid ?? uniqid('vision_');
+
+        Log::info('Extracting PDF with Vision model', [
+            'path' => $path,
+            'document_id' => $documentId,
+        ]);
+
+        $result = $visionService->extractFromPdf($path, $documentId);
+
+        if (!$result['success']) {
+            $errorMessages = array_map(fn ($e) => $e['error'] ?? 'Unknown', $result['errors']);
+            throw new \RuntimeException(
+                "Extraction Vision échouée: " . implode(', ', $errorMessages)
+            );
+        }
+
+        // Stocker les métadonnées dans le document si disponible
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'vision_extraction' => $result['metadata'],
+                ]),
+            ]);
+        }
+
+        Log::info('Vision extraction completed', [
+            'path' => $path,
+            'markdown_length' => strlen($result['markdown']),
+            'pages_processed' => $result['metadata']['pages_processed'] ?? 0,
+        ]);
+
+        return $result['markdown'];
+    }
+
+    /**
+     * Extrait le texte d'une image en utilisant un modèle de vision
+     */
+    private function extractFromImageWithVision(string $path, ?Document $document = null): string
+    {
+        $visionService = $this->getVisionService();
+
+        if (!$visionService->isAvailable()) {
+            throw new \RuntimeException(
+                "Le service Vision n'est pas disponible. " .
+                "Vérifiez qu'Ollama est accessible et qu'un modèle vision est installé."
+            );
+        }
+
+        Log::info('Extracting image with Vision model', ['path' => $path]);
+
+        // Pour une image seule, on l'extrait directement
+        $result = $visionService->extractFromImage($path);
+
+        if (!$result['success']) {
+            throw new \RuntimeException("Extraction Vision échouée: " . ($result['error'] ?? 'Unknown'));
+        }
+
+        // Stocker les métadonnées si document disponible
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'vision_extraction' => [
+                        'model' => app(VisionExtractorService::class)->getDiagnostics()['model'] ?? null,
+                        'processing_time' => $result['processing_time'],
+                    ],
+                ]),
+            ]);
+        }
+
+        Log::info('Vision image extraction completed', [
+            'path' => $path,
+            'markdown_length' => strlen($result['markdown']),
+        ]);
+
+        return $result['markdown'];
     }
 
     /**

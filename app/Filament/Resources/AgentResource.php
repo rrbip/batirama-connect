@@ -236,9 +236,10 @@ class AgentResource extends Resource
                                                 'auto' => 'Automatique (texte si disponible, sinon OCR)',
                                                 'text' => 'Texte uniquement (pdftotext)',
                                                 'ocr' => 'OCR forcé (Tesseract)',
+                                                'vision' => 'Vision IA (préserve tableaux)',
                                             ])
                                             ->default('auto')
-                                            ->helperText('Méthode utilisée pour extraire le texte des PDFs'),
+                                            ->helperText('Vision: modèle IA pour tableaux et documents complexes'),
 
                                         Forms\Components\Select::make('default_chunk_strategy')
                                             ->label('Stratégie de découpage')
