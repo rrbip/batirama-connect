@@ -1047,7 +1047,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
     protected function getLocaleOptionsForFilter(): array
     {
         $locales = WebCrawlUrl::query()
-            ->whereHas('crawls', fn ($q) => $q->where('web_crawl_id', $this->record->id))
+            ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
             ->whereNotNull('locale')
             ->distinct()
             ->pluck('locale')
