@@ -455,11 +455,11 @@ class VisionSettingsPage extends Page implements HasForms
         $this->calibrationProgress = 0;
         $this->calibrationTotal = count($tests);
 
-        // Dispatcher le job
+        // Dispatcher le job (encoder l'image en base64 pour éviter les problèmes UTF-8)
         RunVisionCalibrationJob::dispatch(
             $this->calibrationId,
             $tests,
-            $imageContent,
+            base64_encode($imageContent),
             $this->calibrationImageUrl
         );
 

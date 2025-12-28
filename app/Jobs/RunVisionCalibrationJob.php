@@ -24,18 +24,18 @@ class RunVisionCalibrationJob implements ShouldQueue
 
     private string $calibrationId;
     private array $tests;
-    private string $imageContent;
+    private string $imageBase64; // Image déjà encodée en base64
     private ?string $imageSource;
 
     public function __construct(
         string $calibrationId,
         array $tests,
-        string $imageContent,
+        string $imageBase64,
         ?string $imageSource = null
     ) {
         $this->calibrationId = $calibrationId;
         $this->tests = $tests;
-        $this->imageContent = $imageContent;
+        $this->imageBase64 = $imageBase64;
         $this->imageSource = $imageSource;
     }
 
@@ -121,13 +121,12 @@ class RunVisionCalibrationJob implements ShouldQueue
         $startTime = microtime(true);
 
         try {
-            $base64Image = base64_encode($this->imageContent);
-
+            // L'image est déjà encodée en base64
             $response = Http::timeout($settings->timeout_seconds)
                 ->post($settings->getOllamaUrl() . '/api/generate', [
                     'model' => $settings->model,
                     'prompt' => $prompt,
-                    'images' => [$base64Image],
+                    'images' => [$this->imageBase64],
                     'stream' => false,
                     'options' => [
                         'temperature' => 0.1,
