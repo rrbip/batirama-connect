@@ -322,6 +322,9 @@ class DocumentResource extends Resource
                                                     ?? \App\Models\VisionSetting::getInstance()->storage_disk
                                                     ?? 'public';
 
+                                                // Message si le store_images était désactivé ou les images ont été supprimées
+                                                $imagesConfigured = $visionData['store_images'] ?? true;
+
                                                 if (!empty($pages)) {
                                                     $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
                                                     $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
@@ -375,7 +378,10 @@ class DocumentResource extends Resource
                                                             $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 rounded" title="Image stockée localement (non accessible via URL)"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></span>';
                                                         } elseif ($imagePath && !$imageExists) {
                                                             // Image dans les métadonnées mais fichier introuvable
-                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-danger-500 bg-danger-50 dark:bg-danger-900/30 dark:text-danger-400 rounded" title="Fichier image introuvable"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></span>';
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-danger-500 bg-danger-50 dark:bg-danger-900/30 dark:text-danger-400 rounded" title="Image non trouvée - Retraitez le document pour régénérer"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></span>';
+                                                        } elseif (!$imagePath && !$imagesConfigured) {
+                                                            // store_images était désactivé
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 rounded" title="Stockage images désactivé lors du traitement">-</span>';
                                                         }
                                                         if ($mdContent) {
                                                             $actions .= '<button type="button" onclick="document.getElementById(\'md-content-' . $pageNum . '\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50" title="Voir le markdown"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>';

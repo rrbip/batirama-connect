@@ -211,6 +211,7 @@ class VisionExtractorService
                 'duration_seconds' => round($duration, 2),
                 'storage_path' => $storagePath,
                 'storage_disk' => $this->settings->storage_disk,
+                'store_images' => $this->settings->store_images,
             ],
         ];
     }
