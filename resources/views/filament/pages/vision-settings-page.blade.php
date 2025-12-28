@@ -221,29 +221,63 @@
                 </div>
 
                 {{-- Bouton de lancement --}}
-                <div class="flex justify-center">
-                    <button
-                        type="button"
-                        wire:click="runCalibration"
-                        wire:loading.attr="disabled"
-                        class="inline-flex items-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-primary-600 rounded-xl hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    >
-                        <span wire:loading.remove wire:target="runCalibration">
-                            <x-heroicon-o-play class="w-5 h-5" />
-                        </span>
-                        <span wire:loading wire:target="runCalibration">
-                            <x-heroicon-o-arrow-path class="w-5 h-5 animate-spin" />
-                        </span>
-                        <span wire:loading.remove wire:target="runCalibration">Lancer la calibration</span>
-                        <span wire:loading wire:target="runCalibration">Traitement en cours...</span>
-                    </button>
+                <div class="flex justify-center gap-4">
+                    @if($isCalibrating)
+                        <button
+                            type="button"
+                            wire:click="cancelCalibration"
+                            class="inline-flex items-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-danger-600 rounded-xl hover:bg-danger-700 focus:outline-none focus:ring-2 focus:ring-danger-500 focus:ring-offset-2 transition"
+                        >
+                            <x-heroicon-o-stop class="w-5 h-5" />
+                            Annuler
+                        </button>
+                    @else
+                        <button
+                            type="button"
+                            wire:click="runCalibration"
+                            wire:loading.attr="disabled"
+                            class="inline-flex items-center gap-2 px-6 py-3 text-lg font-semibold text-white bg-primary-600 rounded-xl hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        >
+                            <span wire:loading.remove wire:target="runCalibration">
+                                <x-heroicon-o-play class="w-5 h-5" />
+                            </span>
+                            <span wire:loading wire:target="runCalibration">
+                                <x-heroicon-o-arrow-path class="w-5 h-5 animate-spin" />
+                            </span>
+                            <span wire:loading.remove wire:target="runCalibration">Lancer la calibration</span>
+                            <span wire:loading wire:target="runCalibration">Démarrage...</span>
+                        </button>
+                    @endif
                 </div>
 
                 @if($isCalibrating)
-                    <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                        <div class="flex items-center gap-3">
-                            <x-heroicon-o-arrow-path class="w-5 h-5 text-blue-600 animate-spin" />
-                            <span class="text-blue-700 dark:text-blue-400">Calibration en cours... Le modèle traite l'image avec chaque prompt.</span>
+                    <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg" wire:poll.2s="checkCalibrationStatus">
+                        <div class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <x-heroicon-o-arrow-path class="w-5 h-5 text-blue-600 animate-spin" />
+                                    <span class="text-blue-700 dark:text-blue-400">Calibration en cours...</span>
+                                </div>
+                                <span class="text-sm font-medium text-blue-600">
+                                    {{ $calibrationProgress }}/{{ $calibrationTotal }}
+                                </span>
+                            </div>
+                            @if($calibrationTotal > 0)
+                                <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2.5">
+                                    <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: {{ ($calibrationProgress / $calibrationTotal) * 100 }}%"></div>
+                                </div>
+                                @if($calibrationProgress > 0 && isset($calibrationResults[$calibrationProgress - 1]))
+                                    @php $lastResult = $calibrationResults[$calibrationProgress - 1]; @endphp
+                                    <p class="text-xs text-blue-600 dark:text-blue-400">
+                                        Dernier test : {{ $lastResult['id'] ?? 'N/A' }}
+                                        @if($lastResult['success'] ?? false)
+                                            <span class="text-success-600">✓</span>
+                                        @else
+                                            <span class="text-danger-600">✗</span>
+                                        @endif
+                                    </p>
+                                @endif
+                            @endif
                         </div>
                     </div>
                 @endif

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Jobs\RunVisionCalibrationJob;
 use App\Models\VisionSetting;
 use App\Services\VisionExtractorService;
 use Filament\Actions\Action;
@@ -22,8 +23,10 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Livewire\WithFileUploads;
 
 class VisionSettingsPage extends Page implements HasForms
@@ -54,6 +57,9 @@ class VisionSettingsPage extends Page implements HasForms
     public array $calibrationResults = [];
     public bool $isCalibrating = false;
     public string $calibrationReport = '';
+    public ?string $calibrationId = null;
+    public int $calibrationProgress = 0;
+    public int $calibrationTotal = 0;
 
     public function mount(): void
     {
@@ -405,78 +411,87 @@ class VisionSettingsPage extends Page implements HasForms
     }
 
     /**
-     * Lancer la calibration pour tous les tests du JSON
+     * Lancer la calibration pour tous les tests du JSON (via job en arrière-plan)
      */
     public function runCalibration(): void
     {
+        // Valider le JSON
+        $tests = json_decode($this->calibrationJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Notification::make()
+                ->title('Erreur JSON')
+                ->body('Le JSON de calibration est invalide : ' . json_last_error_msg())
+                ->danger()
+                ->send();
+            return;
+        }
+
+        if (empty($tests)) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Aucun test défini dans le JSON')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Récupérer l'image
+        $imageContent = $this->getCalibrationImageContent();
+
+        if (!$imageContent) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Veuillez fournir une image (upload ou URL)')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Générer un ID unique pour cette calibration
+        $this->calibrationId = Str::uuid()->toString();
         $this->isCalibrating = true;
         $this->calibrationResults = [];
         $this->calibrationReport = '';
+        $this->calibrationProgress = 0;
+        $this->calibrationTotal = count($tests);
 
-        try {
-            // Parser le JSON
-            $tests = json_decode($this->calibrationJson, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                Notification::make()
-                    ->title('Erreur JSON')
-                    ->body('Le JSON de calibration est invalide : ' . json_last_error_msg())
-                    ->danger()
-                    ->send();
-                $this->isCalibrating = false;
-                return;
-            }
+        // Dispatcher le job
+        RunVisionCalibrationJob::dispatch(
+            $this->calibrationId,
+            $tests,
+            $imageContent,
+            $this->calibrationImageUrl
+        );
 
-            if (empty($tests)) {
-                Notification::make()
-                    ->title('Erreur')
-                    ->body('Aucun test défini dans le JSON')
-                    ->danger()
-                    ->send();
-                $this->isCalibrating = false;
-                return;
-            }
+        Notification::make()
+            ->title('Calibration lancée')
+            ->body("Traitement de {$this->calibrationTotal} tests en arrière-plan...")
+            ->info()
+            ->send();
+    }
 
-            // Récupérer l'image
-            $imageContent = $this->getCalibrationImageContent();
+    /**
+     * Vérifier le statut de la calibration (appelé par polling)
+     */
+    public function checkCalibrationStatus(): void
+    {
+        if (!$this->calibrationId || !$this->isCalibrating) {
+            return;
+        }
 
-            if (!$imageContent) {
-                Notification::make()
-                    ->title('Erreur')
-                    ->body('Veuillez fournir une image (upload ou URL)')
-                    ->danger()
-                    ->send();
-                $this->isCalibrating = false;
-                return;
-            }
+        $status = Cache::get("calibration:{$this->calibrationId}");
 
-            // Tester chaque prompt
-            foreach ($tests as $index => $test) {
-                $prompt = $test['prompt'] ?? '';
+        if (!$status) {
+            return;
+        }
 
-                if (empty($prompt)) {
-                    $this->calibrationResults[$index] = [
-                        'id' => $test['id'] ?? "test_$index",
-                        'category' => $test['category'] ?? 'N/A',
-                        'description' => $test['description'] ?? '',
-                        'success' => false,
-                        'error' => 'Prompt vide',
-                        'markdown' => '',
-                        'processing_time' => 0,
-                    ];
-                    continue;
-                }
+        $this->calibrationProgress = $status['progress'] ?? 0;
+        $this->calibrationTotal = $status['total'] ?? 0;
+        $this->calibrationResults = $status['results'] ?? [];
 
-                $result = $this->testPromptWithImage($imageContent, $prompt);
-                $this->calibrationResults[$index] = array_merge([
-                    'id' => $test['id'] ?? "test_$index",
-                    'category' => $test['category'] ?? 'N/A',
-                    'description' => $test['description'] ?? '',
-                    'prompt' => $prompt,
-                ], $result);
-            }
-
-            // Générer le rapport
-            $this->generateCalibrationReport();
+        if ($status['status'] === 'completed') {
+            $this->isCalibrating = false;
+            $this->calibrationReport = $status['report'] ?? '';
 
             Notification::make()
                 ->title('Calibration terminée')
@@ -484,88 +499,38 @@ class VisionSettingsPage extends Page implements HasForms
                 ->success()
                 ->send();
 
-        } catch (\Exception $e) {
+            // Nettoyer le cache
+            Cache::forget("calibration:{$this->calibrationId}");
+        } elseif ($status['status'] === 'failed') {
+            $this->isCalibrating = false;
+
             Notification::make()
                 ->title('Erreur de calibration')
-                ->body($e->getMessage())
+                ->body($status['error'] ?? 'Erreur inconnue')
                 ->danger()
                 ->send();
-        }
 
-        $this->isCalibrating = false;
+            Cache::forget("calibration:{$this->calibrationId}");
+        }
     }
 
     /**
-     * Générer le rapport de calibration au format Markdown
+     * Annuler la calibration en cours
      */
-    private function generateCalibrationReport(): void
+    public function cancelCalibration(): void
     {
-        $settings = VisionSetting::getInstance();
-        $successCount = count(array_filter($this->calibrationResults, fn($r) => $r['success'] ?? false));
-        $totalCount = count($this->calibrationResults);
-        $totalTime = array_sum(array_column($this->calibrationResults, 'processing_time'));
-
-        $report = "# Rapport de Calibration Vision\n\n";
-        $report .= "## Informations Générales\n\n";
-        $report .= "- **Date** : " . now()->format('d/m/Y H:i:s') . "\n";
-        $report .= "- **Modèle** : `{$settings->model}`\n";
-        $report .= "- **Serveur Ollama** : `{$settings->getOllamaUrl()}`\n";
-        $report .= "- **Image source** : " . ($this->calibrationImageUrl ?: 'Upload local') . "\n";
-        $report .= "- **Tests réussis** : {$successCount}/{$totalCount}\n";
-        $report .= "- **Temps total** : {$totalTime}s\n\n";
-
-        $report .= "## Résumé par Catégorie\n\n";
-
-        // Grouper par catégorie
-        $byCategory = [];
-        foreach ($this->calibrationResults as $result) {
-            $cat = $result['category'] ?? 'Autre';
-            if (!isset($byCategory[$cat])) {
-                $byCategory[$cat] = ['success' => 0, 'total' => 0, 'time' => 0];
-            }
-            $byCategory[$cat]['total']++;
-            $byCategory[$cat]['time'] += $result['processing_time'] ?? 0;
-            if ($result['success'] ?? false) {
-                $byCategory[$cat]['success']++;
-            }
+        if ($this->calibrationId) {
+            Cache::forget("calibration:{$this->calibrationId}");
         }
+        $this->isCalibrating = false;
+        $this->calibrationId = null;
+        $this->calibrationProgress = 0;
+        $this->calibrationTotal = 0;
 
-        $report .= "| Catégorie | Réussis | Temps moyen |\n";
-        $report .= "|-----------|---------|-------------|\n";
-        foreach ($byCategory as $cat => $stats) {
-            $avgTime = $stats['total'] > 0 ? round($stats['time'] / $stats['total'], 2) : 0;
-            $report .= "| {$cat} | {$stats['success']}/{$stats['total']} | {$avgTime}s |\n";
-        }
-        $report .= "\n";
-
-        $report .= "## Détails des Tests\n\n";
-
-        foreach ($this->calibrationResults as $result) {
-            $status = ($result['success'] ?? false) ? '✅' : '❌';
-            $report .= "### {$status} {$result['id']}\n\n";
-            $report .= "- **Catégorie** : {$result['category']}\n";
-            $report .= "- **Description** : {$result['description']}\n";
-            $report .= "- **Temps** : {$result['processing_time']}s\n\n";
-
-            $report .= "**Prompt utilisé :**\n```\n{$result['prompt']}\n```\n\n";
-
-            if ($result['success'] ?? false) {
-                $report .= "**Résultat obtenu :**\n```markdown\n{$result['markdown']}\n```\n\n";
-            } else {
-                $report .= "**Erreur :** {$result['error']}\n\n";
-            }
-
-            $report .= "---\n\n";
-        }
-
-        $report .= "## Recommandations pour l'amélioration\n\n";
-        $report .= "Sur la base des résultats ci-dessus, une IA peut analyser :\n";
-        $report .= "1. Les tests échoués et proposer des améliorations de prompts\n";
-        $report .= "2. La qualité du markdown généré vs attendu\n";
-        $report .= "3. Les patterns de succès/échec par catégorie\n";
-        $report .= "4. Des suggestions pour de nouveaux tests pertinents\n\n";
-
-        $this->calibrationReport = $report;
+        Notification::make()
+            ->title('Calibration annulée')
+            ->warning()
+            ->send();
     }
 
     /**
@@ -601,76 +566,6 @@ class VisionSettingsPage extends Page implements HasForms
         }
 
         return null;
-    }
-
-    /**
-     * Teste un prompt avec une image
-     */
-    private function testPromptWithImage(string $imageContent, string $prompt): array
-    {
-        $startTime = microtime(true);
-
-        try {
-            $settings = VisionSetting::getInstance();
-            $base64Image = base64_encode($imageContent);
-
-            // Appel à Ollama
-            $response = Http::timeout($settings->timeout_seconds)
-                ->post($settings->getOllamaUrl() . '/api/generate', [
-                    'model' => $settings->model,
-                    'prompt' => $prompt,
-                    'images' => [$base64Image],
-                    'stream' => false,
-                    'options' => [
-                        'temperature' => 0.1,
-                        'num_predict' => 4096,
-                    ],
-                ]);
-
-            $processingTime = round(microtime(true) - $startTime, 2);
-
-            if (!$response->successful()) {
-                return [
-                    'success' => false,
-                    'error' => 'Erreur Ollama: ' . $response->body(),
-                    'markdown' => '',
-                    'processing_time' => $processingTime,
-                ];
-            }
-
-            $result = $response->json();
-            $markdown = $result['response'] ?? '';
-
-            // Nettoyer le markdown
-            $markdown = $this->cleanMarkdown($markdown);
-
-            return [
-                'success' => true,
-                'error' => null,
-                'markdown' => $markdown,
-                'processing_time' => $processingTime,
-                'model' => $settings->model,
-            ];
-
-        } catch (\Exception $e) {
-            return [
-                'success' => false,
-                'error' => $e->getMessage(),
-                'markdown' => '',
-                'processing_time' => round(microtime(true) - $startTime, 2),
-            ];
-        }
-    }
-
-    /**
-     * Nettoie le markdown généré
-     */
-    private function cleanMarkdown(string $markdown): string
-    {
-        $markdown = preg_replace('/^```(?:markdown)?\n?/m', '', $markdown);
-        $markdown = preg_replace('/\n?```$/m', '', $markdown);
-        $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
-        return trim($markdown);
     }
 
     /**
