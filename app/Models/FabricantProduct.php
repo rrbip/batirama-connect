@@ -79,6 +79,7 @@ class FabricantProduct extends Model
         'catalog_id',
         'crawl_url_id',
         'duplicate_of_id',
+        'locale',
         'sku',
         'ean',
         'manufacturer_ref',
@@ -245,12 +246,22 @@ class FabricantProduct extends Model
 
     /**
      * Find potential duplicates of this product within the same catalog.
+     * Excludes products with different locales (language variants are not duplicates).
      */
     public function findPotentialDuplicates(): \Illuminate\Database\Eloquent\Collection
     {
         $query = static::where('catalog_id', $this->catalog_id)
             ->where('id', '!=', $this->id)
             ->whereNull('duplicate_of_id');
+
+        // If this product has a locale, only find duplicates with same locale or no locale
+        // Products with different locales are language variants, not duplicates
+        if ($this->locale) {
+            $query->where(function ($q) {
+                $q->where('locale', $this->locale)
+                    ->orWhereNull('locale');
+            });
+        }
 
         return $query->where(function ($q) {
             // Same SKU
@@ -265,8 +276,13 @@ class FabricantProduct extends Model
             if ($this->source_hash) {
                 $q->orWhere('source_hash', $this->source_hash);
             }
-            // Very similar name (exact match)
-            if ($this->name) {
+            // Very similar name (exact match) - only if same locale
+            if ($this->name && $this->locale) {
+                $q->orWhere(function ($q2) {
+                    $q2->where('name', $this->name)
+                        ->where('locale', $this->locale);
+                });
+            } elseif ($this->name) {
                 $q->orWhere('name', $this->name);
             }
         })->get();
@@ -274,6 +290,7 @@ class FabricantProduct extends Model
 
     /**
      * Get duplicate statistics for a catalog.
+     * Name duplicates now exclude different locales (language variants).
      */
     public static function getDuplicateStats(int $catalogId): array
     {
@@ -289,12 +306,12 @@ class FabricantProduct extends Model
             ->havingRaw('COUNT(*) > 1')
             ->get();
 
-        // Count by name duplicates
+        // Count by name duplicates - GROUP BY name AND locale to exclude language variants
         $nameDuplicates = \DB::table('fabricant_products')
-            ->select('name', \DB::raw('COUNT(*) as cnt'))
+            ->select('name', 'locale', \DB::raw('COUNT(*) as cnt'))
             ->where('catalog_id', $catalogId)
             ->whereNull('deleted_at')
-            ->groupBy('name')
+            ->groupBy('name', 'locale')
             ->havingRaw('COUNT(*) > 1')
             ->get();
 
@@ -308,6 +325,16 @@ class FabricantProduct extends Model
             ->havingRaw('COUNT(*) > 1')
             ->get();
 
+        // Count language variants (same name, different locale)
+        $languageVariants = \DB::table('fabricant_products')
+            ->select('name', \DB::raw('COUNT(DISTINCT locale) as locale_count'))
+            ->where('catalog_id', $catalogId)
+            ->whereNotNull('locale')
+            ->whereNull('deleted_at')
+            ->groupBy('name')
+            ->havingRaw('COUNT(DISTINCT locale) > 1')
+            ->get();
+
         return [
             'total_products' => $total,
             'duplicate_skus' => $skuDuplicates->count(),
@@ -316,7 +343,33 @@ class FabricantProduct extends Model
             'duplicate_name_products' => $nameDuplicates->sum('cnt') - $nameDuplicates->count(),
             'duplicate_hashes' => $hashDuplicates->count(),
             'duplicate_hash_products' => $hashDuplicates->sum('cnt') - $hashDuplicates->count(),
+            'language_variants' => $languageVariants->count(),
         ];
+    }
+
+    /**
+     * Detect and set locale using LanguageDetector.
+     */
+    public function detectLocale(): ?string
+    {
+        $detector = app(\App\Services\Marketplace\LanguageDetector::class);
+
+        return $detector->detect(
+            $this->source_url,
+            $this->sku,
+            $this->description ?? $this->name
+        );
+    }
+
+    /**
+     * Detect and save locale.
+     */
+    public function detectAndSaveLocale(): void
+    {
+        $locale = $this->detectLocale();
+        if ($locale && $locale !== $this->locale) {
+            $this->update(['locale' => $locale]);
+        }
     }
 
     /**

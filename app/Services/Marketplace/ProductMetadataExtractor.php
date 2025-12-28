@@ -24,10 +24,12 @@ use Symfony\Component\DomCrawler\Crawler;
 class ProductMetadataExtractor
 {
     private OllamaService $ollamaService;
+    private LanguageDetector $languageDetector;
 
-    public function __construct(OllamaService $ollamaService)
+    public function __construct(OllamaService $ollamaService, LanguageDetector $languageDetector)
     {
         $this->ollamaService = $ollamaService;
+        $this->languageDetector = $languageDetector;
     }
 
     /**
@@ -668,11 +670,19 @@ PROMPT;
             })
             ->first();
 
+        // Detect locale from URL, SKU, or content
+        $locale = $this->languageDetector->detect(
+            $crawlUrl->url,
+            $data['sku'] ?? null,
+            $data['description'] ?? $data['name'] ?? null
+        );
+
         $productData = [
             'catalog_id' => $catalog->id,
             'crawl_url_id' => $crawlUrl->id,
             'source_url' => $crawlUrl->url,
             'source_hash' => $sourceHash,
+            'locale' => $locale,
             'extraction_method' => isset($data['_llm_extracted'])
                 ? FabricantProduct::EXTRACTION_LLM
                 : FabricantProduct::EXTRACTION_SELECTOR,

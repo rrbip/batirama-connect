@@ -319,6 +319,28 @@ class FabricantProductResource extends Resource
                     ->badge()
                     ->color('gray'),
 
+                Tables\Columns\TextColumn::make('locale')
+                    ->label('Langue')
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => match($state) {
+                        'fr' => 'FR',
+                        'en' => 'EN',
+                        'de' => 'DE',
+                        'es' => 'ES',
+                        'it' => 'IT',
+                        'nl' => 'NL',
+                        'pt' => 'PT',
+                        'pl' => 'PL',
+                        default => $state ?? '-',
+                    })
+                    ->color(fn ($state) => match($state) {
+                        'fr' => 'info',
+                        'en' => 'success',
+                        'de' => 'warning',
+                        default => 'gray',
+                    })
+                    ->toggleable(),
+
                 Tables\Columns\TextColumn::make('catalog.name')
                     ->label('Catalogue')
                     ->badge()
@@ -415,6 +437,23 @@ class FabricantProductResource extends Resource
 
                 Tables\Filters\TernaryFilter::make('marketplace_visible')
                     ->label('Visible marketplace'),
+
+                Tables\Filters\SelectFilter::make('locale')
+                    ->label('Langue')
+                    ->options([
+                        'fr' => 'Francais',
+                        'en' => 'English',
+                        'de' => 'Deutsch',
+                        'es' => 'Espanol',
+                        'it' => 'Italiano',
+                        'nl' => 'Nederlands',
+                        'pt' => 'Portugues',
+                        'pl' => 'Polski',
+                    ]),
+
+                Tables\Filters\Filter::make('no_locale')
+                    ->label('Sans langue detectee')
+                    ->query(fn ($query) => $query->whereNull('locale')),
 
                 Tables\Filters\Filter::make('has_price')
                     ->label('Avec prix')
@@ -516,6 +555,28 @@ class FabricantProductResource extends Resource
                         ->label('Activer')
                         ->icon('heroicon-o-check')
                         ->action(fn ($records) => $records->each->update(['status' => FabricantProduct::STATUS_ACTIVE])),
+
+                    Tables\Actions\BulkAction::make('detectLocale')
+                        ->label('Detecter la langue')
+                        ->icon('heroicon-o-language')
+                        ->color('info')
+                        ->action(function ($records) {
+                            $detected = 0;
+                            foreach ($records as $record) {
+                                $locale = $record->detectLocale();
+                                if ($locale) {
+                                    $record->update(['locale' => $locale]);
+                                    $detected++;
+                                }
+                            }
+
+                            Notification::make()
+                                ->title('Detection terminee')
+                                ->body("Langue detectee pour {$detected} produit(s) sur " . $records->count())
+                                ->success()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion(),
 
                     Tables\Actions\BulkAction::make('deactivate')
                         ->label('Désactiver')

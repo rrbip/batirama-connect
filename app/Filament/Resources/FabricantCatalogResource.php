@@ -255,7 +255,7 @@ class FabricantCatalogResource extends Resource
                                             }),
                                     ]),
 
-                                Forms\Components\Section::make('Doublons détectés')
+                                Forms\Components\Section::make('Doublons & Variantes linguistiques')
                                     ->schema([
                                         Forms\Components\Placeholder::make('duplicate_stats_display')
                                             ->label('')
@@ -265,16 +265,28 @@ class FabricantCatalogResource extends Resource
                                                 if ($stats['total_products'] === 0) {
                                                     return 'Aucun produit';
                                                 }
+
+                                                $lines = [];
+
+                                                // Language variants info
+                                                if (($stats['language_variants'] ?? 0) > 0) {
+                                                    $lines[] = "Variantes linguistiques: {$stats['language_variants']} produits en plusieurs langues";
+                                                }
+
+                                                // Duplicates
                                                 $duplicateCount = $stats['duplicate_sku_products'] + $stats['duplicate_name_products'] + $stats['duplicate_hash_products'];
                                                 if ($duplicateCount === 0) {
-                                                    return '✓ Aucun doublon détecté';
+                                                    $lines[] = 'Aucun doublon detecte';
+                                                } else {
+                                                    $lines[] = sprintf(
+                                                        "Doublons SKU: %d | Doublons Nom (meme langue): %d | Doublons Hash: %d",
+                                                        $stats['duplicate_sku_products'],
+                                                        $stats['duplicate_name_products'],
+                                                        $stats['duplicate_hash_products']
+                                                    );
                                                 }
-                                                return sprintf(
-                                                    "⚠ Doublons SKU: %d | Doublons Nom: %d | Doublons Hash: %d",
-                                                    $stats['duplicate_sku_products'],
-                                                    $stats['duplicate_name_products'],
-                                                    $stats['duplicate_hash_products']
-                                                );
+
+                                                return implode("\n", $lines);
                                             }),
                                     ])
                                     ->visible(fn ($record) => $record !== null),
