@@ -429,7 +429,7 @@ class DocumentResource extends Resource
                                                 $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
                                                 $html .= '<a href="' . $chunksUrl . '" class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-full hover:bg-amber-200 transition">';
                                                 $html .= '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>';
-                                                $html .= 'Voir les chunks</a>';
+                                                $html .= 'Gérer les chunks</a>';
                                                 $html .= '</div>';
                                                 $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
 
@@ -446,7 +446,30 @@ class DocumentResource extends Resource
                                                 $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
                                                 $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
                                                 $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
-                                                $html .= '</div></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
 
                                                 // 5. Erreurs éventuelles
                                                 $errors = $visionData['errors'] ?? [];
@@ -639,6 +662,9 @@ class DocumentResource extends Resource
 
                                                 // 3. Détail par page (uniquement pour PDF multi-pages)
                                                 $pages = $ocrData['pages'] ?? [];
+                                                $storagePath = $ocrData['storage_path'] ?? '';
+                                                $storageDisk = $ocrData['storage_disk'] ?? 'public';
+
                                                 if (!$isImage && !empty($pages)) {
                                                     $stepNumber++;
                                                     $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
@@ -648,23 +674,69 @@ class DocumentResource extends Resource
                                                     $html .= '<div class="p-4">';
                                                     $html .= '<table class="w-full text-sm">';
                                                     $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
-                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-right py-2">Taille texte</th><th class="text-right py-2">Temps OCR</th></tr>';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-right py-2">Taille texte</th><th class="text-right py-2">Temps OCR</th><th class="text-center py-2">Actions</th></tr>';
                                                     $html .= '</thead><tbody>';
 
-                                                    foreach ($pages as $page) {
+                                                    foreach ($pages as $pageIndex => $page) {
                                                         $textLength = $page['text_length'] ?? 0;
                                                         $time = $page['processing_time'] ?? 0;
+                                                        $pageNum = $page['page'] ?? ($pageIndex + 1);
+                                                        $imagePath = $page['image_path'] ?? '';
+                                                        $textContent = $page['text_content'] ?? '';
+
+                                                        // Générer l'URL de l'image si disponible
+                                                        $imageUrl = '';
+                                                        $imageExists = false;
+                                                        if ($imagePath) {
+                                                            if (\Storage::disk($storageDisk)->exists($imagePath)) {
+                                                                $imageUrl = \Storage::disk($storageDisk)->url($imagePath);
+                                                                $imageExists = true;
+                                                            } elseif ($storageDisk === 'public' && \Storage::disk('local')->exists($imagePath)) {
+                                                                $imageExists = true;
+                                                            }
+                                                        }
+
+                                                        $imageDisplay = $imagePath ? basename($imagePath) : '-';
+
+                                                        // Boutons d'action
+                                                        $actions = '<div class="flex gap-1 justify-center">';
+                                                        if ($imageUrl) {
+                                                            $actions .= '<a href="' . e($imageUrl) . '" target="_blank" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50" title="Voir l\'image"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></a>';
+                                                        } elseif ($imagePath && !$imageExists) {
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-danger-500 bg-danger-50 dark:bg-danger-900/30 dark:text-danger-400 rounded" title="Image non trouvée"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></span>';
+                                                        }
+                                                        if ($textContent) {
+                                                            $actions .= '<button type="button" onclick="document.getElementById(\'ocr-text-' . $pageNum . '\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-orange-600 bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400 rounded hover:bg-orange-100 dark:hover:bg-orange-900/50" title="Voir le texte OCR"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>';
+                                                        }
+                                                        $actions .= '</div>';
 
                                                         $html .= sprintf(
-                                                            '<tr class="border-b dark:border-gray-700 last:border-0">
+                                                            '<tr class="border-b dark:border-gray-700">
                                                                 <td class="py-2 font-medium">%d</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
                                                                 <td class="py-2 text-right">%s chars</td>
                                                                 <td class="py-2 text-right">%ss</td>
+                                                                <td class="py-2 text-center">%s</td>
                                                             </tr>',
-                                                            $page['page'] ?? 0,
+                                                            $pageNum,
+                                                            e($imageDisplay),
                                                             number_format($textLength),
-                                                            $time
+                                                            $time,
+                                                            $actions
                                                         );
+
+                                                        // Ligne expandable pour le texte OCR
+                                                        if ($textContent) {
+                                                            $html .= '<tr id="ocr-text-' . $pageNum . '" class="hidden">';
+                                                            $html .= '<td colspan="5" class="p-0">';
+                                                            $html .= '<div class="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">';
+                                                            $html .= '<div class="flex items-center justify-between mb-2">';
+                                                            $html .= '<span class="text-xs font-medium text-gray-500">Texte OCR - Page ' . $pageNum . '</span>';
+                                                            $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'ocr-content-' . $pageNum . '\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                            $html .= '</div>';
+                                                            $html .= '<pre id="ocr-content-' . $pageNum . '" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e($textContent) . '</pre>';
+                                                            $html .= '</div></td></tr>';
+                                                        }
                                                     }
                                                     $html .= '</tbody></table>';
                                                     $html .= '</div></div>';
@@ -691,7 +763,30 @@ class DocumentResource extends Resource
                                                 $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
                                                 $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
                                                 $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
-                                                $html .= '</div></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
 
                                                 // 5. Erreurs éventuelles
                                                 $errors = $ocrData['errors'] ?? [];
