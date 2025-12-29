@@ -1,6 +1,6 @@
 # Cahier des Charges : Refonte de la Gestion RAG
 
-> **Statut** : En cours de validation
+> **Statut** : Validé - Prêt pour développement
 > **Branche** : `claude/rag-refactor-planning-3F9Bx`
 > **Date de création** : 2025-12-29
 > **Dernière mise à jour** : 2025-12-29
@@ -15,6 +15,7 @@
 2. **Simplifier** la création de documents avec un formulaire adaptatif
 3. **Clarifier** les pipelines de traitement en cascade
 4. **Implémenter** une nouvelle stratégie d'indexation sémantique "Q/R Atomique"
+5. **Améliorer le debug** avec visibilité complète sur chaque étape du pipeline
 
 ### 1.2 Périmètre
 
@@ -27,6 +28,19 @@
 | Pipelines de traitement | **Nouvelle architecture en cascade** |
 | Stratégie de chunking | **Nouvelle** - Q/R Atomique |
 | Crawl web | **Inchangé** (fonctionne bien) |
+
+### 1.3 Formats de fichiers
+
+| Format | Traitement |
+|--------|------------|
+| PDF | ✅ Supporté (pipeline complet) |
+| HTML | ✅ Supporté (crawl ou fichier) |
+| Images (JPG, PNG, etc.) | ✅ Supporté |
+| Markdown | ✅ Supporté (format pivot) |
+| DOCX | ❌ Pas traité pour l'instant |
+| TXT | ❌ Pas traité pour l'instant |
+
+> **Note :** DOCX et TXT seront traités plus tard avec une IA à fenêtre flottante pour transformer en Markdown structuré.
 
 ---
 
@@ -60,18 +74,18 @@ Regrouper les onglets actuels "Extraction Vision" et "Chunking LLM" en **un seul
 ### 2.2 Zones dépliables
 
 #### Zone 1 : Configuration Vision
-- Modèle vision (Ollama / Déploiements)
+- Modèle vision (utilise la hiérarchie : Déploiement > Agent > Global)
 - Paramètres de température
 - Prompt système pour description d'images
 
 #### Zone 2 : Configuration Chunking LLM
-- Modèle LLM (Ollama / Déploiements)
+- Modèle LLM (utilise la hiérarchie : Déploiement > Agent > Global)
 - Taille de fenêtre
 - Pourcentage de chevauchement
 - Prompt système
 
 #### Zone 3 : Configuration Q/R Atomique
-- Seuil de caractères pour découpage (défaut: 1500)
+- Seuil de caractères pour découpage (défaut: 1500, **configurable**)
 - Prompt pour génération Q/R
 - Paramètres d'indexation Qdrant
 
@@ -202,50 +216,139 @@ Contenu conservé :
 
 ### 4.3 Onglet : Pipeline (nouveau - remplace Extraction)
 
-Affiche le pipeline spécifique au type de document avec pour chaque étape :
-- L'outil utilisé pour le traitement
-- Le statut (en attente / en cours / terminé / erreur)
-- Un bouton **"Voir"** pour afficher le résultat post-traitement dans une popup
-- Une **checkbox** pour choisir un outil différent (liste des outils disponibles)
+#### 4.3.1 Objectif
+
+Afficher le pipeline complet avec **toutes les informations de debug** pour chaque étape :
+- Outil utilisé et sa configuration
+- Statut et durée
+- Résultat visualisable
+- Possibilité de changer d'outil et relancer
+
+#### 4.3.2 Informations stockées par étape
+
+| Information | Description | Exemple |
+|-------------|-------------|---------|
+| `step_name` | Nom de l'étape | "pdf_to_images", "image_to_markdown" |
+| `tool_used` | Outil utilisé | "pdftoppm", "vision_llm" |
+| `tool_config` | Config de l'outil | `{"model": "llava:13b", "temperature": 0.3}` |
+| `status` | État | "pending", "running", "success", "error" |
+| `started_at` | Début traitement | timestamp |
+| `completed_at` | Fin traitement | timestamp |
+| `duration_ms` | Durée en ms | 2345 |
+| `input_summary` | Résumé de l'entrée | "15 pages PDF, 3.2MB" |
+| `output_summary` | Résumé de la sortie | "15 images, 12MB total" |
+| `output_path` | Chemin stockage résultat | "storage/pipeline/doc_xxx/step1/" |
+| `output_data` | Données complètes | Markdown généré, métadonnées, etc. |
+| `error_message` | Si erreur | "Timeout après 60s" |
+| `error_trace` | Stack trace | Pour debug technique |
+
+> **Stockage :** Toutes les données sont conservées pour le debug. Un traitement d'archivage sera ajouté plus tard pour nettoyer.
+
+#### 4.3.3 Interface visuelle
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  ⚙️ PIPELINE DE TRAITEMENT                                  │
 │                                                             │
-│  Type : PDF                                                 │
+│  Type : PDF | Statut global : ✅ Terminé                   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │ ☑ Étape 1 : PDF → Image                    ✅ OK    │   │
+│  │ ÉTAPE 1 : PDF → Images                     ✅ OK    │   │
+│  │                                                       │   │
 │  │   Outil : Pdftoppm                                   │   │
-│  │   Durée : 2.3s | 15 pages générées                  │   │
-│  │                                        [👁️ Voir]    │   │
+│  │   Config : 300 DPI, format PNG                       │   │
+│  │   Durée : 2.3s                                       │   │
+│  │   Résultat : 15 images générées (12.4 MB)           │   │
 │  │                                                       │   │
-│  │   Changer l'outil : [Pdftoppm ▼] [ImageMagick]      │   │
+│  │   [👁️ Voir le résultat]                              │   │
+│  │                                                       │   │
+│  │   ── Changer l'outil ──────────────────────────     │   │
+│  │   ○ Pdftoppm (actuel)                                │   │
+│  │   ○ ImageMagick                                      │   │
+│  │                                                       │   │
+│  │   [🔄 Relancer cette étape]                          │   │
 │  └─────────────────────────────────────────────────────┘   │
-│                    ↓                                        │
+│                          ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │ ☑ Étape 2 : Image → Markdown               ✅ OK    │   │
-│  │   Outil : Vision LLM (llava:13b)                    │   │
-│  │   Durée : 45.2s | 15 234 tokens générés             │   │
-│  │                                        [👁️ Voir]    │   │
+│  │ ÉTAPE 2 : Images → Markdown                ✅ OK    │   │
 │  │                                                       │   │
-│  │   Changer l'outil : [Vision LLM ▼]                  │   │
+│  │   Outil : Vision LLM                                 │   │
+│  │   Config : llava:13b, temp: 0.3                      │   │
+│  │   Durée : 45.2s                                      │   │
+│  │   Résultat : 15 234 tokens Markdown                 │   │
+│  │                                                       │   │
+│  │   [👁️ Voir le résultat]                              │   │
+│  │                                                       │   │
+│  │   ── Changer l'outil ──────────────────────────     │   │
+│  │   ○ Vision LLM - llava:13b (actuel)                 │   │
+│  │   ○ Vision LLM - llava:34b                          │   │
+│  │                                                       │   │
+│  │   [🔄 Relancer cette étape]                          │   │
 │  └─────────────────────────────────────────────────────┘   │
-│                    ↓                                        │
+│                          ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │ ☑ Étape 3 : Markdown → Indexation          ✅ OK    │   │
-│  │   Outil : Q/R Atomique                              │   │
-│  │   Durée : 23.1s | 47 chunks, 142 points Qdrant      │   │
-│  │                                        [👁️ Voir]    │   │
+│  │ ÉTAPE 3 : Markdown → Q/R + Indexation      ✅ OK    │   │
 │  │                                                       │   │
-│  │   Changer l'outil : [Q/R Atomique ▼]                │   │
+│  │   Outil : Q/R Atomique                               │   │
+│  │   Config : seuil 1500 chars, mistral:7b              │   │
+│  │   Durée : 23.1s                                      │   │
+│  │   Résultat : 47 chunks, 142 points Qdrant           │   │
+│  │                                                       │   │
+│  │   [👁️ Voir le résultat]                              │   │
+│  │                                                       │   │
+│  │   ── Changer l'outil ──────────────────────────     │   │
+│  │   ○ Q/R Atomique (actuel)                            │   │
+│  │                                                       │   │
+│  │   [🔄 Relancer cette étape]                          │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  [🔄 Relancer le pipeline complet]                         │
-│  [🔄 Relancer à partir de l'étape 2]                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+#### 4.3.4 Popup "Voir le résultat" par étape
+
+| Étape | Contenu de la popup |
+|-------|---------------------|
+| **PDF → Images** | Galerie des images générées (miniatures cliquables, zoom) |
+| **Image → Markdown** | Texte Markdown avec syntax highlighting |
+| **HTML → Markdown** | Texte Markdown avec syntax highlighting |
+| **Markdown → Q/R** | Liste des chunks avec leurs Q/R générées |
+
+#### 4.3.5 Workflow de relance d'une étape
+
+```
+Utilisateur clique [🔄 Relancer cette étape]
+              ↓
+    Job async lancé pour cette étape
+              ↓
+    Interface affiche "⏳ En cours..."
+              ↓
+    Job terminé, nouveau résultat stocké
+              ↓
+    Interface met à jour le statut
+              ↓
+    Utilisateur peut [👁️ Voir le résultat]
+              ↓
+    Si OK : [✅ Valider et continuer le pipeline]
+    Si KO : Changer d'outil et relancer
+              ↓
+    "Valider et continuer" lance les étapes suivantes
+```
+
+> **Note :** On garde uniquement le dernier résultat. Si le nouveau résultat est moins bon, on rechange l'outil et on relance.
+
+#### 4.3.6 Outils disponibles par étape (V1)
+
+| Étape | Outils disponibles | Par défaut |
+|-------|-------------------|------------|
+| PDF → Images | pdftoppm | pdftoppm |
+| Image → Markdown | Vision LLM (modèles configurés) | Vision LLM (agent) |
+| HTML → Markdown | Convertisseur HTML | Convertisseur HTML |
+| Markdown → Q/R | Q/R Atomique | Q/R Atomique |
+
+> **Note :** Certaines étapes n'ont qu'un seul outil pour l'instant. La structure est prévue pour ajouter des outils plus tard.
 
 ### 4.4 Onglet : Indexation (refait)
 
@@ -268,11 +371,16 @@ Affiche le traitement final (Markdown → Qdrant) avec les données LLM brutes.
 │  Chunks utiles (useful: true) : 42                         │
 │  Chunks ignorés (useful: false) : 5                        │
 │                                                             │
+│  ── Catégories générées ───────────────────────────────    │
+│                                                             │
+│  [PRODUITS] x12  [FACTURATION] x8  [GARANTIES] x5          │
+│  [CONTACT] x3    [DIVERS] x14                              │
+│                                                             │
 │  ── Données brutes LLM par chunk ──────────────────────    │
 │                                                             │
-│  ▶ Chunk #1 - Catégorie: PRODUITS (fermé)                  │
-│  ▶ Chunk #2 - Catégorie: FACTURATION (fermé)               │
-│  ▼ Chunk #3 - Catégorie: GARANTIES (ouvert)                │
+│  ▶ Chunk #1 - PRODUITS - useful: ✅ (fermé)                │
+│  ▶ Chunk #2 - FACTURATION - useful: ✅ (fermé)             │
+│  ▼ Chunk #3 - GARANTIES - useful: ✅ (ouvert)              │
 │    ┌───────────────────────────────────────────────────┐   │
 │    │ {                                                  │   │
 │    │   "useful": true,                                  │   │
@@ -287,13 +395,12 @@ Affiche le traitement final (Markdown → Qdrant) avec les données LLM brutes.
 │    │   "raw_content_clean": "..."                       │   │
 │    │ }                                                  │   │
 │    └───────────────────────────────────────────────────┘   │
-│  ▶ Chunk #4 - Catégorie: CONTACT (fermé)                   │
+│  ▶ Chunk #4 - CONTACT - useful: ✅ (fermé)                 │
+│  ▶ Chunk #5 - DIVERS - useful: ❌ (non indexé)            │
 │  ...                                                        │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-**Note** : La stratégie de chunking n'apparaît plus ici, elle fait partie des choix d'outils dans l'onglet Pipeline.
 
 ### 4.5 Onglet : Chunks (reformaté)
 
@@ -303,7 +410,7 @@ Affiche tous les chunks avec les données complètes retournées par le LLM.
 ┌─────────────────────────────────────────────────────────────┐
 │  📦 CHUNKS                                                  │
 │                                                             │
-│  47 chunks | 142 points Qdrant                             │
+│  47 chunks | 142 points Qdrant | 5 non indexés             │
 │                                                             │
 │  ── Filtres ───────────────────────────────────────────    │
 │                                                             │
@@ -313,29 +420,40 @@ Affiche tous les chunks avec les données complètes retournées par le LLM.
 │  ── Liste des chunks ──────────────────────────────────    │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │ #1 | [PRODUITS] | useful: ✅                         │   │
+│  │ #1 | [PRODUITS] | useful: ✅ | 3 Q/R | 4 points     │   │
 │  │ ─────────────────────────────────────────────────── │   │
 │  │                                                       │   │
 │  │ 📝 Résumé :                                          │   │
 │  │ Présentation des gammes de produits disponibles     │   │
 │  │                                                       │   │
-│  │ ❓ Questions/Réponses générées (3) :                 │   │
+│  │ ❓ Questions/Réponses générées :                     │   │
 │  │                                                       │   │
-│  │ Q: Quels sont les produits disponibles ?            │   │
-│  │ R: Notre gamme comprend des solutions pour...       │   │
+│  │ Q1: Quels sont les produits disponibles ?           │   │
+│  │ R1: Notre gamme comprend des solutions pour...      │   │
 │  │                                                       │   │
-│  │ Q: Existe-t-il des packs ?                          │   │
-│  │ R: Oui, nous proposons des packs découverte...      │   │
+│  │ Q2: Existe-t-il des packs ?                         │   │
+│  │ R2: Oui, nous proposons des packs découverte...     │   │
 │  │                                                       │   │
-│  │ Q: Quelles sont les nouveautés 2025 ?               │   │
-│  │ R: Cette année, nous lançons...                     │   │
+│  │ Q3: Quelles sont les nouveautés 2025 ?              │   │
+│  │ R3: Cette année, nous lançons...                    │   │
 │  │                                                       │   │
 │  │ 📄 Contenu source :                                  │   │
 │  │ "Notre gamme de produits comprend des solutions..." │   │
 │  │                                                       │   │
-│  │ 🔗 Contexte parent : Catalogue > Produits           │   │
+│  │ 🔗 Contexte : Catalogue > Produits                  │   │
 │  │                                                       │   │
 │  │ [✏️ Éditer] [🗑️ Supprimer]                          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ #5 | [DIVERS] | useful: ❌ | Non indexé             │   │
+│  │ ─────────────────────────────────────────────────── │   │
+│  │                                                       │   │
+│  │ ⚠️ Ce chunk n'a pas été jugé utile par le LLM       │   │
+│  │                                                       │   │
+│  │ 📄 Contenu source :                                  │   │
+│  │ "Copyright 2024 - Tous droits réservés..."          │   │
+│  │                                                       │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -350,7 +468,7 @@ Affiche tous les chunks avec les données complètes retournées par le LLM.
 Tous les formats convergent vers **Markdown** comme format pivot avant l'indexation finale.
 
 ```
-PDF ──────────→ Image ──────────→ Markdown ──────────→ Indexation
+PDF ──────────→ Image ──────────→ Markdown ──────────→ Q/R + Qdrant
                                       ↑
 HTML ─────────────────────────────────┤
                                       ↑
@@ -372,20 +490,24 @@ C'est le pipeline terminal utilisé par tous les autres.
 │  │    • Découpe par hiérarchie Markdown (### niveau 3) │   │
 │  │    • Si chunk > 1500 chars → découpe par paragraphe │   │
 │  │    • Préservation contexte parent (breadcrumbs)     │   │
+│  │    • Seuil configurable dans les paramètres         │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ 2. GÉNÉRATION Q/R (LLM)                              │   │
-│  │    • Modèle : Agent IA (Ollama) ou Déploiements     │   │
+│  │    • Modèle : Déploiement > Agent > Global          │   │
+│  │    • Catégories : utilise DocumentCategory existant │   │
 │  │    • Génère : questions, réponses, catégorie,       │   │
 │  │      résumé, contenu nettoyé                        │   │
 │  │    • Filtre : useful = true/false                   │   │
+│  │    • Si nouvelle catégorie → ajout automatique      │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ 3. INDEXATION QDRANT                                 │   │
-│  │    • N points Q/R : vecteur(question) + réponse     │   │
-│  │    • 1 point référence : vecteur(résumé) + source   │   │
+│  │    • Si useful=true : N points Q/R + 1 source       │   │
+│  │    • Si useful=false : chunk gardé en base,         │   │
+│  │      NON indexé dans Qdrant                         │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -423,7 +545,7 @@ C'est le pipeline terminal utilisé par tous les autres.
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ 1. IMAGE → MARKDOWN                                  │   │
 │  │    Outil : Vision LLM (déjà implémenté)             │   │
-│  │    • Modèle : Agent IA ou Déploiements              │   │
+│  │    • Modèle : Déploiement > Agent > Global          │   │
 │  │    • Génère du Markdown structuré depuis l'image    │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
@@ -440,12 +562,18 @@ C'est le pipeline terminal utilisé par tous les autres.
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │ 1. PDF → IMAGES                                      │   │
-│  │    Outil : À vérifier (pdftoppm existant ?)         │   │
+│  │    Outil : pdftoppm                                  │   │
 │  │    • Conversion de chaque page en image             │   │
-│  │    • Résolution : 300 DPI recommandé                │   │
+│  │    • Traitement SÉQUENTIEL (page par page)          │   │
+│  │    • Résolution : 300 DPI                           │   │
+│  │    • Stockage : toutes les images conservées        │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
-│                   [PIPELINE IMAGE]                          │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │ 2. IMAGES → MARKDOWN                                 │   │
+│  │    • Traitement SÉQUENTIEL de chaque image          │   │
+│  │    • Concaténation du Markdown final                │   │
+│  └─────────────────────────────────────────────────────┘   │
 │                          ↓                                  │
 │                  [PIPELINE MARKDOWN]                        │
 │                                                             │
@@ -459,7 +587,7 @@ C'est le pipeline terminal utilisé par tous les autres.
 | **Markdown** | Découpe structurelle | Génération Q/R (LLM) | Indexation Qdrant |
 | **HTML** | HTML → Markdown | → Pipeline Markdown | |
 | **Image** | Image → Markdown (Vision) | → Pipeline Markdown | |
-| **PDF** | PDF → Images | → Pipeline Image | → Pipeline Markdown |
+| **PDF** | PDF → Images | Images → Markdown | → Pipeline Markdown |
 
 ---
 
@@ -478,14 +606,20 @@ Transformer les documents en une base de connaissances vectorielle où chaque ch
 **Règles :**
 - Découper à chaque titre de niveau 3 (`###`)
 - Si un `###` contient > 1500 caractères → découpe par paragraphe
+- Seuil configurable dans `/admin/gestion-rag-page`
 - Contexte propagé : `Titre 1 > Titre 2 > [Contenu]`
 
 **Implémentation :** PHP Regex ou Parseur Markdown
 
 ### 6.3 Phase 2 : Génération de Savoir Synthétique (LLM)
 
+**Catégories :**
+- Utiliser la table `DocumentCategory` existante
+- Proposer les catégories existantes au LLM dans le prompt
+- Si le LLM propose une nouvelle catégorie → l'ajouter automatiquement
+
 **Prompt LLM :**
-> "Analyse ce texte et génère des paires Question/Réponse. La réponse doit être autonome et ne pas faire référence au texte (ex: ne pas dire 'Comme indiqué dans le document'). Si le texte n'a aucune valeur informative, réponds useful: false."
+> "Analyse ce texte et génère des paires Question/Réponse. La réponse doit être autonome et ne pas faire référence au texte (ex: ne pas dire 'Comme indiqué dans le document'). Si le texte n'a aucune valeur informative, réponds useful: false. Catégories existantes : [liste]."
 
 **Format JSON attendu :**
 
@@ -510,9 +644,9 @@ Transformer les documents en une base de connaissances vectorielle où chaque ch
 
 ### 6.4 Phase 3 : Structuration Qdrant
 
-Pour un chunk validé (`useful: true`), on crée **N + 1 points** dans Qdrant :
+#### Si `useful: true` → N + 1 points
 
-#### Points "Q/R" (1 à N)
+**Points "Q/R" (1 à N) :**
 
 | Champ | Valeur |
 |-------|--------|
@@ -525,11 +659,13 @@ Pour un chunk validé (`useful: true`), on crée **N + 1 points** dans Qdrant :
   "category": "FACTURATION",
   "display_text": "RÉPONSE_IA",
   "source_doc": "manuel_v2.md",
-  "parent_context": "Titre 1 > Titre 2"
+  "parent_context": "Titre 1 > Titre 2",
+  "chunk_id": "uuid-du-chunk",
+  "document_id": "uuid-du-document"
 }
 ```
 
-#### Point "Référence" (dernier)
+**Point "Référence" (dernier) :**
 
 | Champ | Valeur |
 |-------|--------|
@@ -541,9 +677,17 @@ Pour un chunk validé (`useful: true`), on crée **N + 1 points** dans Qdrant :
   "type": "source_material",
   "category": "FACTURATION",
   "display_text": "TEXTE_ORIGINAL",
-  "source_doc": "manuel_v2.md"
+  "source_doc": "manuel_v2.md",
+  "chunk_id": "uuid-du-chunk",
+  "document_id": "uuid-du-document"
 }
 ```
+
+#### Si `useful: false` → 0 points
+
+- Chunk conservé en base de données (pour audit)
+- **Non indexé** dans Qdrant
+- Visible dans l'interface avec mention "Non indexé"
 
 ### 6.5 Utilisation des champs `type` et `category`
 
@@ -582,10 +726,6 @@ Le système Zoombat permet de générer des factures d'acompte. Une fois le devi
 
 ### 7.1 Adaptation au nouveau système
 
-L'import en masse doit être adapté pour fonctionner avec les nouveaux pipelines.
-
-**Proposition :**
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  📦 IMPORT EN MASSE                                         │
@@ -600,6 +740,7 @@ L'import en masse doit être adapté pour fonctionner avec les nouveaux pipeline
 │    ┌─────────────────────────────────────────────────┐     │
 │    │  Glissez plusieurs fichiers ici (max 100)       │     │
 │    │  ou un fichier ZIP                              │     │
+│    │  Formats : PDF, HTML, Images, Markdown          │     │
 │    └─────────────────────────────────────────────────┘     │
 │                                                             │
 │  ○ Crawl de site                                           │
@@ -616,11 +757,6 @@ L'import en masse doit être adapté pour fonctionner avec les nouveaux pipeline
 │    ▶ HTML : [Configurer...]                                │
 │    ▶ Images : [Configurer...]                              │
 │                                                             │
-│  ── Options ───────────────────────────────────────────    │
-│                                                             │
-│  ☑ Traitement asynchrone (file d'attente)                  │
-│  ☐ Notifier par email à la fin                             │
-│                                                             │
 │  [🚀 Lancer l'import]                                      │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
@@ -628,34 +764,50 @@ L'import en masse doit être adapté pour fonctionner avec les nouveaux pipeline
 
 ### 7.2 Comportement
 
-1. Pour le **crawl de site** : utilise les outils par défaut configurés dans `/admin/gestion-rag-page`
-2. Pour les **fichiers multiples** :
+1. **Crawl de site** : utilise les outils par défaut configurés dans `/admin/gestion-rag-page`
+2. **Fichiers multiples** :
    - Détecte le type de chaque fichier
    - Applique le pipeline correspondant avec les outils par défaut
    - Pré-remplit le titre avec le nom de fichier
-3. **Traitement asynchrone** via jobs Laravel
+3. **Traitement asynchrone** via jobs Laravel (un job par document)
 
 ---
 
-## 8. Modifications Techniques
+## 8. Architecture Technique
 
-### 8.1 Base de données
+### 8.1 Priorité des modèles LLM
+
+```
+Déploiement (config_overlay.model)
+    ↓ si non défini
+Agent IA (model)
+    ↓ si non défini
+Config globale (config/ai.php → default_model)
+```
+
+### 8.2 Base de données
+
+#### Migration Document
 
 ```php
-// Migration : Adaptation du modèle Document
 Schema::table('documents', function (Blueprint $table) {
     // Suppression
     $table->dropColumn('extraction_method');
     $table->dropColumn('category');
 
     // Ajout
-    $table->json('pipeline_config')->nullable();      // Configuration du pipeline
-    $table->json('pipeline_results')->nullable();     // Résultats par étape
+    $table->json('pipeline_steps')->nullable();       // Résultats par étape
     $table->string('source_type')->default('file');   // 'file' ou 'url'
 });
+```
 
-// Migration : Adaptation du modèle DocumentChunk
+#### Migration DocumentChunk
+
+```php
 Schema::table('document_chunks', function (Blueprint $table) {
+    // Modification
+    // qdrant_point_id → qdrant_point_ids (JSON array)
+
     // Ajout pour Q/R Atomique
     $table->boolean('useful')->default(true);
     $table->json('knowledge_units')->nullable();      // Q/R générées
@@ -664,148 +816,130 @@ Schema::table('document_chunks', function (Blueprint $table) {
 });
 ```
 
-### 8.2 Nouveaux services
+### 8.3 Structure JSON `pipeline_steps`
+
+```json
+{
+  "steps": [
+    {
+      "step_name": "pdf_to_images",
+      "tool_used": "pdftoppm",
+      "tool_config": {"dpi": 300, "format": "png"},
+      "status": "success",
+      "started_at": "2025-12-29T14:30:00Z",
+      "completed_at": "2025-12-29T14:30:02Z",
+      "duration_ms": 2345,
+      "input_summary": "15 pages PDF, 3.2MB",
+      "output_summary": "15 images, 12MB total",
+      "output_path": "storage/pipeline/doc_xxx/step1/",
+      "output_data": null,
+      "error_message": null,
+      "error_trace": null
+    },
+    {
+      "step_name": "images_to_markdown",
+      "tool_used": "vision_llm",
+      "tool_config": {"model": "llava:13b", "temperature": 0.3},
+      "status": "success",
+      "output_data": "# Titre\n\nContenu markdown...",
+      ...
+    },
+    {
+      "step_name": "markdown_to_qr",
+      "tool_used": "qr_atomique",
+      "tool_config": {"threshold": 1500, "model": "mistral:7b"},
+      "status": "success",
+      "output_summary": "47 chunks, 142 points Qdrant",
+      ...
+    }
+  ]
+}
+```
+
+### 8.4 Jobs par étape (async)
+
+| Job | Description |
+|-----|-------------|
+| `ProcessPdfToImagesJob` | PDF → Images (pdftoppm) |
+| `ProcessImagesToMarkdownJob` | Images → Markdown (Vision LLM, séquentiel) |
+| `ProcessHtmlToMarkdownJob` | HTML → Markdown |
+| `ProcessMarkdownToQrJob` | Markdown → Découpe + Q/R + Indexation |
+
+**Orchestration :**
+- En mode automatique (création/crawl) : chaque job dispatch le suivant
+- En mode manuel (relance) : job isolé, attend validation pour continuer
+
+### 8.5 Nouveaux services
 
 | Service | Description |
 |---------|-------------|
-| `PipelineOrchestratorService` | Orchestre l'exécution du pipeline selon le type |
+| `PipelineOrchestratorService` | Orchestre l'exécution du pipeline |
 | `MarkdownChunkerService` | Découpe structurelle du Markdown |
 | `QrGeneratorService` | Génération Q/R via LLM |
 | `QdrantMultiPointService` | Indexation multi-points (Q/R + source) |
 
-### 8.3 Jobs modifiés
+---
 
-| Job | Modification |
-|-----|--------------|
-| `ProcessDocumentJob` | Appelle le `PipelineOrchestratorService` |
-| `IndexDocumentChunksJob` | Supporte la création multi-points |
+## 9. Récapitulatif des Décisions
+
+| Sujet | Décision |
+|-------|----------|
+| Formats supportés | PDF, HTML, Images, Markdown (DOCX/TXT plus tard) |
+| `useful: false` | Chunk gardé en base, NON indexé dans Qdrant |
+| IDs Qdrant multiples | JSON array `qdrant_point_ids` |
+| Priorité modèle LLM | Déploiement > Agent > Global |
+| Seuil découpage | 1500 chars par défaut, configurable |
+| Catégories | Utilise `DocumentCategory`, enrichissement auto |
+| PDF multi-pages | Traitement séquentiel |
+| Prévisualisation Q/R | Non, on indexe direct et corrige après |
+| Stockage debug | Tout conserver, archivage plus tard |
+| Pipeline steps | Jobs async séparés par étape |
+| Relance étape | Isolée + validation avant suite |
+| Historique résultats | Dernier uniquement |
 
 ---
 
-## 9. Questions et Points à Clarifier
+## 10. Fichiers à Modifier/Créer
 
-Avant de passer au développement, j'ai besoin de clarifications sur les points suivants :
+### 10.1 Fichiers existants à modifier
 
-### 9.1 Fichiers DOCX et TXT
-
-**Question :** Les fichiers DOCX et TXT ne sont pas mentionnés dans les pipelines. Comment les traiter ?
-
-**Propositions :**
-- **DOCX** → Pipeline dédié DOCX → Markdown (extraction XML) → Pipeline Markdown
-- **TXT** → Traité directement comme Markdown (structure plate)
-
-### 9.2 Pipeline PDF multi-pages
-
-**Question :** Pour un PDF de 50 pages, on génère 50 images puis 50 passages Vision LLM. Comment gérer la concaténation ?
-
-**Propositions :**
-- Option A : Traiter page par page, concaténer le Markdown final
-- Option B : Traiter par lot de N pages
-- Option C : Paralléliser les appels Vision
-
-### 9.3 Gestion du `useful: false`
-
-**Question :** Quand le LLM retourne `useful: false`, que fait-on ?
-
-**Propositions :**
-- Option A : Ne rien indexer du tout (pas de point Qdrant)
-- Option B : Indexer quand même le point "source_material" pour référence
-- Option C : Garder le chunk en base mais sans l'indexer (pour audit)
-
-### 9.4 Seuil des 1500 caractères
-
-**Question :** Ce seuil est-il fixe ou configurable dans `/admin/gestion-rag-page` ?
-
-### 9.5 Catégories dynamiques existantes
-
-**Question :** Le système actuel de `DocumentCategory` (table séparée avec usage_count) reste-t-il ? Ou on utilise uniquement la catégorie en string dans le JSON LLM ?
-
-**Considération :** Si on garde les catégories existantes, on peut les proposer au LLM dans le prompt pour cohérence.
-
-### 9.6 Points Qdrant multiples
-
-**Question :** Actuellement `DocumentChunk` a un champ `qdrant_point_id` (un seul ID). Avec N+1 points par chunk, faut-il :
-- Option A : Stocker les IDs dans un JSON `qdrant_point_ids`
-- Option B : Créer une table de liaison `chunk_qdrant_points`
-- Option C : Ne stocker que le premier ID et dériver les autres
-
-### 9.7 Modèle LLM pour Q/R
-
-**Question :** "celui paramétré sur l'agent IA" vs "celui paramétré sur les déploiements" - quelle est la priorité ? Où configure-t-on le fallback ?
-
-### 9.8 Prévisualisation avant indexation
-
-**Question :** Veut-on permettre de prévisualiser les Q/R générées avant l'indexation finale pour validation manuelle ?
-
-### 9.9 Statistiques RAG
-
-**Question :** Doit-on tracker les requêtes impliquant chaque document pour les statistiques d'utilisation (onglet RAG dans ma version précédente) ?
-
----
-
-## 10. Suggestions d'Améliorations
-
-### 10.1 Mode "Dry Run"
-
-Permettre de lancer le pipeline sans indexation finale pour valider les Q/R générées.
-
-### 10.2 Édition des Q/R
-
-Dans l'onglet Chunks, permettre d'éditer manuellement les questions/réponses générées avant ré-indexation.
-
-### 10.3 Fusion intelligente
-
-Détecter les chunks adjacents avec la même catégorie et proposer une fusion.
-
-### 10.4 Export des Q/R
-
-Exporter les paires Q/R en JSON/CSV pour review externe ou fine-tuning.
-
-### 10.5 Monitoring du pipeline
-
-Dashboard temps réel pour suivre l'avancement des traitements en file d'attente.
-
----
-
-## 11. Références Techniques
-
-### 11.1 Fichiers existants à modifier
-
-| Fichier | Type de modification |
-|---------|---------------------|
-| `app/Filament/Pages/GestionRagPage.php` | Refonte complète |
-| `app/Filament/Resources/DocumentResource.php` | Refonte formulaires |
-| `app/Filament/Resources/DocumentResource/Pages/*` | Refonte onglets |
-| `app/Models/Document.php` | Ajout/suppression colonnes |
+| Fichier | Modification |
+|---------|-------------|
+| `app/Filament/Pages/GestionRagPage.php` | Refonte zones dépliables |
+| `app/Filament/Resources/DocumentResource.php` | Nouveau formulaire création |
+| `app/Filament/Resources/DocumentResource/Pages/EditDocument.php` | Nouveaux onglets |
+| `app/Models/Document.php` | Nouveaux champs, suppression anciens |
 | `app/Models/DocumentChunk.php` | Nouveaux champs Q/R |
-| `app/Jobs/ProcessDocumentJob.php` | Nouvelle orchestration |
-| `config/documents.php` | Nouveaux paramètres pipeline |
+| `app/Jobs/ProcessDocumentJob.php` | Utilise orchestrateur |
+| `config/documents.php` | Paramètres pipeline |
 
-### 11.2 Nouveaux fichiers à créer
+### 10.2 Nouveaux fichiers à créer
 
 | Fichier | Description |
 |---------|-------------|
 | `app/Services/Pipeline/PipelineOrchestratorService.php` | Orchestrateur |
 | `app/Services/Pipeline/MarkdownChunkerService.php` | Découpe Markdown |
 | `app/Services/Pipeline/QrGeneratorService.php` | Génération Q/R |
-| `app/Services/Pipeline/PdfToImageService.php` | Conversion PDF |
+| `app/Services/Pipeline/PdfToImagesService.php` | Conversion PDF |
+| `app/Jobs/Pipeline/ProcessPdfToImagesJob.php` | Job étape 1 |
+| `app/Jobs/Pipeline/ProcessImagesToMarkdownJob.php` | Job étape 2 |
+| `app/Jobs/Pipeline/ProcessHtmlToMarkdownJob.php` | Job HTML |
+| `app/Jobs/Pipeline/ProcessMarkdownToQrJob.php` | Job final |
 | `database/migrations/xxx_refactor_documents_for_pipeline.php` | Migration |
 
 ---
 
-## 12. Prochaines Étapes
+## 11. Ordre de Développement
 
-Une fois les questions clarifiées :
-
-1. **Validation** du cahier des charges
-2. **Migration DB** et modèles
-3. **Services pipeline** (orchestrateur + étapes)
-4. **Interface création** (`/admin/documents/create`)
-5. **Interface édition** (onglets Pipeline, Indexation, Chunks)
-6. **Page paramétrage** (`/admin/gestion-rag-page`)
+1. **Migration DB** et modèles (Document, DocumentChunk)
+2. **Services pipeline** (Orchestrateur, PdfToImages, MarkdownChunker, QrGenerator)
+3. **Jobs async** par étape
+4. **Page paramétrage** (`/admin/gestion-rag-page`)
+5. **Interface création** (`/admin/documents/create`)
+6. **Interface édition** (onglets Pipeline, Indexation, Chunks)
 7. **Adaptation import masse**
-8. **Tests et documentation**
+8. **Tests**
 
 ---
 
-> **En attente de validation et réponses aux questions avant développement.**
+> **Statut : Cahier des charges validé. Prêt pour développement.**
