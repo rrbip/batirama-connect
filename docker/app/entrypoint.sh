@@ -242,12 +242,35 @@ if [ ! -f "$INIT_MARKER" ]; then
 else
     echo "📌 Application déjà initialisée"
 
+    # Toujours vider les caches au redémarrage (pour les mises à jour de code)
+    echo "   ⚡ Nettoyage des caches..."
+    php artisan config:clear 2>/dev/null || true
+    php artisan cache:clear 2>/dev/null || true
+    php artisan view:clear 2>/dev/null || true
+    php artisan route:clear 2>/dev/null || true
+
+    # Régénérer l'autoloader si le code a changé
+    if vendor_needs_update; then
+        echo "   📦 Mise à jour des dépendances Composer..."
+        if [ "$APP_ENV" = "production" ]; then
+            composer install --no-dev --optimize-autoloader --no-interaction
+        else
+            composer install --optimize-autoloader --no-interaction
+        fi
+        md5sum /var/www/html/composer.lock | cut -d' ' -f1 > /var/www/html/vendor/.composer-lock-hash
+    else
+        # Juste regénérer l'autoloader pour les nouvelles classes
+        composer dump-autoload --optimize 2>/dev/null || true
+    fi
+
     # Vérifier les migrations en attente
     PENDING=$(php artisan migrate:status --pending 2>/dev/null | grep -c "Pending" || true)
     if [ "$PENDING" -gt 0 ]; then
         echo "   📦 $PENDING migration(s) en attente..."
         php artisan migrate --force
     fi
+
+    echo "   ✅ Application prête"
 fi
 
 echo ""
