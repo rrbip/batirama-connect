@@ -79,6 +79,7 @@ Cette plateforme s'intègre dans un écosystème plus large comprenant :
 | `mistral-small` | 24B | Support rapide, Q&A général | 32GB |
 | `mistral:7b` | 7B | Développement, tests | 8GB |
 | `nomic-embed-text` | - | Génération d'embeddings | 4GB |
+| `moondream` | 1.6B | Vision : extraction texte images/PDF | 4GB |
 
 ---
 
@@ -231,6 +232,10 @@ batirama-connect/
 | [10_documents_rag.md](./10_documents_rag.md) | Gestion des documents RAG (upload, extraction, indexation) |
 | [11_async_ai_messages.md](./11_async_ai_messages.md) | Traitement asynchrone des messages IA avec monitoring |
 | [12_future_improvements.md](./12_future_improvements.md) | 🚫 **RÉFLEXION** - Améliorations futures (Query Rewriting, embeddings) - NE PAS DÉVELOPPER sans CDC |
+| [13_web_crawler.md](./13_web_crawler.md) | Crawler Web pour RAG (architecture multi-agents, cache partagé) |
+| [15_fabricant_catalogs.md](./15_fabricant_catalogs.md) | Catalogues Fabricants (crawl, extraction produits, liaison utilisateurs) |
+| [16_locale_detection.md](./16_locale_detection.md) | Détection de langue sur documents et produits (80+ langues supportées) |
+| [17_extraction_pipelines.md](./17_extraction_pipelines.md) | Pipelines d'extraction (OCR, Vision, HTML) - Visualisation et traçage |
 
 ---
 

@@ -56,6 +56,7 @@ class LlmChunkingSettingsPage extends Page implements HasForms
             'max_retries' => $settings->max_retries,
             'timeout_seconds' => $settings->timeout_seconds,
             'system_prompt' => $settings->system_prompt,
+            'enrichment_prompt' => $settings->enrichment_prompt,
         ]);
 
         $this->refreshQueueStats();
@@ -141,15 +142,26 @@ class LlmChunkingSettingsPage extends Page implements HasForms
                     ])
                     ->columns(2),
 
-                Section::make('Prompt système')
-                    ->description('Instructions envoyées au LLM pour le découpage sémantique')
+                Section::make('Prompt système (LLM Chunking)')
+                    ->description('Instructions envoyées au LLM pour le découpage sémantique complet')
                     ->schema([
                         MarkdownEditor::make('system_prompt')
                             ->label('')
                             ->required()
                             ->columnSpanFull()
                             ->helperText('Utilisez {CATEGORIES} et {INPUT_TEXT} comme placeholders.'),
-                    ]),
+                    ])
+                    ->collapsed(),
+
+                Section::make('Prompt d\'enrichissement (Markdown)')
+                    ->description('Instructions pour enrichir les chunks markdown avec catégories, keywords et résumés')
+                    ->schema([
+                        MarkdownEditor::make('enrichment_prompt')
+                            ->label('')
+                            ->columnSpanFull()
+                            ->helperText('Utilisez {CATEGORIES} et {CHUNKS_JSON} comme placeholders. Laissez vide pour le prompt par défaut.'),
+                    ])
+                    ->collapsed(),
             ])
             ->statePath('data');
     }
@@ -190,6 +202,22 @@ class LlmChunkingSettingsPage extends Page implements HasForms
 
         Notification::make()
             ->title('Prompt réinitialisé')
+            ->body('Le prompt par défaut a été restauré. N\'oubliez pas de sauvegarder.')
+            ->info()
+            ->send();
+    }
+
+    public function resetEnrichmentPrompt(): void
+    {
+        $defaultPrompt = LlmChunkingSetting::getDefaultEnrichmentPrompt();
+
+        $this->form->fill([
+            ...$this->form->getState(),
+            'enrichment_prompt' => $defaultPrompt,
+        ]);
+
+        Notification::make()
+            ->title('Prompt d\'enrichissement réinitialisé')
             ->body('Le prompt par défaut a été restauré. N\'oubliez pas de sauvegarder.')
             ->info()
             ->send();
@@ -252,13 +280,22 @@ class LlmChunkingSettingsPage extends Page implements HasForms
                 ->action(fn () => $this->testConnection()),
 
             Action::make('reset_prompt')
-                ->label('Réinitialiser le prompt')
+                ->label('Reset prompt chunking')
                 ->icon('heroicon-o-arrow-path')
                 ->color('warning')
                 ->requiresConfirmation()
                 ->modalHeading('Réinitialiser le prompt ?')
                 ->modalDescription('Le prompt sera remplacé par la version par défaut.')
                 ->action(fn () => $this->resetPrompt()),
+
+            Action::make('reset_enrichment_prompt')
+                ->label('Reset prompt enrichissement')
+                ->icon('heroicon-o-arrow-path')
+                ->color('warning')
+                ->requiresConfirmation()
+                ->modalHeading('Réinitialiser le prompt d\'enrichissement ?')
+                ->modalDescription('Le prompt d\'enrichissement sera remplacé par la version par défaut.')
+                ->action(fn () => $this->resetEnrichmentPrompt()),
 
             Action::make('save')
                 ->label('Sauvegarder')

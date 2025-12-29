@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Resources\DocumentResource\Pages;
 
 use App\Filament\Resources\DocumentResource;
+use App\Jobs\EnrichChunksWithLlmJob;
 use App\Jobs\IndexDocumentChunksJob;
 use App\Jobs\ProcessDocumentJob;
 use App\Jobs\ProcessLlmChunkingJob;
@@ -119,6 +120,25 @@ class EditDocument extends EditRecord
                                 ->send();
                         }
                     }
+                }),
+
+            Actions\Action::make('enrich_llm')
+                ->label('Enrichir LLM')
+                ->icon('heroicon-o-sparkles')
+                ->color('purple')
+                ->visible(fn () => $this->record->chunk_count > 0 && $this->record->chunk_strategy !== 'llm_assisted')
+                ->requiresConfirmation()
+                ->modalHeading('Enrichir les chunks avec le LLM')
+                ->modalDescription('Le LLM va analyser chaque chunk pour ajouter : catégorie, mots-clés et résumé. Le contenu ne sera pas modifié.')
+                ->modalIcon('heroicon-o-sparkles')
+                ->action(function () {
+                    EnrichChunksWithLlmJob::dispatch($this->record, batchSize: 10, reindexAfter: true);
+
+                    Notification::make()
+                        ->title('Enrichissement LLM lancé')
+                        ->body('Les chunks seront enrichis avec catégories, keywords et résumés. Consultez la queue llm-chunking.')
+                        ->success()
+                        ->send();
                 }),
 
             Actions\DeleteAction::make(),

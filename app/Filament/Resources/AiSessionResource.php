@@ -61,8 +61,23 @@ class AiSessionResource extends Resource
                         'api' => 'info',
                         'public_link' => 'success',
                         'partner' => 'primary',
+                        'whitelabel' => 'info',
                         default => 'gray',
                     }),
+
+                Tables\Columns\TextColumn::make('deployment.name')
+                    ->label('Déploiement')
+                    ->badge()
+                    ->color('info')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                Tables\Columns\TextColumn::make('deployment.editor.name')
+                    ->label('Éditeur')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                Tables\Columns\TextColumn::make('editorLink.artisan.name')
+                    ->label('Artisan')
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\TextColumn::make('message_count')
                     ->label('Messages')
@@ -110,6 +125,15 @@ class AiSessionResource extends Resource
                 Tables\Filters\SelectFilter::make('agent')
                     ->relationship('agent', 'name')
                     ->label('Agent'),
+
+                Tables\Filters\SelectFilter::make('deployment')
+                    ->relationship('deployment', 'name')
+                    ->label('Déploiement'),
+
+                Tables\Filters\Filter::make('whitelabel_only')
+                    ->label('Sessions whitelabel')
+                    ->query(fn (Builder $query) => $query->whereNotNull('deployment_id'))
+                    ->toggle(),
 
                 Tables\Filters\SelectFilter::make('status')
                     ->options([

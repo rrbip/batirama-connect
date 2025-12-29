@@ -209,6 +209,27 @@ class DocumentResource extends Resource
 
                                                 return new \Illuminate\Support\HtmlString($html);
                                             })
+                                        Forms\Components\Select::make('category')
+                                            ->label('Catégorie')
+                                            ->options([
+                                                'documentation' => 'Documentation',
+                                                'faq' => 'FAQ',
+                                                'product' => 'Produit',
+                                                'support' => 'Support',
+                                                'legal' => 'Légal',
+                                                'other' => 'Autre',
+                                            ]),
+
+                                        Forms\Components\Select::make('extraction_method')
+                                            ->label('Méthode d\'extraction (PDF)')
+                                            ->options([
+                                                'auto' => 'Automatique (recommandé)',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                                'vision' => 'Vision IA (tableaux)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Vision: préserve la structure des tableaux. OCR: pour les PDF scannés.')
                                             ->columnSpanFull(),
                                     ])
                                     ->visible(fn ($record) => !$record),
@@ -319,6 +340,16 @@ class DocumentResource extends Resource
                                                     'failed' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
                                                     default => ['label' => $status, 'color' => 'gray', 'icon' => 'question-mark-circle'],
                                                 };
+                                        Forms\Components\Placeholder::make('extraction_method_display')
+                                            ->label('Méthode utilisée')
+                                            ->content(fn ($record) => match ($record?->extraction_method) {
+                                                'auto' => 'Automatique',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                                'vision' => 'Vision IA',
+                                                null => '-',
+                                                default => $record?->extraction_method,
+                                            }),
 
                                                 $startedAt = isset($pipelineData['started_at']) ? \Carbon\Carbon::parse($pipelineData['started_at'])->format('d/m/Y H:i') : '-';
                                                 $completedAt = isset($pipelineData['completed_at']) ? \Carbon\Carbon::parse($pipelineData['completed_at'])->format('d/m/Y H:i') : '-';
@@ -421,6 +452,436 @@ class DocumentResource extends Resource
                                                         $error ? sprintf('<div class="mt-3 p-2 bg-danger-50 dark:bg-danger-900/20 rounded text-sm text-danger-700 dark:text-danger-300"><strong>Erreur:</strong> %s</div>', e($error)) : ''
                                                     );
                                                 }
+                                // Section Pipeline Vision (uniquement pour extraction vision)
+                                Forms\Components\Section::make('Pipeline d\'extraction Vision')
+                                    ->description('Détails du traitement PDF → Images → Markdown')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('vision_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $visionData = $metadata['vision_extraction'] ?? null;
+
+                                                if (!$visionData) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
+                                                }
+
+                                                // Informations générales
+                                                $html = '<div class="space-y-6">';
+
+                                                // 1. Étape PDF → Images
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. PDF → Images</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Outil:</span><br><strong class="text-blue-600">' . e($visionData['pdf_converter'] ?? 'pdftoppm') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Pages totales:</span><br><strong>' . ($visionData['total_pages'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">DPI:</span><br><strong>' . ($visionData['dpi'] ?? '300') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Stockage:</span><br><strong class="font-mono text-xs">' . e($visionData['storage_path'] ?? '-') . '</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 2. Étape Images → Markdown (Vision LLM)
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-purple-700 dark:text-purple-400">2. Images → Markdown (Vision IA)</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Bibliothèque:</span><br><strong class="text-purple-600">' . e($visionData['vision_library'] ?? 'Ollama API') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Modèle:</span><br><strong class="text-purple-600">' . e($visionData['vision_model'] ?? $visionData['model'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Pages traitées:</span><br><strong>' . ($visionData['pages_processed'] ?? '-') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Durée totale:</span><br><strong>' . ($visionData['duration_seconds'] ?? '-') . 's</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 3. Détail par page
+                                                $pages = $visionData['pages'] ?? [];
+                                                $storagePath = $visionData['storage_path'] ?? '';
+
+                                                // Récupérer le disque de stockage depuis les métadonnées, sinon utiliser les settings actuels
+                                                $storageDisk = $visionData['storage_disk']
+                                                    ?? \App\Models\VisionSetting::getInstance()->storage_disk
+                                                    ?? 'public';
+
+                                                // Message si le store_images était désactivé ou les images ont été supprimées
+                                                $imagesConfigured = $visionData['store_images'] ?? true;
+
+                                                if (!empty($pages)) {
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-green-700 dark:text-green-400">3. Détail par page</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4">';
+                                                    $html .= '<table class="w-full text-sm">';
+                                                    $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-left py-2">Markdown</th><th class="text-right py-2">Taille MD</th><th class="text-right py-2">Temps</th><th class="text-center py-2">Actions</th></tr>';
+                                                    $html .= '</thead><tbody>';
+
+                                                    foreach ($pages as $index => $page) {
+                                                        $imagePath = $page['image_path'] ?? '';
+                                                        $mdPath = $page['markdown_path'] ?? '';
+                                                        $mdContent = $page['markdown_content'] ?? null;
+                                                        $mdLength = $page['markdown_length'] ?? 0;
+                                                        $time = $page['processing_time'] ?? 0;
+                                                        $pageNum = $page['page'] ?? 0;
+
+                                                        // Générer l'URL de l'image si disponible
+                                                        // Essayer d'abord le disque des métadonnées, puis fallback sur l'autre
+                                                        $imageUrl = '';
+                                                        $imageExists = false;
+                                                        if ($imagePath) {
+                                                            // Essayer le disque principal
+                                                            if (\Storage::disk($storageDisk)->exists($imagePath)) {
+                                                                $imageUrl = \Storage::disk($storageDisk)->url($imagePath);
+                                                                $imageExists = true;
+                                                            }
+                                                            // Fallback: essayer l'autre disque
+                                                            elseif ($storageDisk === 'public' && \Storage::disk('local')->exists($imagePath)) {
+                                                                // Les fichiers 'local' ne sont pas accessibles via URL
+                                                                $imageExists = true;
+                                                            }
+                                                            elseif ($storageDisk === 'local' && \Storage::disk('public')->exists($imagePath)) {
+                                                                $imageUrl = \Storage::disk('public')->url($imagePath);
+                                                                $imageExists = true;
+                                                            }
+                                                        }
+
+                                                        // Raccourcir les chemins pour l'affichage
+                                                        $imageDisplay = $imagePath ? basename($imagePath) : '-';
+                                                        $mdDisplay = $mdPath ? basename($mdPath) : '-';
+
+                                                        // Boutons d'action
+                                                        $actions = '<div class="flex gap-1 justify-center">';
+                                                        if ($imageUrl) {
+                                                            $actions .= '<a href="' . e($imageUrl) . '" target="_blank" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50" title="Voir l\'image"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></a>';
+                                                        } elseif ($imageExists && !$imageUrl) {
+                                                            // Image existe sur disque local mais pas accessible via URL
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 rounded" title="Image stockée localement (non accessible via URL)"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></span>';
+                                                        } elseif ($imagePath && !$imageExists) {
+                                                            // Image dans les métadonnées mais fichier introuvable
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-danger-500 bg-danger-50 dark:bg-danger-900/30 dark:text-danger-400 rounded" title="Image non trouvée - Retraitez le document pour régénérer"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></span>';
+                                                        } elseif (!$imagePath && !$imagesConfigured) {
+                                                            // store_images était désactivé
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 dark:text-gray-400 rounded" title="Stockage images désactivé lors du traitement">-</span>';
+                                                        }
+                                                        if ($mdContent) {
+                                                            $actions .= '<button type="button" onclick="document.getElementById(\'md-content-' . $pageNum . '\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100 dark:hover:bg-purple-900/50" title="Voir le markdown"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>';
+                                                        }
+                                                        $actions .= '</div>';
+
+                                                        $html .= sprintf(
+                                                            '<tr class="border-b dark:border-gray-700">
+                                                                <td class="py-2 font-medium">%d</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
+                                                                <td class="py-2 text-right">%s</td>
+                                                                <td class="py-2 text-right">%ss</td>
+                                                                <td class="py-2 text-center">%s</td>
+                                                            </tr>',
+                                                            $pageNum,
+                                                            e($imageDisplay),
+                                                            e($mdDisplay),
+                                                            number_format($mdLength) . ' chars',
+                                                            $time,
+                                                            $actions
+                                                        );
+
+                                                        // Ligne expandable pour le contenu markdown
+                                                        if ($mdContent) {
+                                                            $html .= '<tr id="md-content-' . $pageNum . '" class="hidden">';
+                                                            $html .= '<td colspan="6" class="p-0">';
+                                                            $html .= '<div class="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">';
+                                                            $html .= '<div class="flex items-center justify-between mb-2">';
+                                                            $html .= '<span class="text-xs font-medium text-gray-500">Markdown extrait - Page ' . $pageNum . '</span>';
+                                                            $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'md-text-' . $pageNum . '\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                            $html .= '</div>';
+                                                            $html .= '<pre id="md-text-' . $pageNum . '" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e($mdContent) . '</pre>';
+                                                            $html .= '</div></td></tr>';
+                                                        }
+                                                    }
+                                                    $html .= '</tbody></table>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 4. Étape Chunking + Indexation
+                                                $chunksUrl = '/admin/documents/' . $record->id . '/chunks';
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
+                                                $html .= '<a href="' . $chunksUrl . '" class="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-amber-700 bg-amber-100 rounded-full hover:bg-amber-200 transition">';
+                                                $html .= '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>';
+                                                $html .= 'Gérer les chunks</a>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // 5. Erreurs éventuelles
+                                                $errors = $visionData['errors'] ?? [];
+                                                if (!empty($errors)) {
+                                                    $html .= '<div class="border border-red-200 dark:border-red-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-700">';
+                                                    $html .= '<h4 class="font-medium text-red-700 dark:text-red-400">Erreurs</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 space-y-2">';
+                                                    foreach ($errors as $error) {
+                                                        $html .= sprintf(
+                                                            '<div class="text-sm text-red-600 dark:text-red-400">Page %d: %s</div>',
+                                                            $error['page'] ?? 0,
+                                                            e($error['error'] ?? 'Erreur inconnue')
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsible()
+                                    ->visible(fn ($record) => $record?->extraction_method === 'vision' || !empty($record?->extraction_metadata['vision_extraction'] ?? null)),
+
+                                // Section Pipeline HTML (uniquement pour extraction HTML)
+                                Forms\Components\Section::make('Pipeline d\'extraction HTML')
+                                    ->description('Détails de la conversion HTML → Markdown')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('html_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $htmlData = $metadata['html_extraction'] ?? null;
+
+                                                if (!$htmlData) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
+                                                }
+
+                                                $html = '<div class="space-y-6">';
+
+                                                // 1. Étape Fetch HTML
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. Récupération HTML</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Source:</span><br><strong class="text-blue-600">URL crawlée</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Taille HTML:</span><br><strong>' . number_format($htmlData['html_size'] ?? 0) . ' chars</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">URL:</span><br><span class="text-xs text-gray-400 truncate block max-w-[200px]" title="' . e($record->source_url ?? '-') . '">' . e(\Illuminate\Support\Str::limit($record->source_url ?? '-', 40)) . '</span></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($htmlData['original_html'])) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-original\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100" title="Voir HTML original"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>HTML</button>';
+                                                }
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+                                                // Zone expandable pour HTML original
+                                                if (!empty($htmlData['original_html'])) {
+                                                    $html .= '<div id="html-original" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">HTML Original</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-original-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-original-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($htmlData['original_html'], 5000)) . '</pre>';
+                                                    $html .= '</div>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // 2. Étape Nettoyage HTML
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-orange-50 dark:bg-orange-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-orange-700 dark:text-orange-400">2. Nettoyage HTML</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Taille après nettoyage:</span><br><strong>' . number_format($htmlData['cleaned_html_size'] ?? 0) . ' chars</strong></div>';
+                                                $compressionRatio = $htmlData['compression_ratio'] ?? 0;
+                                                $html .= '<div><span class="text-gray-500">Compression:</span><br><strong class="text-green-600">' . $compressionRatio . '%</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Éléments supprimés:</span><br><strong>scripts, styles, nav</strong></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($htmlData['cleaned_html'])) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-cleaned\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-orange-600 bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400 rounded hover:bg-orange-100" title="Voir HTML nettoyé"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>HTML</button>';
+                                                }
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+                                                // Zone expandable pour HTML nettoyé
+                                                if (!empty($htmlData['cleaned_html'])) {
+                                                    $html .= '<div id="html-cleaned" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">HTML Nettoyé</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-cleaned-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-cleaned-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($htmlData['cleaned_html'], 5000)) . '</pre>';
+                                                    $html .= '</div>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // 3. Étape Conversion Markdown
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-purple-50 dark:bg-purple-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-purple-700 dark:text-purple-400">3. Conversion → Markdown</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Convertisseur:</span><br><strong class="text-purple-600">' . e($htmlData['converter'] ?? 'League HTML to Markdown') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Taille Markdown:</span><br><strong>' . number_format($htmlData['markdown_size'] ?? 0) . ' chars</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Temps:</span><br><strong>' . ($htmlData['processing_time_ms'] ?? 0) . 'ms</strong></div>';
+                                                $html .= '<div class="flex items-center justify-end">';
+                                                if (!empty($record->extracted_text)) {
+                                                    $html .= '<button type="button" onclick="document.getElementById(\'html-markdown\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-purple-600 bg-purple-50 dark:bg-purple-900/30 dark:text-purple-400 rounded hover:bg-purple-100" title="Voir Markdown"><svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>MD</button>';
+                                                }
+                                                $html .= '</div>';
+                                                $html .= '</div>';
+
+                                                // Éléments détectés
+                                                $elements = $htmlData['elements_detected'] ?? [];
+                                                if (!empty($elements)) {
+                                                    $html .= '<div class="border-t border-gray-200 dark:border-gray-700 p-4">';
+                                                    $html .= '<div class="text-xs font-medium text-gray-500 mb-2">Éléments structurels détectés</div>';
+                                                    $html .= '<div class="flex flex-wrap gap-2">';
+                                                    foreach ($elements as $type => $count) {
+                                                        $label = match ($type) {
+                                                            'headings' => 'Titres',
+                                                            'lists' => 'Listes',
+                                                            'tables' => 'Tableaux',
+                                                            'links' => 'Liens',
+                                                            'images' => 'Images',
+                                                            'paragraphs' => 'Paragraphes',
+                                                            default => $type,
+                                                        };
+                                                        $html .= sprintf(
+                                                            '<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 rounded text-xs">%s: <strong>%d</strong></span>',
+                                                            $label,
+                                                            $count
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // Zone expandable pour Markdown
+                                                if (!empty($record->extracted_text)) {
+                                                    $html .= '<div id="html-markdown" class="hidden border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800">';
+                                                    $html .= '<div class="flex items-center justify-between mb-2">';
+                                                    $html .= '<span class="text-xs font-medium text-gray-500">Markdown généré</span>';
+                                                    $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'html-markdown-content\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                    $html .= '</div>';
+                                                    $html .= '<pre id="html-markdown-content" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($record->extracted_text, 5000)) . '</pre>';
+                                                    $html .= '</div>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // 4. Étape Chunking + Indexation
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">4. Chunking + Indexation</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // Timestamp
+                                                if (!empty($htmlData['extracted_at'])) {
+                                                    $html .= '<div class="text-xs text-gray-400 text-right">';
+                                                    $html .= 'Extrait le ' . \Carbon\Carbon::parse($htmlData['extracted_at'])->format('d/m/Y H:i');
+                                                    $html .= '</div>';
+                                                }
+
                                                 $html .= '</div>';
 
                                                 return new \Illuminate\Support\HtmlString($html);
@@ -467,6 +928,238 @@ class DocumentResource extends Resource
 
                                 // Extracted Text (collapsible)
                                 Forms\Components\Section::make('Texte extrait (Markdown)')
+                                    ])
+                                    ->collapsible()
+                                    ->visible(fn ($record) => in_array($record?->document_type, ['html', 'htm']) || !empty($record?->extraction_metadata['html_extraction'] ?? null)),
+
+                                // Section Pipeline OCR (uniquement pour extraction OCR/Tesseract)
+                                Forms\Components\Section::make('Pipeline d\'extraction OCR')
+                                    ->description('Détails du traitement PDF → Images → Texte (Tesseract)')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('ocr_pipeline_info')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $metadata = $record?->extraction_metadata ?? [];
+                                                $ocrData = $metadata['ocr_extraction'] ?? null;
+
+                                                if (!$ocrData) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg">
+                                                            <div class="flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                                                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                                                </svg>
+                                                                <strong>Métadonnées de traçage non disponibles</strong>
+                                                            </div>
+                                                            <p class="mt-2 text-sm text-yellow-600 dark:text-yellow-500">
+                                                                Ce document a été extrait avant l\'ajout du système de traçage du pipeline.
+                                                                Pour voir le détail complet de chaque étape, utilisez le bouton <strong>Retraiter</strong>.
+                                                            </p>
+                                                        </div>'
+                                                    );
+                                                }
+
+                                                // Déterminer si c'est une image ou un PDF
+                                                $isImage = ($ocrData['source_type'] ?? null) === 'image';
+
+                                                $html = '<div class="space-y-6">';
+
+                                                if (!$isImage) {
+                                                    // 1. Étape PDF → Images (uniquement pour PDF)
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-blue-700 dark:text-blue-400">1. PDF → Images</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                    $html .= '<div><span class="text-gray-500">Outil:</span><br><strong class="text-blue-600">' . e($ocrData['pdf_converter'] ?? 'pdftoppm (poppler-utils)') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">Pages totales:</span><br><strong>' . ($ocrData['total_pages'] ?? '-') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">DPI:</span><br><strong>' . ($ocrData['dpi'] ?? '300') . '</strong></div>';
+                                                    $html .= '<div><span class="text-gray-500">Temps conversion:</span><br><strong>' . ($ocrData['pdf_conversion_time'] ?? '-') . 's</strong></div>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 2. Étape Images → Texte (OCR)
+                                                $stepNumber = $isImage ? 1 : 2;
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-orange-50 dark:bg-orange-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-orange-700 dark:text-orange-400">' . $stepNumber . '. ' . ($isImage ? 'Image' : 'Images') . ' → Texte (OCR)</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+                                                $html .= '<div><span class="text-gray-500">Moteur OCR:</span><br><strong class="text-orange-600">' . e($ocrData['ocr_engine'] ?? 'Tesseract OCR') . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Langues:</span><br><strong>' . e($ocrData['ocr_languages'] ?? 'fra+eng') . '</strong></div>';
+                                                if (!$isImage) {
+                                                    $html .= '<div><span class="text-gray-500">Pages traitées:</span><br><strong>' . ($ocrData['pages_processed'] ?? '-') . '</strong></div>';
+                                                } else {
+                                                    $html .= '<div><span class="text-gray-500">Taille texte:</span><br><strong>' . number_format($ocrData['text_length'] ?? 0) . ' chars</strong></div>';
+                                                }
+                                                $html .= '<div><span class="text-gray-500">Durée totale:</span><br><strong>' . ($ocrData['total_processing_time'] ?? $ocrData['processing_time'] ?? '-') . 's</strong></div>';
+                                                $html .= '</div></div>';
+
+                                                // 3. Détail par page (uniquement pour PDF multi-pages)
+                                                $pages = $ocrData['pages'] ?? [];
+                                                $storagePath = $ocrData['storage_path'] ?? '';
+                                                $storageDisk = $ocrData['storage_disk'] ?? 'public';
+
+                                                if (!$isImage && !empty($pages)) {
+                                                    $stepNumber++;
+                                                    $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-green-50 dark:bg-green-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<h4 class="font-medium text-green-700 dark:text-green-400">' . $stepNumber . '. Détail par page</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4">';
+                                                    $html .= '<table class="w-full text-sm">';
+                                                    $html .= '<thead class="text-gray-500 border-b dark:border-gray-700">';
+                                                    $html .= '<tr><th class="text-left py-2">Page</th><th class="text-left py-2">Image</th><th class="text-right py-2">Taille texte</th><th class="text-right py-2">Temps OCR</th><th class="text-center py-2">Actions</th></tr>';
+                                                    $html .= '</thead><tbody>';
+
+                                                    foreach ($pages as $pageIndex => $page) {
+                                                        $textLength = $page['text_length'] ?? 0;
+                                                        $time = $page['processing_time'] ?? 0;
+                                                        $pageNum = $page['page'] ?? ($pageIndex + 1);
+                                                        $imagePath = $page['image_path'] ?? '';
+                                                        $textContent = $page['text_content'] ?? '';
+
+                                                        // Générer l'URL de l'image si disponible
+                                                        $imageUrl = '';
+                                                        $imageExists = false;
+                                                        if ($imagePath) {
+                                                            if (\Storage::disk($storageDisk)->exists($imagePath)) {
+                                                                $imageUrl = \Storage::disk($storageDisk)->url($imagePath);
+                                                                $imageExists = true;
+                                                            } elseif ($storageDisk === 'public' && \Storage::disk('local')->exists($imagePath)) {
+                                                                $imageExists = true;
+                                                            }
+                                                        }
+
+                                                        $imageDisplay = $imagePath ? basename($imagePath) : '-';
+
+                                                        // Boutons d'action
+                                                        $actions = '<div class="flex gap-1 justify-center">';
+                                                        if ($imageUrl) {
+                                                            $actions .= '<a href="' . e($imageUrl) . '" target="_blank" class="inline-flex items-center px-2 py-1 text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50" title="Voir l\'image"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg></a>';
+                                                        } elseif ($imagePath && !$imageExists) {
+                                                            $actions .= '<span class="inline-flex items-center px-2 py-1 text-xs font-medium text-danger-500 bg-danger-50 dark:bg-danger-900/30 dark:text-danger-400 rounded" title="Image non trouvée"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></span>';
+                                                        }
+                                                        if ($textContent) {
+                                                            $actions .= '<button type="button" onclick="document.getElementById(\'ocr-text-' . $pageNum . '\').classList.toggle(\'hidden\')" class="inline-flex items-center px-2 py-1 text-xs font-medium text-orange-600 bg-orange-50 dark:bg-orange-900/30 dark:text-orange-400 rounded hover:bg-orange-100 dark:hover:bg-orange-900/50" title="Voir le texte OCR"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg></button>';
+                                                        }
+                                                        $actions .= '</div>';
+
+                                                        $html .= sprintf(
+                                                            '<tr class="border-b dark:border-gray-700">
+                                                                <td class="py-2 font-medium">%d</td>
+                                                                <td class="py-2 text-gray-500 font-mono text-xs">%s</td>
+                                                                <td class="py-2 text-right">%s chars</td>
+                                                                <td class="py-2 text-right">%ss</td>
+                                                                <td class="py-2 text-center">%s</td>
+                                                            </tr>',
+                                                            $pageNum,
+                                                            e($imageDisplay),
+                                                            number_format($textLength),
+                                                            $time,
+                                                            $actions
+                                                        );
+
+                                                        // Ligne expandable pour le texte OCR
+                                                        if ($textContent) {
+                                                            $html .= '<tr id="ocr-text-' . $pageNum . '" class="hidden">';
+                                                            $html .= '<td colspan="5" class="p-0">';
+                                                            $html .= '<div class="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">';
+                                                            $html .= '<div class="flex items-center justify-between mb-2">';
+                                                            $html .= '<span class="text-xs font-medium text-gray-500">Texte OCR - Page ' . $pageNum . '</span>';
+                                                            $html .= '<button onclick="navigator.clipboard.writeText(document.getElementById(\'ocr-content-' . $pageNum . '\').innerText)" class="text-xs text-primary-600 hover:underline">Copier</button>';
+                                                            $html .= '</div>';
+                                                            $html .= '<pre id="ocr-content-' . $pageNum . '" class="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64 overflow-y-auto">' . e($textContent) . '</pre>';
+                                                            $html .= '</div></td></tr>';
+                                                        }
+                                                    }
+                                                    $html .= '</tbody></table>';
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // 4. Étape Chunking + Indexation
+                                                $stepNumber = $isImage ? 2 : (empty($pages) ? 3 : 4);
+                                                $html .= '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">';
+                                                $html .= '<div class="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-gray-200 dark:border-gray-700">';
+                                                $html .= '<h4 class="font-medium text-amber-700 dark:text-amber-400">' . $stepNumber . '. Chunking + Indexation</h4>';
+                                                $html .= '</div>';
+                                                $html .= '<div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">';
+
+                                                $chunkStrategy = $record->chunk_strategy ?? 'sentence';
+                                                $strategyLabel = match ($chunkStrategy) {
+                                                    'sentence' => 'Par phrase',
+                                                    'paragraph' => 'Par paragraphe',
+                                                    'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
+                                                    'llm_assisted' => 'Assisté par LLM',
+                                                    default => $chunkStrategy,
+                                                };
+
+                                                $html .= '<div><span class="text-gray-500">Stratégie:</span><br><strong class="text-amber-600">' . e($strategyLabel) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Chunks générés:</span><br><strong>' . ($record->chunk_count ?? 0) . '</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Vectorisation:</span><br><strong class="text-amber-600">Ollama (nomic-embed-text)</strong></div>';
+                                                $html .= '<div><span class="text-gray-500">Base vectorielle:</span><br><strong class="text-amber-600">Qdrant</strong></div>';
+                                                $html .= '</div>';
+
+                                                // Zone expandable avec les chunks
+                                                $chunks = $record->chunks()->orderBy('chunk_index')->get();
+                                                if ($chunks->isNotEmpty()) {
+                                                    $html .= '<details class="border-t border-gray-200 dark:border-gray-700">';
+                                                    $html .= '<summary class="px-4 py-2 text-sm font-medium text-amber-600 dark:text-amber-400 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-900/20">Voir les ' . $chunks->count() . ' chunks</summary>';
+                                                    $html .= '<div class="p-4 space-y-3 max-h-96 overflow-y-auto">';
+                                                    foreach ($chunks as $chunk) {
+                                                        $statusIcon = $chunk->is_indexed ? '✓' : '✗';
+                                                        $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
+                                                        $html .= '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">';
+                                                        $html .= '<div class="flex justify-between items-center mb-2">';
+                                                        $html .= '<span class="font-medium text-sm">Chunk #' . $chunk->chunk_index . '</span>';
+                                                        $html .= '<div class="flex items-center gap-2">';
+                                                        $html .= '<span class="text-xs text-gray-500">' . ($chunk->token_count ?? 0) . ' tokens</span>';
+                                                        $html .= '<span class="text-xs ' . $statusColor . '">' . $statusIcon . ' ' . ($chunk->is_indexed ? 'Indexé' : 'Non indexé') . '</span>';
+                                                        $html .= '</div></div>';
+                                                        $html .= '<div class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">' . e(\Illuminate\Support\Str::limit($chunk->content, 300)) . '</div>';
+                                                        $html .= '</div>';
+                                                    }
+                                                    $html .= '</div></details>';
+                                                }
+                                                $html .= '</div>';
+
+                                                // 5. Erreurs éventuelles
+                                                $errors = $ocrData['errors'] ?? [];
+                                                if (!empty($errors)) {
+                                                    $html .= '<div class="border border-red-200 dark:border-red-700 rounded-lg overflow-hidden">';
+                                                    $html .= '<div class="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-700">';
+                                                    $html .= '<h4 class="font-medium text-red-700 dark:text-red-400">Erreurs</h4>';
+                                                    $html .= '</div>';
+                                                    $html .= '<div class="p-4 space-y-2">';
+                                                    foreach ($errors as $error) {
+                                                        $html .= sprintf(
+                                                            '<div class="text-sm text-red-600 dark:text-red-400">Page %d: %s</div>',
+                                                            $error['page'] ?? 0,
+                                                            e($error['error'] ?? 'Erreur inconnue')
+                                                        );
+                                                    }
+                                                    $html .= '</div></div>';
+                                                }
+
+                                                // Timestamp
+                                                if (!empty($ocrData['extracted_at'])) {
+                                                    $html .= '<div class="text-xs text-gray-400 text-right">';
+                                                    $html .= 'Extrait le ' . \Carbon\Carbon::parse($ocrData['extracted_at'])->format('d/m/Y H:i');
+                                                    $html .= '</div>';
+                                                }
+
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->collapsible()
+                                    ->visible(fn ($record) => $record?->extraction_method === 'ocr' || !empty($record?->extraction_metadata['ocr_extraction'] ?? null)),
+
+                                Forms\Components\Section::make('Texte extrait')
+                                    ->description('Vous pouvez modifier le texte avant de le re-chunker')
                                     ->schema([
                                         Forms\Components\Textarea::make('extracted_text')
                                             ->label('')
@@ -510,6 +1203,7 @@ class DocumentResource extends Resource
                                                 'paragraph' => 'Par paragraphe',
                                                 'fixed_size' => 'Taille fixe',
                                                 'recursive' => 'Récursif',
+                                                'markdown' => 'Markdown (par headers)',
                                                 'llm_assisted' => 'Assisté par LLM',
                                             ])
                                             ->default('sentence'),

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Admin\DocumentController;
+use App\Http\Controllers\Whitelabel\StandaloneChatController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -18,11 +19,13 @@ Route::get('/', function () {
     ]);
 });
 
-// Public chat access (via token)
-Route::get('/c/{token}', function (string $token) {
-    // TODO: Implement public chat access
-    return "Chat public - Token: {$token}";
-})->name('public.chat');
+// Standalone chat pages (whitelabel session links)
+Route::get('/s/{token}', [StandaloneChatController::class, 'show'])
+    ->name('whitelabel.standalone');
+
+// Public chat access (legacy token)
+Route::get('/c/{token}', [StandaloneChatController::class, 'show'])
+    ->name('public.chat');
 
 // Admin routes for document management
 Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(function () {

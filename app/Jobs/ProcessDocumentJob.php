@@ -52,12 +52,14 @@ class ProcessDocumentJob implements ShouldQueue
                 throw new \RuntimeException("Aucun texte extrait du document");
             }
 
+            // Fusionner avec les métadonnées existantes (ex: vision_extraction, ocr_extraction)
+            $existingMetadata = $this->document->extraction_metadata ?? [];
             $this->document->update([
                 'extracted_text' => $extractedText,
-                'extraction_metadata' => [
+                'extraction_metadata' => array_merge($existingMetadata, [
                     'text_length' => mb_strlen($extractedText),
                     'estimated_tokens' => (int) ceil(mb_strlen($extractedText) / 4),
-                ],
+                ]),
                 'extracted_at' => now(),
             ]);
 

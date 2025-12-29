@@ -56,6 +56,31 @@ class BulkImportDocuments extends Page
                             ])
                             ->default(2)
                             ->helperText('Pour les ZIP : nombre de niveaux de sous-dossiers à utiliser comme contexte parent.'),
+                            ->helperText('Pour les ZIP : nombre de niveaux de sous-dossiers à utiliser comme catégorie.'),
+
+                        Forms\Components\Select::make('extraction_method')
+                            ->label('Méthode d\'extraction (PDF)')
+                            ->options([
+                                'auto' => 'Automatique (recommandé)',
+                                'text' => 'Texte uniquement',
+                                'ocr' => 'OCR (Tesseract)',
+                                'vision' => 'Vision IA (tableaux)',
+                            ])
+                            ->default('auto')
+                            ->helperText('Vision: préserve les tableaux. OCR: pour les PDF scannés.'),
+
+                        Forms\Components\Select::make('chunk_strategy')
+                            ->label('Stratégie de chunking')
+                            ->options([
+                                'sentence' => 'Par phrase',
+                                'paragraph' => 'Par paragraphe',
+                                'fixed_size' => 'Taille fixe',
+                                'recursive' => 'Récursif',
+                                'markdown' => 'Markdown (par headers)',
+                                'llm_assisted' => 'Assisté par LLM',
+                            ])
+                            ->default('sentence')
+                            ->helperText('Markdown: optimal pour HTML/MD. Automatiquement défini selon l\'agent.'),
                     ])
                     ->columns(2),
 

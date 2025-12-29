@@ -75,7 +75,9 @@ class ProcessCrawledContentJob implements ShouldQueue
                 : $agent->getDefaultExtractionMethod();
 
             // Déterminer la stratégie de chunking
-            $chunkStrategy = $agent->getDefaultChunkStrategy();
+            // Pour les contenus HTML, utiliser 'markdown' par défaut (optimal après conversion HTML→MD)
+            // Sinon utiliser la stratégie par défaut de l'agent
+            $chunkStrategy = $this->getOptimalChunkStrategy($contentType, $agent);
 
             // Générer le titre depuis l'URL
             $title = $this->generateTitleFromUrl($url);
@@ -273,6 +275,24 @@ class ProcessCrawledContentJob implements ShouldQueue
                 'pages_error' => $this->crawl->pages_error,
             ]);
         }
+    }
+
+    /**
+     * Détermine la stratégie de chunking optimale selon le type de contenu
+     *
+     * - HTML : utilise 'markdown' (optimal après conversion HTML→Markdown)
+     * - Autres : utilise la stratégie par défaut de l'agent
+     */
+    private function getOptimalChunkStrategy(string $contentType, \App\Models\Agent $agent): string
+    {
+        // Pour les contenus HTML, la stratégie 'markdown' est optimale
+        // car le HTML est converti en Markdown et découpé par headers
+        if (str_contains($contentType, 'text/html') || str_contains($contentType, 'application/xhtml')) {
+            return 'markdown';
+        }
+
+        // Pour les autres types, utiliser la stratégie de l'agent
+        return $agent->getDefaultChunkStrategy();
     }
 
     public function failed(\Throwable $exception): void

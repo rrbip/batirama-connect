@@ -174,6 +174,43 @@ services:
       - "${OLLAMA_EXTERNAL_PORT:-11434}:11434"
     networks:
       - ai_network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  # ===========================================
+  # OLLAMA INIT - Téléchargement des modèles
+  # ===========================================
+  # Ce service pull les modèles requis puis s'arrête.
+  # Les modèles sont persistés dans le volume ollama_data.
+  ollama-init:
+    image: ollama/ollama:${OLLAMA_VERSION:-latest}
+    container_name: aim_ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama
+      - OLLAMA_MODELS=${OLLAMA_MODELS:-nomic-embed-text,mistral:7b,moondream}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "⏳ Waiting for Ollama to be ready..."
+        sleep 5
+        IFS=',' read -ra MODELS <<< "$$OLLAMA_MODELS"
+        for model in "$${MODELS[@]}"; do
+          model=$$(echo "$$model" | xargs)
+          echo "📥 Pulling $$model..."
+          ollama pull "$$model" || echo "⚠️ Failed to pull $$model"
+        done
+        echo "✅ Model initialization complete"
+        ollama list
+    networks:
+      - ai_network
+    restart: "no"
 
   # ===========================================
   # SCHEDULER (CRON LARAVEL)
@@ -414,6 +451,14 @@ RUN apk add --no-cache \
     postgresql-dev \
     linux-headers \
     bash \
+    poppler-utils \
+    # OCR Tesseract pour extraction texte d'images
+    tesseract-ocr \
+    tesseract-ocr-data-fra \
+    tesseract-ocr-data-eng \
+    # ImageMagick pour manipulation d'images (Vision extraction)
+    imagemagick \
+    imagemagick-libs \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP

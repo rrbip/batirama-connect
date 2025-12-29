@@ -97,6 +97,15 @@ Le Crawler Web permet d'indexer automatiquement un site web complet dans le syst
 | **Délai entre requêtes** | Number | Millisecondes (défaut: 500ms) |
 | **Respecter robots.txt** | Toggle | Défaut: Oui |
 | **User-Agent** | TextInput | Défaut: `IA-Manager/1.0` |
+| **Extraction texte PDF** | Select | Méthode pour extraire le texte des PDFs (pour détection de langue) |
+
+### Méthode d'extraction PDF
+
+| Méthode | Description |
+|---------|-------------|
+| **Auto** (défaut) | Essaie `pdftotext`, puis OCR si le PDF est scanné |
+| **Texte uniquement** | Utilise uniquement `pdftotext` (rapide) |
+| **OCR uniquement** | Utilise Tesseract OCR (pour PDFs scannés) |
 
 ### Étape 2 : Authentification (optionnel)
 
@@ -136,11 +145,14 @@ Après création du crawl, ajoutez un ou plusieurs agents avec leur configuratio
 
 **Syntaxe des patterns :**
 ```
-/blog/*              # Wildcard simple
+/blog/*              # Wildcard simple sur le path
 /products/*.html     # Wildcard avec extension
+*locale=fr-FR*       # Wildcard sur la query string (paramètres URL)
 ^/docs/v[0-9]+/.*    # Regex (commence par ^)
 /admin               # Match exact
 ```
+
+**Note** : Les patterns sont testés sur le path ET la query string. Par exemple `*locale=fr-FR*` matchera `https://example.com/api/assets/123?locale=fr-FR`.
 
 ### Types de contenu
 
@@ -152,6 +164,19 @@ Chaque agent peut choisir quels types de contenu indexer :
 | **PDF** | `application/pdf` |
 | **Images** | `image/*` |
 | **Documents** | `application/msword`, `*officedocument*`, `text/plain`, `text/markdown` |
+
+### Langues à indexer
+
+Chaque agent peut filtrer les URLs par langue détectée :
+
+| Configuration | Comportement |
+|---------------|--------------|
+| **Aucune sélection** | Toutes les langues sont indexées |
+| **Langues sélectionnées** | Seules les URLs avec ces langues sont indexées |
+
+Les langues sont organisées par continent (Europe, Asie, Afrique, Amériques, Océanie) avec ~80 langues supportées.
+
+**Note** : Les URLs sans langue détectée sont toujours incluses par défaut.
 
 ### Stratégie de chunking
 
@@ -203,7 +228,13 @@ Toutes les URLs découvertes sont stockées et affichées avec :
 | **Relancer** | Re-crawle tout le site |
 | **Tout supprimer** | Supprime cache + documents de tous les agents |
 | **Ajouter un agent** | Lie un nouvel agent avec sa config |
-| **Réindexer agent** | Réindexe un agent spécifique |
+| **Indexer** | Lance l'indexation pour un agent (fonctionne même si crawl partiel) |
+| **Réindexer agent** | Supprime les documents existants et réindexe |
+| **Détecter langues** | Lance la détection de langue (nouveau uniquement ou tout re-détecter) |
+
+**Indexation partielle** : L'indexation peut être lancée avant la fin du crawl. Seules les URLs déjà récupérées (status "fetched") seront indexées. Le nombre d'URLs correspondant aux filtres est affiché avant lancement.
+
+**Tooltip d'erreur** : Survolez un badge "Erreur" dans la colonne Cache pour voir le message d'erreur détaillé.
 
 ---
 
@@ -353,9 +384,10 @@ class WebCrawlUrlObserver
 |-----|-------|-------------|
 | `StartWebCrawlJob` | default | Initialise le crawl, parse robots.txt, ajoute URL de départ |
 | `CrawlUrlJob` | default | GET URL, stocke en cache, extrait liens |
-| `IndexAgentJob` | default | Indexe toutes les URLs d'un crawl pour un agent |
-| `IndexAgentUrlJob` | default | Indexe une URL spécifique pour un agent |
-| `ReindexAgentJob` | llm-chunking | Réindexe tout un agent (après changement de config) |
+| `IndexAgentUrlJob` | default/llm-chunking | Indexe une URL spécifique pour un agent |
+| `DetectCrawlUrlLocalesJob` | default | Détecte la langue de toutes les URLs d'un crawl |
+
+**Optimisation des filtres** : Les filtres d'agent (patterns URL, types de contenu, langues) sont appliqués **avant** de créer les jobs d'indexation, évitant ainsi la création de milliers de jobs qui seraient skippés.
 
 ### Services
 

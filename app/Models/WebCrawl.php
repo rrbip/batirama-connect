@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
 /**
  * Représente un crawl de site web.
@@ -18,6 +19,31 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class WebCrawl extends Model
 {
     use HasFactory;
+
+    public const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+    /**
+     * Boot the model - Auto-generate UUID on creation and ensure user_agent has default.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (WebCrawl $crawl) {
+            if (empty($crawl->uuid)) {
+                $crawl->uuid = (string) Str::uuid();
+            }
+            if (empty($crawl->user_agent)) {
+                $crawl->user_agent = self::DEFAULT_USER_AGENT;
+            }
+        });
+
+        static::saving(function (WebCrawl $crawl) {
+            if (empty($crawl->user_agent)) {
+                $crawl->user_agent = self::DEFAULT_USER_AGENT;
+            }
+        });
+    }
 
     protected $fillable = [
         'uuid',
@@ -32,6 +58,9 @@ class WebCrawl extends Model
         'auth_type',
         'auth_credentials',
         'custom_headers',
+        'enable_deduplication',
+        'dedup_mode',
+        'pdf_extraction_method',
         'status',
         'pages_discovered',
         'pages_crawled',
@@ -45,6 +74,7 @@ class WebCrawl extends Model
         'allowed_domains' => 'array',
         'custom_headers' => 'array',
         'respect_robots_txt' => 'boolean',
+        'enable_deduplication' => 'boolean',
         'started_at' => 'datetime',
         'paused_at' => 'datetime',
         'completed_at' => 'datetime',

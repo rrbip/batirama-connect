@@ -8,6 +8,7 @@ use App\Models\Document;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use League\HTMLToMarkdown\HtmlConverter;
 use Smalot\PdfParser\Parser as PdfParser;
 use thiagoalessio\TesseractOCR\TesseractOCR;
 
@@ -18,6 +19,19 @@ class DocumentExtractorService
      * Si plus de X% des mots semblent tronqués, on utilise l'OCR
      */
     private const OCR_FALLBACK_THRESHOLD = 0.05; // 5%
+
+    private ?VisionExtractorService $visionService = null;
+
+    /**
+     * Get the vision service (lazy loaded)
+     */
+    private function getVisionService(): VisionExtractorService
+    {
+        if ($this->visionService === null) {
+            $this->visionService = app(VisionExtractorService::class);
+        }
+        return $this->visionService;
+    }
 
     /**
      * Extrait le texte d'un document
@@ -49,12 +63,12 @@ class DocumentExtractorService
         $extractionMethod = $document->extraction_method ?? 'auto';
 
         $text = match ($extension) {
-            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod),
+            'pdf' => $this->extractFromPdf($fullPath, $extractionMethod, $document),
             'txt', 'md' => $this->extractFromText($fullPath),
             'docx' => $this->extractFromDocx($fullPath),
             'doc' => $this->extractFromDoc($fullPath),
-            'html', 'htm' => $this->extractFromHtml($fullPath),
-            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath),
+            'html', 'htm' => $this->extractFromHtml($fullPath, $document),
+            'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'tif', 'webp' => $this->extractFromImage($fullPath, $extractionMethod, $document),
             default => throw new \RuntimeException("Type de document non supporté: {$extension}"),
         };
 
@@ -70,14 +84,20 @@ class DocumentExtractorService
      * Extrait le texte d'un fichier PDF
      *
      * @param string $path Chemin vers le fichier PDF
-     * @param string $method Méthode d'extraction: 'auto', 'text', ou 'ocr'
+     * @param string $method Méthode d'extraction: 'auto', 'text', 'ocr', ou 'vision'
+     * @param Document|null $document Document pour stocker les métadonnées vision
      */
-    private function extractFromPdf(string $path, string $method = 'auto'): string
+    private function extractFromPdf(string $path, string $method = 'auto', ?Document $document = null): string
     {
         Log::info('PDF extraction starting', [
             'path' => $path,
             'method' => $method,
         ]);
+
+        // Mode Vision : utiliser un modèle de vision pour extraire le texte
+        if ($method === 'vision') {
+            return $this->extractFromPdfWithVision($path, $document);
+        }
 
         // Mode OCR forcé : convertir le PDF en images et appliquer Tesseract
         if ($method === 'ocr') {
@@ -91,7 +111,7 @@ class DocumentExtractorService
             Log::info('Using forced OCR mode for PDF', ['path' => $path]);
 
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
 
                 if (!empty($ocrClean)) {
@@ -199,7 +219,7 @@ class DocumentExtractorService
             ]);
 
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
                 $ocrTruncatedRatio = $this->getTruncatedRatio($ocrClean);
 
@@ -230,7 +250,7 @@ class DocumentExtractorService
         if ($this->isOcrAvailable()) {
             Log::info('All text extraction failed, trying OCR as last resort', ['path' => $path]);
             try {
-                $ocrText = $this->extractFromPdfWithOcr($path);
+                $ocrText = $this->extractFromPdfWithOcr($path, $document);
                 $ocrClean = $this->cleanText($ocrText);
                 if (!empty($ocrClean)) {
                     return $ocrClean;
@@ -252,9 +272,24 @@ class DocumentExtractorService
     /**
      * Extrait le texte d'un PDF en utilisant OCR (Tesseract)
      * Convertit chaque page en image puis applique l'OCR
+     *
+     * @param string $path Chemin vers le fichier PDF
+     * @param Document|null $document Document pour stocker les métadonnées
+     * @return string Texte extrait
      */
-    private function extractFromPdfWithOcr(string $path): string
+    private function extractFromPdfWithOcr(string $path, ?Document $document = null): string
     {
+        $startTime = microtime(true);
+        $ocrMetadata = [
+            'method' => 'ocr',
+            'pdf_converter' => 'pdftoppm (poppler-utils)',
+            'ocr_engine' => 'Tesseract OCR',
+            'ocr_languages' => 'fra+eng',
+            'dpi' => 300,
+            'pages' => [],
+            'errors' => [],
+        ];
+
         // Vérifier si pdftoppm est disponible pour convertir PDF en images
         $checkResult = Process::run('pdftoppm -v 2>&1');
         if (!$checkResult->successful() && !str_contains($checkResult->errorOutput(), 'pdftoppm')) {
@@ -265,6 +300,8 @@ class DocumentExtractorService
         mkdir($tempDir, 0755, true);
 
         try {
+            $pdfConversionStart = microtime(true);
+
             // Convertir le PDF en images PNG (une par page)
             $command = sprintf(
                 'pdftoppm -png -r 300 %s %s/page',
@@ -276,6 +313,8 @@ class DocumentExtractorService
             if (!$result->successful()) {
                 throw new \RuntimeException('Failed to convert PDF to images: ' . $result->errorOutput());
             }
+
+            $ocrMetadata['pdf_conversion_time'] = round(microtime(true) - $pdfConversionStart, 2);
 
             // Trouver toutes les images générées
             $images = glob($tempDir . '/page-*.png');
@@ -289,17 +328,48 @@ class DocumentExtractorService
             }
 
             sort($images); // Assurer l'ordre des pages
+            $ocrMetadata['total_pages'] = count($images);
 
             // Appliquer l'OCR sur chaque image
             $fullText = '';
             foreach ($images as $index => $imagePath) {
+                $pageNumber = $index + 1;
+                $pageStart = microtime(true);
+
                 Log::info('OCR processing page', [
-                    'page' => $index + 1,
+                    'page' => $pageNumber,
                     'total' => count($images),
                 ]);
 
-                $pageText = $this->extractFromImage($imagePath);
-                $fullText .= $pageText . "\n\n";
+                try {
+                    $pageText = $this->extractFromImageWithOcr($imagePath);
+                    $fullText .= $pageText . "\n\n";
+
+                    $ocrMetadata['pages'][] = [
+                        'page' => $pageNumber,
+                        'text_length' => strlen($pageText),
+                        'processing_time' => round(microtime(true) - $pageStart, 2),
+                    ];
+                } catch (\Exception $e) {
+                    $ocrMetadata['errors'][] = [
+                        'page' => $pageNumber,
+                        'error' => $e->getMessage(),
+                    ];
+                }
+            }
+
+            $ocrMetadata['total_processing_time'] = round(microtime(true) - $startTime, 2);
+            $ocrMetadata['pages_processed'] = count($ocrMetadata['pages']);
+            $ocrMetadata['extracted_at'] = now()->toIso8601String();
+
+            // Stocker les métadonnées dans le document
+            if ($document) {
+                $existingMetadata = $document->extraction_metadata ?? [];
+                $document->update([
+                    'extraction_metadata' => array_merge($existingMetadata, [
+                        'ocr_extraction' => $ocrMetadata,
+                    ]),
+                ]);
             }
 
             return trim($fullText);
@@ -315,12 +385,50 @@ class DocumentExtractorService
     }
 
     /**
-     * Extrait le texte d'une image avec Tesseract OCR
+     * Extrait le texte d'une image avec Tesseract OCR (méthode interne)
+     */
+    private function extractFromImageWithOcr(string $path): string
+    {
+        $tesseract = $this->findTesseractExecutable();
+        $escapedPath = escapeshellarg($path);
+
+        // Exécuter tesseract directement via shell_exec
+        // -l fra+eng : français + anglais
+        // --psm 3 : segmentation automatique
+        // --oem 3 : LSTM + Legacy engine
+        // stdout : sortie vers stdout au lieu d'un fichier
+        $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
+
+        $text = shell_exec($command);
+
+        if ($text === null) {
+            throw new \RuntimeException("La commande tesseract a échoué");
+        }
+
+        // Vérifier si c'est un message d'erreur
+        if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
+            throw new \RuntimeException("Erreur Tesseract: " . trim($text));
+        }
+
+        return $this->cleanText($text);
+    }
+
+    /**
+     * Extrait le texte d'une image avec Tesseract OCR ou Vision
      * Utilise shell_exec directement car la librairie TesseractOCR a des problèmes
      * avec proc_open dans certains environnements PHP-FPM
+     *
+     * @param string $path Chemin vers l'image
+     * @param string $method Méthode: 'ocr' (default) ou 'vision'
+     * @param Document|null $document Document pour stocker les métadonnées
      */
-    private function extractFromImage(string $path): string
+    private function extractFromImage(string $path, string $method = 'ocr', ?Document $document = null): string
     {
+        // Mode Vision pour les images
+        if ($method === 'vision') {
+            return $this->extractFromImageWithVision($path, $document);
+        }
+
         if (!$this->isOcrAvailable()) {
             throw new \RuntimeException(
                 "Tesseract OCR n'est pas installé ou non détecté. " .
@@ -328,38 +436,37 @@ class DocumentExtractorService
             );
         }
 
+        $startTime = microtime(true);
         Log::info('Extracting text from image with OCR', ['path' => $path]);
 
         try {
-            $tesseract = $this->findTesseractExecutable();
-            $escapedPath = escapeshellarg($path);
-
-            // Exécuter tesseract directement via shell_exec
-            // -l fra+eng : français + anglais
-            // --psm 3 : segmentation automatique
-            // --oem 3 : LSTM + Legacy engine
-            // stdout : sortie vers stdout au lieu d'un fichier
-            $command = "{$tesseract} {$escapedPath} stdout -l fra+eng --psm 3 --oem 3 2>&1";
-
-            Log::info('Running OCR command', ['command' => $command]);
-
-            $text = shell_exec($command);
-
-            if ($text === null) {
-                throw new \RuntimeException("La commande tesseract a échoué");
-            }
-
-            // Vérifier si c'est un message d'erreur
-            if (str_starts_with(trim($text), 'Error') || str_contains($text, 'error opening')) {
-                throw new \RuntimeException("Erreur Tesseract: " . trim($text));
-            }
+            $text = $this->extractFromImageWithOcr($path);
+            $processingTime = round(microtime(true) - $startTime, 2);
 
             Log::info('OCR extraction successful', [
                 'path' => $path,
                 'text_length' => strlen($text),
             ]);
 
-            return $this->cleanText($text);
+            // Stocker les métadonnées si document disponible
+            if ($document) {
+                $existingMetadata = $document->extraction_metadata ?? [];
+                $document->update([
+                    'extraction_metadata' => array_merge($existingMetadata, [
+                        'ocr_extraction' => [
+                            'method' => 'ocr',
+                            'ocr_engine' => 'Tesseract OCR',
+                            'ocr_languages' => 'fra+eng',
+                            'source_type' => 'image',
+                            'text_length' => strlen($text),
+                            'processing_time' => $processingTime,
+                            'extracted_at' => now()->toIso8601String(),
+                        ],
+                    ]),
+                ]);
+            }
+
+            return $text;
 
         } catch (\Exception $e) {
             Log::error('OCR extraction failed', [
@@ -369,6 +476,102 @@ class DocumentExtractorService
 
             throw new \RuntimeException("Erreur OCR: {$e->getMessage()}");
         }
+    }
+
+    /**
+     * Extrait le texte d'un PDF en utilisant un modèle de vision
+     */
+    private function extractFromPdfWithVision(string $path, ?Document $document = null): string
+    {
+        $visionService = $this->getVisionService();
+
+        if (!$visionService->isAvailable()) {
+            throw new \RuntimeException(
+                "Le service Vision n'est pas disponible. " .
+                "Vérifiez qu'Ollama est accessible et qu'un modèle vision est installé."
+            );
+        }
+
+        $documentId = $document?->uuid ?? uniqid('vision_');
+
+        Log::info('Extracting PDF with Vision model', [
+            'path' => $path,
+            'document_id' => $documentId,
+        ]);
+
+        $result = $visionService->extractFromPdf($path, $documentId);
+
+        if (!$result['success']) {
+            $errorMessages = array_map(fn ($e) => $e['error'] ?? 'Unknown', $result['errors']);
+            throw new \RuntimeException(
+                "Extraction Vision échouée: " . implode(', ', $errorMessages)
+            );
+        }
+
+        // Stocker les métadonnées complètes dans le document (incluant pages et erreurs)
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'vision_extraction' => array_merge($result['metadata'], [
+                        'pages' => $result['pages'] ?? [],
+                        'errors' => $result['errors'] ?? [],
+                    ]),
+                ]),
+            ]);
+        }
+
+        Log::info('Vision extraction completed', [
+            'path' => $path,
+            'markdown_length' => strlen($result['markdown']),
+            'pages_processed' => $result['metadata']['pages_processed'] ?? 0,
+        ]);
+
+        return $result['markdown'];
+    }
+
+    /**
+     * Extrait le texte d'une image en utilisant un modèle de vision
+     */
+    private function extractFromImageWithVision(string $path, ?Document $document = null): string
+    {
+        $visionService = $this->getVisionService();
+
+        if (!$visionService->isAvailable()) {
+            throw new \RuntimeException(
+                "Le service Vision n'est pas disponible. " .
+                "Vérifiez qu'Ollama est accessible et qu'un modèle vision est installé."
+            );
+        }
+
+        Log::info('Extracting image with Vision model', ['path' => $path]);
+
+        // Pour une image seule, on l'extrait directement
+        $result = $visionService->extractFromImage($path);
+
+        if (!$result['success']) {
+            throw new \RuntimeException("Extraction Vision échouée: " . ($result['error'] ?? 'Unknown'));
+        }
+
+        // Stocker les métadonnées si document disponible
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'vision_extraction' => [
+                        'model' => app(VisionExtractorService::class)->getDiagnostics()['model'] ?? null,
+                        'processing_time' => $result['processing_time'],
+                    ],
+                ]),
+            ]);
+        }
+
+        Log::info('Vision image extraction completed', [
+            'path' => $path,
+            'markdown_length' => strlen($result['markdown']),
+        ]);
+
+        return $result['markdown'];
     }
 
     /**
@@ -660,9 +863,13 @@ class DocumentExtractorService
     }
 
     /**
-     * Extrait le texte d'un fichier HTML
+     * Extrait le texte d'un fichier HTML en le convertissant en Markdown
+     * Conserve la structure sémantique (titres, listes, tableaux, liens)
+     *
+     * @param string $path Chemin vers le fichier HTML
+     * @param Document|null $document Document pour stocker les métadonnées
      */
-    private function extractFromHtml(string $path): string
+    private function extractFromHtml(string $path, ?Document $document = null): string
     {
         $content = file_get_contents($path);
 
@@ -670,20 +877,115 @@ class DocumentExtractorService
             throw new \RuntimeException("Impossible de lire le fichier HTML");
         }
 
-        // Supprimer les balises script et style
-        $content = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $content);
-        $content = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $content);
+        $result = $this->convertHtmlToMarkdown($content);
 
-        // Convertir les balises de bloc en sauts de ligne
-        $content = preg_replace('/<(br|p|div|h[1-6]|li)[^>]*>/i', "\n", $content);
+        // Stocker les métadonnées d'extraction si document disponible
+        if ($document) {
+            $existingMetadata = $document->extraction_metadata ?? [];
+            $document->update([
+                'extraction_metadata' => array_merge($existingMetadata, [
+                    'html_extraction' => $result['metadata'],
+                ]),
+            ]);
+        }
 
-        // Supprimer toutes les balises HTML restantes
-        $text = strip_tags($content);
+        Log::info('HTML to Markdown extraction completed', [
+            'path' => $path,
+            'html_size' => $result['metadata']['html_size'],
+            'markdown_size' => $result['metadata']['markdown_size'],
+            'compression_ratio' => $result['metadata']['compression_ratio'],
+        ]);
 
-        // Décoder les entités HTML
-        $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return $result['markdown'];
+    }
 
-        return $this->cleanText($text);
+    /**
+     * Convertit du HTML en Markdown avec métadonnées de traçage
+     *
+     * @param string $html Contenu HTML brut
+     * @return array{markdown: string, metadata: array}
+     */
+    public function convertHtmlToMarkdown(string $html): array
+    {
+        $startTime = microtime(true);
+        $originalSize = strlen($html);
+
+        // Supprimer les balises script et style avant conversion
+        $cleanedHtml = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
+        $cleanedHtml = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $cleanedHtml);
+        $cleanedHtml = preg_replace('/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $cleanedHtml);
+
+        // Supprimer les commentaires HTML
+        $cleanedHtml = preg_replace('/<!--.*?-->/s', '', $cleanedHtml);
+
+        // Compter les éléments structurels avant conversion
+        $elementCounts = [
+            'headings' => preg_match_all('/<h[1-6]\b/i', $cleanedHtml),
+            'lists' => preg_match_all('/<[uo]l\b/i', $cleanedHtml),
+            'tables' => preg_match_all('/<table\b/i', $cleanedHtml),
+            'links' => preg_match_all('/<a\b/i', $cleanedHtml),
+            'images' => preg_match_all('/<img\b/i', $cleanedHtml),
+            'paragraphs' => preg_match_all('/<p\b/i', $cleanedHtml),
+        ];
+
+        // Configurer le convertisseur HTML → Markdown
+        $converter = new HtmlConverter([
+            'strip_tags' => true,
+            'remove_nodes' => 'head meta nav footer aside iframe script style noscript',
+            'hard_break' => true,
+            'header_style' => 'atx', // # Style headers
+            'bold_style' => '**',
+            'italic_style' => '_',
+            'list_item_style' => '-',
+        ]);
+
+        // Convertir en Markdown
+        $markdown = $converter->convert($cleanedHtml);
+
+        // Nettoyer le Markdown résultant
+        $markdown = $this->cleanMarkdown($markdown);
+
+        $processingTime = round((microtime(true) - $startTime) * 1000, 2);
+        $markdownSize = strlen($markdown);
+
+        return [
+            'markdown' => $markdown,
+            'metadata' => [
+                'converter' => 'league/html-to-markdown',
+                'html_size' => $originalSize,
+                'cleaned_html_size' => strlen($cleanedHtml),
+                'markdown_size' => $markdownSize,
+                'compression_ratio' => $originalSize > 0
+                    ? round((1 - $markdownSize / $originalSize) * 100, 1)
+                    : 0,
+                'elements_detected' => $elementCounts,
+                'processing_time_ms' => $processingTime,
+                'extracted_at' => now()->toIso8601String(),
+            ],
+        ];
+    }
+
+    /**
+     * Nettoie le Markdown généré
+     */
+    private function cleanMarkdown(string $markdown): string
+    {
+        // Normaliser les retours à la ligne
+        $markdown = str_replace(["\r\n", "\r"], "\n", $markdown);
+
+        // Supprimer les lignes vides multiples (max 2 newlines)
+        $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
+
+        // Supprimer les espaces en fin de ligne
+        $markdown = preg_replace('/[ \t]+$/m', '', $markdown);
+
+        // Supprimer les espaces multiples (mais pas les newlines)
+        $markdown = preg_replace('/[^\S\n]+/', ' ', $markdown);
+
+        // Supprimer les lignes ne contenant que des espaces
+        $markdown = preg_replace('/^\s+$/m', '', $markdown);
+
+        return trim($markdown);
     }
 
     /**

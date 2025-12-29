@@ -37,6 +37,9 @@ RUN apk add --no-cache \
     tesseract-ocr \
     tesseract-ocr-data-fra \
     tesseract-ocr-data-eng \
+    # ImageMagick pour manipulation d'images (Vision extraction)
+    imagemagick \
+    imagemagick-libs \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP

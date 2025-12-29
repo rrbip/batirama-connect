@@ -18,6 +18,7 @@ class LlmChunkingSetting extends Model
         'max_retries',
         'timeout_seconds',
         'system_prompt',
+        'enrichment_prompt',
     ];
 
     protected $casts = [
@@ -117,19 +118,37 @@ Analyse le texte fourni et découpe-le en chunks sémantiques autonomes.
    - BON : "Le Directeur Financier a validé le budget marketing 2024."
    - Le chunk doit être compréhensible SEUL, sans contexte.
 
-3. **Fidélité** : Ne modifie JAMAIS les faits, chiffres ou le sens. Ajoute uniquement le contexte nécessaire.
+3. **Fidélité ABSOLUE** :
+   - Ne modifie JAMAIS les faits, chiffres, valeurs techniques ou le sens
+   - PRÉSERVE INTÉGRALEMENT tous les tableaux, données chiffrées et spécifications techniques
+   - Les valeurs numériques (dimensions, résistances, épaisseurs, poids, etc.) doivent être reproduites EXACTEMENT
 
-4. **Taille** : Vise des chunks de 3 à 6 phrases.
+4. **Tableaux et données techniques** :
+   - Les tableaux doivent être préservés dans leur intégralité dans un seul chunk
+   - Ne résume PAS les lignes d'un tableau - garde TOUTES les lignes
+   - Format texte pour les tableaux : utilise des séparateurs clairs (| ou tabulations)
+   - Un tableau = un chunk (ne pas découper un tableau en plusieurs chunks)
 
-5. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste fournie. Si aucune ne convient, propose une nouvelle catégorie dans "new_categories".
+5. **Taille** : Adapte la taille selon le contenu
+   - Texte descriptif : chunks de 4 à 10 phrases
+   - Tableau ou liste technique : inclure l'INTÉGRALITÉ même si plus long
+   - Ne JAMAIS tronquer du contenu technique
+
+6. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste fournie. Si aucune ne convient, propose une nouvelle catégorie dans "new_categories".
 
 # Catégories disponibles
 {CATEGORIES}
 
-# Format de sortie
+# Format de sortie JSON - RESPECTE EXACTEMENT CE FORMAT
+
+ATTENTION: Utilise EXACTEMENT ces noms de clés (en anglais) :
+- "content" (pas "contenu")
+- "keywords" (pas "tags", pas "mots_cles")
+- "summary" (pas "resume", pas "résumé")
+- "category" (pas "categorie", pas "catégorie")
+
 Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
 
-```json
 {
   "chunks": [
     {
@@ -139,17 +158,123 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
       "category": "Nom de la catégorie"
     }
   ],
+  "new_categories": []
+}
+
+# Exemple avec tableau technique
+
+{
+  "chunks": [
+    {
+      "content": "Plaque Knauf BA13 - Caractéristiques techniques :\n| Épaisseur | Largeur | Longueur | Poids |\n| 12,5 mm | 1200 mm | 2500 mm | 8,5 kg/m² |\n| 12,5 mm | 1200 mm | 2600 mm | 8,5 kg/m² |\n| 12,5 mm | 1200 mm | 3000 mm | 8,5 kg/m² |\nRésistance thermique R = 0,05 m².K/W. Classement au feu : A2-s1, d0.",
+      "keywords": ["BA13", "plaque plâtre", "dimensions", "poids", "résistance thermique"],
+      "summary": "Caractéristiques techniques complètes de la plaque Knauf BA13.",
+      "category": "Fiches techniques"
+    }
+  ],
+  "new_categories": []
+}
+
+# Texte à traiter
+{INPUT_TEXT}
+PROMPT;
+    }
+
+    /**
+     * Construit le prompt d'enrichissement pour les chunks markdown
+     */
+    public function buildEnrichmentPrompt(array $chunksJson): string
+    {
+        $categories = DocumentCategory::getListForPrompt();
+        $prompt = $this->enrichment_prompt ?? static::getDefaultEnrichmentPrompt();
+
+        return str_replace(
+            ['{CATEGORIES}', '{CHUNKS_JSON}'],
+            [$categories, json_encode($chunksJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
+            $prompt
+        );
+    }
+
+    /**
+     * Prompt par défaut pour l'enrichissement des chunks markdown
+     */
+    public static function getDefaultEnrichmentPrompt(): string
+    {
+        return <<<'PROMPT'
+# Rôle
+Tu es un expert en structuration de connaissances pour des bases de données vectorielles (RAG).
+
+# Tâche
+Tu reçois des chunks déjà découpés par structure Markdown (headers). Ta mission est de les ENRICHIR avec :
+1. Une **catégorie** pertinente
+2. Des **mots-clés** pour la recherche
+3. Un **résumé** court
+4. Optionnellement, corriger le **formatage Markdown** si nécessaire
+
+# IMPORTANT - Ce que tu ne dois PAS faire
+- NE PAS re-découper ou fusionner les chunks
+- NE PAS modifier le contenu sémantique
+- NE PAS inventer d'informations
+- CONSERVER le chunk_index original
+
+# Règles d'enrichissement
+
+1. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste. Si aucune ne convient, propose dans "new_categories".
+
+2. **Mots-clés** (3 à 7) : Extrais les concepts clés pour la recherche sémantique. Inclus :
+   - Termes techniques spécifiques
+   - Noms propres (produits, marques, normes)
+   - Actions principales
+
+3. **Résumé** (1 phrase) : Décris ce que contient le chunk de manière concise.
+
+4. **Correction Markdown** (optionnel) : Si le texte a des problèmes de formatage :
+   - Corriger les headers mal formés (ex: "## " manquant)
+   - Réparer les listes cassées
+   - Sinon, retourner le content original inchangé
+
+# Catégories disponibles
+{CATEGORIES}
+
+# Format d'entrée (JSON)
+Tu reçois un tableau de chunks avec cette structure :
+```json
+[
+  {
+    "chunk_index": 0,
+    "content": "## Titre de section\n\nContenu du chunk...",
+    "header_title": "Titre de section",
+    "header_level": 2
+  }
+]
+```
+
+# Format de sortie JSON - RESPECTE EXACTEMENT
+
+Retourne UNIQUEMENT un JSON valide :
+
+```json
+{
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "## Titre de section\n\nContenu corrigé si nécessaire...",
+      "keywords": ["mot-clé1", "mot-clé2", "mot-clé3"],
+      "summary": "Résumé en une phrase.",
+      "category": "Nom de la catégorie"
+    }
+  ],
   "new_categories": [
     {
       "name": "Nouvelle Catégorie",
-      "description": "Description courte de cette catégorie"
+      "description": "Description courte si pertinent"
     }
   ]
 }
 ```
 
-# Texte à traiter
-{INPUT_TEXT}
+# Chunks à enrichir
+{CHUNKS_JSON}
 PROMPT;
     }
 }

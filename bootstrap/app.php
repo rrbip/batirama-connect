@@ -23,6 +23,17 @@ return Application::configure(basePath: dirname(__DIR__))
                      \Illuminate\Http\Request::HEADER_X_FORWARDED_PROTO |
                      \Illuminate\Http\Request::HEADER_X_FORWARDED_AWS_ELB
         );
+
+        // Enregistrement des alias de middleware pour l'API whitelabel
+        $middleware->alias([
+            'deployment.key' => \App\Http\Middleware\ValidateDeploymentKey::class,
+            'deployment.domain' => \App\Http\Middleware\ValidateDeploymentDomain::class,
+            'deployment.rate' => \App\Http\Middleware\RateLimitDeployment::class,
+            'deployment.cors' => \App\Http\Middleware\DynamicCors::class,
+            'editor.quota' => \App\Http\Middleware\CheckEditorQuota::class,
+            'editor.auth' => \App\Http\Middleware\EditorApiAuth::class,
+            'partner.auth' => \App\Http\Middleware\PartnerApiAuth::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
