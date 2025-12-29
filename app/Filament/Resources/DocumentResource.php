@@ -438,7 +438,7 @@ class DocumentResource extends Resource
                                                 ->modalDescription('Cette action va supprimer les chunks existants et relancer tout le pipeline. Continuer ?')
                                                 ->action(function ($record) {
                                                     $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
-                                                    $orchestrator->startPipeline($record, true);
+                                                    $orchestrator->startPipeline($record);
                                                     Notification::make()->title('Pipeline relancé')->success()->send();
                                                 }),
 
