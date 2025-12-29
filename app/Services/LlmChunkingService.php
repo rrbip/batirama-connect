@@ -254,6 +254,270 @@ class LlmChunkingService
     }
 
     /**
+     * Enrichit des chunks existants (issus du chunking markdown) avec le LLM
+     *
+     * Ajoute : catégorie, keywords, summary
+     * Optionnellement : corrige le formatage markdown
+     *
+     * @param Document $document Le document dont les chunks sont à enrichir
+     * @param int $batchSize Nombre de chunks à traiter par appel LLM (défaut: 10)
+     * @return array Résultat avec chunks enrichis et stats
+     */
+    public function enrichMarkdownChunks(Document $document, int $batchSize = 10): array
+    {
+        $chunks = $document->chunks()->orderBy('chunk_index')->get();
+
+        if ($chunks->isEmpty()) {
+            throw new \RuntimeException('Le document n\'a pas de chunks à enrichir');
+        }
+
+        Log::info('LLM Enrichment started', [
+            'document_id' => $document->id,
+            'chunk_count' => $chunks->count(),
+            'batch_size' => $batchSize,
+        ]);
+
+        $enrichedCount = 0;
+        $errors = [];
+        $llmResponses = [];
+        $newCategoriesCreated = [];
+
+        // Traiter les chunks par batch pour éviter les prompts trop longs
+        $batches = $chunks->chunk($batchSize);
+
+        foreach ($batches as $batchIndex => $batch) {
+            try {
+                // Préparer le JSON des chunks pour le LLM
+                $chunksJson = $batch->map(function ($chunk) {
+                    $metadata = $chunk->metadata ?? [];
+                    return [
+                        'chunk_index' => $chunk->chunk_index,
+                        'content' => $chunk->content,
+                        'header_title' => $metadata['header_title'] ?? null,
+                        'header_level' => $metadata['header_level'] ?? null,
+                        'section_type' => $metadata['section_type'] ?? null,
+                    ];
+                })->values()->toArray();
+
+                // Appeler le LLM pour enrichir
+                $result = $this->callLlmForEnrichment($chunksJson, $document->agent);
+
+                $llmResponses[] = [
+                    'batch_index' => $batchIndex,
+                    'chunks_sent' => count($chunksJson),
+                    'chunks_received' => count($result['chunks']),
+                ];
+
+                // Créer les nouvelles catégories suggérées
+                foreach ($result['new_categories'] as $newCat) {
+                    $category = DocumentCategory::findOrCreateByName(
+                        $newCat['name'],
+                        $newCat['description'] ?? null,
+                        true // is_ai_generated
+                    );
+                    $newCategoriesCreated[] = $category->name;
+                }
+
+                // Mettre à jour les chunks avec les enrichissements
+                foreach ($result['chunks'] as $enrichedData) {
+                    $chunkIndex = $enrichedData['chunk_index'] ?? null;
+                    if ($chunkIndex === null) {
+                        continue;
+                    }
+
+                    $chunk = $batch->firstWhere('chunk_index', $chunkIndex);
+                    if (!$chunk) {
+                        Log::warning('Chunk not found for enrichment', [
+                            'document_id' => $document->id,
+                            'chunk_index' => $chunkIndex,
+                        ]);
+                        continue;
+                    }
+
+                    // Trouver ou créer la catégorie
+                    $category = null;
+                    if (!empty($enrichedData['category'])) {
+                        $category = DocumentCategory::findOrCreateByName(
+                            $enrichedData['category'],
+                            null,
+                            true
+                        );
+                        $category->incrementUsage();
+                    }
+
+                    // Préparer les données à mettre à jour
+                    $updateData = [
+                        'keywords' => $enrichedData['keywords'] ?? [],
+                        'summary' => $enrichedData['summary'] ?? null,
+                        'category_id' => $category?->id,
+                        'is_indexed' => false, // Re-indexation nécessaire
+                        'indexed_at' => null,
+                    ];
+
+                    // Si le contenu a été corrigé, le mettre à jour
+                    if (!empty($enrichedData['content']) && $enrichedData['content'] !== $chunk->content) {
+                        $updateData['original_content'] = $chunk->content;
+                        $updateData['content'] = $enrichedData['content'];
+                        $updateData['content_hash'] = md5($enrichedData['content']);
+                        $updateData['token_count'] = $this->estimateTokens($enrichedData['content']);
+                    }
+
+                    // Mettre à jour les métadonnées
+                    $metadata = $chunk->metadata ?? [];
+                    $metadata['enriched_at'] = now()->toIso8601String();
+                    $metadata['enriched_by_llm'] = true;
+                    if ($category) {
+                        $metadata['chunk_category'] = $category->name;
+                    }
+                    $updateData['metadata'] = $metadata;
+
+                    $chunk->update($updateData);
+                    $enrichedCount++;
+                }
+
+                Log::info('Batch enrichment completed', [
+                    'document_id' => $document->id,
+                    'batch_index' => $batchIndex,
+                    'enriched_count' => count($result['chunks']),
+                ]);
+
+            } catch (\Exception $e) {
+                Log::error('Batch enrichment failed', [
+                    'document_id' => $document->id,
+                    'batch_index' => $batchIndex,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $errors[] = [
+                    'batch_index' => $batchIndex,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        // Mettre à jour les métadonnées du document
+        $existingMetadata = $document->extraction_metadata ?? [];
+        $document->update([
+            'extraction_metadata' => array_merge($existingMetadata, [
+                'llm_enrichment' => [
+                    'enriched_at' => now()->toIso8601String(),
+                    'model' => $this->getModel($document->agent),
+                    'chunks_enriched' => $enrichedCount,
+                    'batches_processed' => count($batches),
+                    'new_categories' => array_unique($newCategoriesCreated),
+                    'errors_count' => count($errors),
+                ],
+            ]),
+        ]);
+
+        Log::info('LLM Enrichment completed', [
+            'document_id' => $document->id,
+            'enriched_count' => $enrichedCount,
+            'errors' => count($errors),
+        ]);
+
+        return [
+            'enriched_count' => $enrichedCount,
+            'total_chunks' => $chunks->count(),
+            'batches_processed' => count($batches),
+            'new_categories' => array_unique($newCategoriesCreated),
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Appelle le LLM pour enrichir un batch de chunks
+     */
+    private function callLlmForEnrichment(array $chunksJson, ?Agent $agent = null): array
+    {
+        $model = $this->getModel($agent);
+        $prompt = $this->settings->buildEnrichmentPrompt($chunksJson);
+
+        $timeout = $this->settings->timeout_seconds;
+
+        $request = Http::withOptions([
+            'timeout' => $timeout > 0 ? $timeout : 0,
+            'connect_timeout' => 30,
+        ]);
+
+        $response = $request->post($this->getOllamaUrl() . '/api/generate', [
+            'model' => $model,
+            'prompt' => $prompt,
+            'stream' => false,
+            'format' => 'json',
+            'options' => [
+                'temperature' => $this->settings->temperature,
+                'num_predict' => 8192,
+            ],
+        ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException('Ollama error: ' . $response->body());
+        }
+
+        $data = $response->json();
+        $content = $data['response'] ?? '';
+
+        return $this->parseEnrichmentResponse($content);
+    }
+
+    /**
+     * Parse la réponse JSON d'enrichissement
+     */
+    private function parseEnrichmentResponse(string $response): array
+    {
+        // Nettoyer la réponse
+        $response = trim($response);
+        $response = preg_replace('/^```json?\s*/i', '', $response);
+        $response = preg_replace('/\s*```$/i', '', $response);
+
+        $data = json_decode($response, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \RuntimeException(
+                'JSON invalide retourné par le LLM: ' . json_last_error_msg() .
+                "\nRéponse brute: " . mb_substr($response, 0, 500)
+            );
+        }
+
+        if (!isset($data['chunks']) || !is_array($data['chunks'])) {
+            throw new \RuntimeException(
+                'Structure JSON invalide: le champ "chunks" est manquant'
+            );
+        }
+
+        // Normaliser les chunks enrichis
+        $chunks = [];
+        foreach ($data['chunks'] as $chunk) {
+            $chunks[] = [
+                'chunk_index' => $chunk['chunk_index'] ?? null,
+                'content' => $chunk['content'] ?? null,
+                'keywords' => $chunk['keywords'] ?? $chunk['tags'] ?? [],
+                'summary' => $chunk['summary'] ?? $chunk['resume'] ?? null,
+                'category' => $chunk['category'] ?? $chunk['categorie'] ?? null,
+            ];
+        }
+
+        // Normaliser les nouvelles catégories
+        $newCategories = [];
+        if (isset($data['new_categories']) && is_array($data['new_categories'])) {
+            foreach ($data['new_categories'] as $cat) {
+                if (isset($cat['name']) && !empty(trim($cat['name']))) {
+                    $newCategories[] = [
+                        'name' => trim($cat['name']),
+                        'description' => $cat['description'] ?? null,
+                    ];
+                }
+            }
+        }
+
+        return [
+            'chunks' => $chunks,
+            'new_categories' => $newCategories,
+        ];
+    }
+
+    /**
      * Fallback vers le chunking simple quand LLM échoue
      */
     private function fallbackToSimpleChunking(Document $document, array $windows, array $errors): array

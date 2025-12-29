@@ -402,6 +402,85 @@ La stratégie `markdown` peut être sélectionnée :
 
 ---
 
+## Enrichissement LLM des chunks
+
+### Principe
+
+Après un chunking markdown (rapide, basé sur la structure), vous pouvez **enrichir** les chunks avec le LLM pour ajouter :
+- **Catégorie** : Classification automatique
+- **Keywords** : Mots-clés pour la recherche
+- **Summary** : Résumé en une phrase
+- **Correction Markdown** (optionnel) : Réparation du formatage
+
+### Flux hybride recommandé
+
+```
+Document HTML/MD → Chunking Markdown (rapide) → Enrichissement LLM (intelligent)
+                         ↓                              ↓
+                   Chunks structurés           + catégorie, keywords, summary
+                   par headers                 + correction formatage
+```
+
+### Avantages
+
+| Aspect | LLM Chunking seul | Markdown + Enrichissement |
+|--------|------------------|---------------------------|
+| **Vitesse** | Lent (tout passe par LLM) | Rapide (chunking structurel) |
+| **Structure** | Dépend du LLM | Garantie par headers |
+| **Métadonnées** | ✅ Complètes | ✅ Complètes |
+| **Coût** | Élevé (gros prompts) | Modéré (petits batches) |
+
+### Utilisation
+
+1. **Via l'interface** : Sur la page d'édition d'un document, cliquez sur le bouton **"Enrichir LLM"** (violet, icône sparkles)
+2. **Condition** : Le bouton apparaît uniquement si le document a des chunks et n'utilise pas déjà `llm_assisted`
+
+### Fonctionnement technique
+
+```
+1. Les chunks sont envoyés au LLM par batches de 10
+2. Le LLM reçoit un JSON avec : chunk_index, content, header_title, header_level
+3. Le LLM retourne le même JSON enrichi avec : category, keywords, summary
+4. Les chunks sont mis à jour en base
+5. Le document est automatiquement ré-indexé dans Qdrant
+```
+
+### Format du prompt d'enrichissement
+
+Le LLM reçoit les chunks sous cette forme :
+```json
+[
+  {
+    "chunk_index": 0,
+    "content": "## Installation\n\nPour installer...",
+    "header_title": "Installation",
+    "header_level": 2
+  }
+]
+```
+
+Et retourne :
+```json
+{
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "## Installation\n\nPour installer...",
+      "keywords": ["installation", "configuration", "setup"],
+      "summary": "Procédure d'installation du produit.",
+      "category": "Documentation technique"
+    }
+  ],
+  "new_categories": []
+}
+```
+
+### Nouvelles catégories
+
+Si le LLM détecte qu'aucune catégorie existante ne convient, il peut proposer de nouvelles catégories dans `new_categories`. Elles seront automatiquement créées avec le flag `is_ai_generated`.
+
+---
+
 ## Voir aussi
 
 - [10_documents_rag.md](./10_documents_rag.md) - Gestion complète des documents RAG

@@ -18,6 +18,7 @@ class LlmChunkingSetting extends Model
         'max_retries',
         'timeout_seconds',
         'system_prompt',
+        'enrichment_prompt',
     ];
 
     protected $casts = [
@@ -176,6 +177,104 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte avant ni après.
 
 # Texte à traiter
 {INPUT_TEXT}
+PROMPT;
+    }
+
+    /**
+     * Construit le prompt d'enrichissement pour les chunks markdown
+     */
+    public function buildEnrichmentPrompt(array $chunksJson): string
+    {
+        $categories = DocumentCategory::getListForPrompt();
+        $prompt = $this->enrichment_prompt ?? static::getDefaultEnrichmentPrompt();
+
+        return str_replace(
+            ['{CATEGORIES}', '{CHUNKS_JSON}'],
+            [$categories, json_encode($chunksJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
+            $prompt
+        );
+    }
+
+    /**
+     * Prompt par défaut pour l'enrichissement des chunks markdown
+     */
+    public static function getDefaultEnrichmentPrompt(): string
+    {
+        return <<<'PROMPT'
+# Rôle
+Tu es un expert en structuration de connaissances pour des bases de données vectorielles (RAG).
+
+# Tâche
+Tu reçois des chunks déjà découpés par structure Markdown (headers). Ta mission est de les ENRICHIR avec :
+1. Une **catégorie** pertinente
+2. Des **mots-clés** pour la recherche
+3. Un **résumé** court
+4. Optionnellement, corriger le **formatage Markdown** si nécessaire
+
+# IMPORTANT - Ce que tu ne dois PAS faire
+- NE PAS re-découper ou fusionner les chunks
+- NE PAS modifier le contenu sémantique
+- NE PAS inventer d'informations
+- CONSERVER le chunk_index original
+
+# Règles d'enrichissement
+
+1. **Catégorie** : Choisis la catégorie la plus pertinente parmi la liste. Si aucune ne convient, propose dans "new_categories".
+
+2. **Mots-clés** (3 à 7) : Extrais les concepts clés pour la recherche sémantique. Inclus :
+   - Termes techniques spécifiques
+   - Noms propres (produits, marques, normes)
+   - Actions principales
+
+3. **Résumé** (1 phrase) : Décris ce que contient le chunk de manière concise.
+
+4. **Correction Markdown** (optionnel) : Si le texte a des problèmes de formatage :
+   - Corriger les headers mal formés (ex: "## " manquant)
+   - Réparer les listes cassées
+   - Sinon, retourner le content original inchangé
+
+# Catégories disponibles
+{CATEGORIES}
+
+# Format d'entrée (JSON)
+Tu reçois un tableau de chunks avec cette structure :
+```json
+[
+  {
+    "chunk_index": 0,
+    "content": "## Titre de section\n\nContenu du chunk...",
+    "header_title": "Titre de section",
+    "header_level": 2
+  }
+]
+```
+
+# Format de sortie JSON - RESPECTE EXACTEMENT
+
+Retourne UNIQUEMENT un JSON valide :
+
+```json
+{
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "## Titre de section\n\nContenu corrigé si nécessaire...",
+      "keywords": ["mot-clé1", "mot-clé2", "mot-clé3"],
+      "summary": "Résumé en une phrase.",
+      "category": "Nom de la catégorie"
+    }
+  ],
+  "new_categories": [
+    {
+      "name": "Nouvelle Catégorie",
+      "description": "Description courte si pertinent"
+    }
+  ]
+}
+```
+
+# Chunks à enrichir
+{CHUNKS_JSON}
 PROMPT;
     }
 }
