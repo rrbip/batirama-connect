@@ -300,58 +300,185 @@ class DocumentResource extends Resource
                                     ->collapsed(),
                             ]),
 
-                        Forms\Components\Tabs\Tab::make('Extraction')
-                            ->icon('heroicon-o-document-magnifying-glass')
+                        Forms\Components\Tabs\Tab::make('Pipeline')
+                            ->icon('heroicon-o-adjustments-horizontal')
                             ->schema([
-                                Forms\Components\Section::make('Statut extraction')
+                                // Pipeline Status Overview
+                                Forms\Components\Section::make('Statut du pipeline')
                                     ->schema([
-                                        Forms\Components\Placeholder::make('extraction_status_display')
-                                            ->label('Statut')
-                                            ->content(fn ($record) => match ($record?->extraction_status) {
-                                                'pending' => 'En attente',
-                                                'processing' => 'En cours',
-                                                'completed' => 'Terminé',
-                                                'failed' => 'Échoué',
-                                                default => '-',
-                                            }),
+                                        Forms\Components\Placeholder::make('pipeline_status_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $pipelineData = $record?->pipeline_steps ?? [];
+                                                $status = $pipelineData['status'] ?? 'not_started';
 
-                                        Forms\Components\Placeholder::make('extraction_method_display')
-                                            ->label('Méthode utilisée')
-                                            ->content(fn ($record) => match ($record?->extraction_method) {
-                                                'auto' => 'Automatique',
-                                                'text' => 'Texte uniquement',
-                                                'ocr' => 'OCR (Tesseract)',
-                                                null => '-',
-                                                default => $record?->extraction_method,
-                                            }),
+                                                $statusInfo = match ($status) {
+                                                    'not_started' => ['label' => 'Non démarré', 'color' => 'gray', 'icon' => 'clock'],
+                                                    'running' => ['label' => 'En cours', 'color' => 'warning', 'icon' => 'arrow-path'],
+                                                    'completed' => ['label' => 'Terminé', 'color' => 'success', 'icon' => 'check-circle'],
+                                                    'failed' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
+                                                    default => ['label' => $status, 'color' => 'gray', 'icon' => 'question-mark-circle'],
+                                                };
 
-                                        Forms\Components\Placeholder::make('extracted_at_display')
-                                            ->label('Extrait le')
-                                            ->content(fn ($record) => $record?->extracted_at?->format('d/m/Y H:i') ?? '-'),
+                                                $startedAt = isset($pipelineData['started_at']) ? \Carbon\Carbon::parse($pipelineData['started_at'])->format('d/m/Y H:i') : '-';
+                                                $completedAt = isset($pipelineData['completed_at']) ? \Carbon\Carbon::parse($pipelineData['completed_at'])->format('d/m/Y H:i') : '-';
 
-                                        Forms\Components\Placeholder::make('chunk_count_display')
-                                            ->label('Nombre de chunks')
-                                            ->content(fn ($record) => $record?->chunk_count ?? 0),
+                                                return new \Illuminate\Support\HtmlString(sprintf(
+                                                    '<div class="flex items-center gap-4">
+                                                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-%s-100 text-%s-800 dark:bg-%s-900/30 dark:text-%s-300">
+                                                            %s
+                                                        </span>
+                                                        <span class="text-sm text-gray-500">Démarré: %s</span>
+                                                        <span class="text-sm text-gray-500">Terminé: %s</span>
+                                                    </div>',
+                                                    $statusInfo['color'], $statusInfo['color'], $statusInfo['color'], $statusInfo['color'],
+                                                    $statusInfo['label'],
+                                                    $startedAt,
+                                                    $completedAt
+                                                ));
+                                            })
+                                            ->columnSpanFull(),
+                                    ]),
 
-                                        Forms\Components\Placeholder::make('file_size_display')
-                                            ->label('Taille')
-                                            ->content(fn ($record) => $record?->getFileSizeForHumans() ?? '-'),
-                                    ])
-                                    ->columns(5),
+                                // Pipeline Steps
+                                Forms\Components\Section::make('Étapes du pipeline')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('pipeline_steps_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $pipelineData = $record?->pipeline_steps ?? [];
+                                                $steps = $pipelineData['steps'] ?? [];
 
-                                Forms\Components\Section::make('Texte extrait')
-                                    ->description('Vous pouvez modifier le texte avant de le re-chunker')
+                                                if (empty($steps)) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="text-gray-500 italic">Aucune étape de pipeline configurée</div>'
+                                                    );
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+                                                foreach ($steps as $index => $step) {
+                                                    $status = $step['status'] ?? 'pending';
+                                                    $statusInfo = match ($status) {
+                                                        'pending' => ['label' => 'En attente', 'color' => 'gray', 'bg' => 'bg-gray-100 dark:bg-gray-800'],
+                                                        'running' => ['label' => 'En cours', 'color' => 'warning', 'bg' => 'bg-warning-50 dark:bg-warning-900/20'],
+                                                        'completed' => ['label' => 'Terminé', 'color' => 'success', 'bg' => 'bg-success-50 dark:bg-success-900/20'],
+                                                        'failed' => ['label' => 'Échoué', 'color' => 'danger', 'bg' => 'bg-danger-50 dark:bg-danger-900/20'],
+                                                        default => ['label' => $status, 'color' => 'gray', 'bg' => 'bg-gray-100 dark:bg-gray-800'],
+                                                    };
+
+                                                    $stepName = $step['name'] ?? "Étape {$index}";
+                                                    $tool = $step['tool'] ?? '-';
+                                                    $startedAt = isset($step['started_at']) ? \Carbon\Carbon::parse($step['started_at'])->format('H:i:s') : '-';
+                                                    $completedAt = isset($step['completed_at']) ? \Carbon\Carbon::parse($step['completed_at'])->format('H:i:s') : '-';
+                                                    $duration = isset($step['duration_seconds']) ? round($step['duration_seconds'], 2) . 's' : '-';
+                                                    $inputSummary = $step['input_summary'] ?? '-';
+                                                    $outputSummary = $step['output_summary'] ?? '-';
+                                                    $error = $step['error'] ?? null;
+
+                                                    $html .= sprintf(
+                                                        '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                                            <div class="px-4 py-3 %s flex justify-between items-center">
+                                                                <div class="flex items-center gap-3">
+                                                                    <span class="font-semibold">Étape %d: %s</span>
+                                                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">%s</span>
+                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-%s-100 text-%s-800 dark:bg-%s-900/50 dark:text-%s-300">%s</span>
+                                                                </div>
+                                                                <span class="text-sm text-gray-500">Durée: %s</span>
+                                                            </div>
+                                                            <div class="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                                                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                                                    <div>
+                                                                        <span class="text-gray-500">Entrée:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Sortie:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Début:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Fin:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                </div>
+                                                                %s
+                                                            </div>
+                                                        </div>',
+                                                        $statusInfo['bg'],
+                                                        $index + 1,
+                                                        e($stepName),
+                                                        e($tool),
+                                                        $statusInfo['color'], $statusInfo['color'], $statusInfo['color'], $statusInfo['color'],
+                                                        $statusInfo['label'],
+                                                        $duration,
+                                                        e($inputSummary),
+                                                        e($outputSummary),
+                                                        $startedAt,
+                                                        $completedAt,
+                                                        $error ? sprintf('<div class="mt-3 p-2 bg-danger-50 dark:bg-danger-900/20 rounded text-sm text-danger-700 dark:text-danger-300"><strong>Erreur:</strong> %s</div>', e($error)) : ''
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
+                                            ->columnSpanFull(),
+
+                                        // Actions
+                                        Forms\Components\Actions::make([
+                                            Forms\Components\Actions\Action::make('restart_pipeline')
+                                                ->label('Relancer tout le pipeline')
+                                                ->icon('heroicon-o-arrow-path')
+                                                ->color('warning')
+                                                ->requiresConfirmation()
+                                                ->modalHeading('Relancer le pipeline')
+                                                ->modalDescription('Cette action va supprimer les chunks existants et relancer tout le pipeline. Continuer ?')
+                                                ->action(function ($record) {
+                                                    $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+                                                    $orchestrator->startPipeline($record, true);
+                                                    Notification::make()->title('Pipeline relancé')->success()->send();
+                                                }),
+
+                                            Forms\Components\Actions\Action::make('continue_pipeline')
+                                                ->label('Continuer depuis l\'échec')
+                                                ->icon('heroicon-o-play')
+                                                ->color('success')
+                                                ->visible(fn ($record) => ($record?->pipeline_steps['status'] ?? '') === 'failed')
+                                                ->action(function ($record) {
+                                                    $pipelineData = $record->pipeline_steps ?? [];
+                                                    $failedIndex = null;
+                                                    foreach (($pipelineData['steps'] ?? []) as $index => $step) {
+                                                        if (($step['status'] ?? '') === 'failed') {
+                                                            $failedIndex = $index;
+                                                            break;
+                                                        }
+                                                    }
+                                                    if ($failedIndex !== null) {
+                                                        $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+                                                        $orchestrator->relaunchStep($record, $failedIndex);
+                                                        Notification::make()->title('Étape relancée')->success()->send();
+                                                    }
+                                                }),
+                                        ])->columnSpanFull(),
+                                    ]),
+
+                                // Extracted Text (collapsible)
+                                Forms\Components\Section::make('Texte extrait (Markdown)')
                                     ->schema([
                                         Forms\Components\Textarea::make('extracted_text')
                                             ->label('')
                                             ->rows(15)
                                             ->columnSpanFull()
-                                            ->hint('Après modification, utilisez "Re-chunker" pour régénérer les chunks'),
+                                            ->hint('Contenu Markdown généré par le pipeline'),
                                     ])
                                     ->collapsed()
                                     ->visible(fn ($record) => $record?->extracted_text),
 
-                                Forms\Components\Section::make('Erreur')
+                                // Error Section
+                                Forms\Components\Section::make('Erreur extraction')
                                     ->schema([
                                         Forms\Components\Textarea::make('extraction_error')
                                             ->label('')
