@@ -1,0 +1,326 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Pipeline;
+
+use App\Models\Document;
+use App\Models\DocumentCategory;
+use App\Models\DocumentChunk;
+use App\Services\AI\EmbeddingService;
+use App\Services\AI\QdrantService;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+
+class QrGeneratorService
+{
+    protected EmbeddingService $embeddingService;
+    protected QdrantService $qdrantService;
+
+    public function __construct(
+        EmbeddingService $embeddingService,
+        QdrantService $qdrantService
+    ) {
+        $this->embeddingService = $embeddingService;
+        $this->qdrantService = $qdrantService;
+    }
+
+    /**
+     * Process a chunk to generate Q/R pairs and index to Qdrant
+     *
+     * @return array{useful: bool, knowledge_units: array, category: string, summary: string, qdrant_points_count: int}
+     */
+    public function processChunk(
+        DocumentChunk $chunk,
+        Document $document,
+        array $config = []
+    ): array {
+        $model = $config['model'] ?? $document->agent?->model ?? config('ai.ollama.default_model');
+        $temperature = $config['temperature'] ?? 0.3;
+
+        // Get existing categories for the prompt
+        $existingCategories = DocumentCategory::orderBy('name')->pluck('name')->toArray();
+
+        // Generate Q/R via LLM
+        $llmResponse = $this->callLlm(
+            $chunk->content,
+            $chunk->parent_context,
+            $existingCategories,
+            $model,
+            $temperature,
+            $document
+        );
+
+        // Parse response
+        $result = $this->parseLlmResponse($llmResponse);
+
+        // Handle category
+        $categoryName = $result['category'] ?? 'DIVERS';
+        $category = $this->findOrCreateCategory($categoryName);
+
+        // Update chunk with Q/R data
+        $chunk->update([
+            'useful' => $result['useful'],
+            'knowledge_units' => $result['knowledge_units'] ?? [],
+            'summary' => $result['summary'] ?? null,
+            'category_id' => $category->id,
+        ]);
+
+        // Index to Qdrant if useful
+        $qdrantPointsCount = 0;
+        if ($result['useful']) {
+            $qdrantPointsCount = $this->indexToQdrant($chunk, $document, $result);
+        }
+
+        $chunk->update([
+            'qdrant_points_count' => $qdrantPointsCount,
+            'is_indexed' => $result['useful'],
+            'indexed_at' => $result['useful'] ? now() : null,
+        ]);
+
+        Log::info("Chunk processed", [
+            'chunk_id' => $chunk->id,
+            'useful' => $result['useful'],
+            'knowledge_units_count' => count($result['knowledge_units'] ?? []),
+            'qdrant_points_count' => $qdrantPointsCount,
+        ]);
+
+        return [
+            'useful' => $result['useful'],
+            'knowledge_units' => $result['knowledge_units'] ?? [],
+            'category' => $categoryName,
+            'summary' => $result['summary'] ?? '',
+            'qdrant_points_count' => $qdrantPointsCount,
+        ];
+    }
+
+    /**
+     * Call LLM to generate Q/R pairs
+     */
+    protected function callLlm(
+        string $content,
+        ?string $parentContext,
+        array $existingCategories,
+        string $model,
+        float $temperature,
+        Document $document
+    ): string {
+        $agent = $document->agent;
+        $ollamaHost = $agent?->ollama_host ?? config('ai.ollama.host');
+        $ollamaPort = $agent?->ollama_port ?? config('ai.ollama.port');
+        $ollamaUrl = "http://{$ollamaHost}:{$ollamaPort}";
+
+        $categoriesList = !empty($existingCategories)
+            ? implode(', ', $existingCategories)
+            : 'Aucune catégorie existante';
+
+        $contextInfo = $parentContext
+            ? "Contexte du document: {$parentContext}\n\n"
+            : '';
+
+        $prompt = <<<PROMPT
+{$contextInfo}Analyse le texte suivant et génère des paires Question/Réponse.
+
+RÈGLES IMPORTANTES:
+1. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
+2. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
+3. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
+4. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
+
+Catégories existantes: {$categoriesList}
+
+TEXTE À ANALYSER:
+{$content}
+
+RÉPONDS UNIQUEMENT avec un JSON valide au format suivant:
+{
+  "useful": true,
+  "category": "NOM_CATEGORIE",
+  "knowledge_units": [
+    {
+      "question": "Question claire et précise ?",
+      "answer": "Réponse autonome et complète."
+    }
+  ],
+  "summary": "Résumé en une phrase du contenu.",
+  "raw_content_clean": "Texte nettoyé..."
+}
+PROMPT;
+
+        $response = Http::timeout(120)
+            ->post("{$ollamaUrl}/api/generate", [
+                'model' => $model,
+                'prompt' => $prompt,
+                'stream' => false,
+                'options' => [
+                    'temperature' => $temperature,
+                ],
+            ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException("LLM call failed: " . $response->body());
+        }
+
+        return $response->json('response', '');
+    }
+
+    /**
+     * Parse LLM response to extract Q/R data
+     */
+    protected function parseLlmResponse(string $response): array
+    {
+        // Try to extract JSON from response
+        $jsonMatch = preg_match('/\{[\s\S]*\}/', $response, $matches);
+
+        if (!$jsonMatch) {
+            Log::warning("Could not extract JSON from LLM response", [
+                'response' => substr($response, 0, 500),
+            ]);
+            return [
+                'useful' => false,
+                'knowledge_units' => [],
+                'category' => 'DIVERS',
+                'summary' => '',
+                'raw_content_clean' => '',
+            ];
+        }
+
+        $json = $matches[0];
+        $data = json_decode($json, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Log::warning("Invalid JSON in LLM response", [
+                'error' => json_last_error_msg(),
+                'json' => substr($json, 0, 500),
+            ]);
+            return [
+                'useful' => false,
+                'knowledge_units' => [],
+                'category' => 'DIVERS',
+                'summary' => '',
+                'raw_content_clean' => '',
+            ];
+        }
+
+        return [
+            'useful' => $data['useful'] ?? false,
+            'knowledge_units' => $data['knowledge_units'] ?? [],
+            'category' => $data['category'] ?? 'DIVERS',
+            'summary' => $data['summary'] ?? '',
+            'raw_content_clean' => $data['raw_content_clean'] ?? '',
+        ];
+    }
+
+    /**
+     * Find or create a category
+     */
+    protected function findOrCreateCategory(string $name): DocumentCategory
+    {
+        $slug = Str::slug($name);
+
+        $category = DocumentCategory::where('slug', $slug)->first();
+
+        if (!$category) {
+            $category = DocumentCategory::create([
+                'name' => strtoupper($name),
+                'slug' => $slug,
+                'description' => "Catégorie générée automatiquement",
+                'is_ai_generated' => true,
+            ]);
+
+            Log::info("Created new category", ['name' => $name, 'slug' => $slug]);
+        }
+
+        $category->incrementUsage();
+
+        return $category;
+    }
+
+    /**
+     * Index chunk to Qdrant with multiple points (Q/R pairs + source)
+     */
+    protected function indexToQdrant(
+        DocumentChunk $chunk,
+        Document $document,
+        array $result
+    ): int {
+        $agent = $document->agent;
+
+        if (!$agent || !$agent->qdrant_collection) {
+            Log::warning("No Qdrant collection configured for agent", [
+                'document_id' => $document->id,
+            ]);
+            return 0;
+        }
+
+        $collection = $agent->qdrant_collection;
+        $points = [];
+        $pointIds = [];
+
+        // Create Q/R points
+        foreach ($result['knowledge_units'] as $index => $unit) {
+            $question = $unit['question'] ?? '';
+            $answer = $unit['answer'] ?? '';
+
+            if (empty($question) || empty($answer)) {
+                continue;
+            }
+
+            // Generate embedding for question
+            $embedding = $this->embeddingService->embed($question);
+
+            $pointId = Str::uuid()->toString();
+            $pointIds[] = $pointId;
+
+            $points[] = [
+                'id' => $pointId,
+                'vector' => $embedding,
+                'payload' => [
+                    'type' => 'qa_pair',
+                    'category' => $result['category'],
+                    'display_text' => $answer,
+                    'question' => $question,
+                    'source_doc' => $document->title ?? $document->original_name,
+                    'parent_context' => $chunk->parent_context,
+                    'chunk_id' => $chunk->id,
+                    'document_id' => $document->id,
+                    'agent_id' => $agent->id,
+                ],
+            ];
+        }
+
+        // Create source material point
+        $summaryContent = ($result['summary'] ?? '') . ' ' . ($result['raw_content_clean'] ?? $chunk->content);
+        $sourceEmbedding = $this->embeddingService->embed($summaryContent);
+
+        $sourcePointId = Str::uuid()->toString();
+        $pointIds[] = $sourcePointId;
+
+        $points[] = [
+            'id' => $sourcePointId,
+            'vector' => $sourceEmbedding,
+            'payload' => [
+                'type' => 'source_material',
+                'category' => $result['category'],
+                'display_text' => $chunk->content,
+                'summary' => $result['summary'] ?? '',
+                'source_doc' => $document->title ?? $document->original_name,
+                'parent_context' => $chunk->parent_context,
+                'chunk_id' => $chunk->id,
+                'document_id' => $document->id,
+                'agent_id' => $agent->id,
+            ],
+        ];
+
+        // Upsert to Qdrant
+        if (!empty($points)) {
+            $this->qdrantService->upsert($collection, $points);
+        }
+
+        // Update chunk with point IDs
+        $chunk->update(['qdrant_point_ids' => $pointIds]);
+
+        return count($points);
+    }
+}

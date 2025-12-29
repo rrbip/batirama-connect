@@ -19,6 +19,7 @@ class Document extends Model
 
     protected $fillable = [
         'uuid',
+        'source_type',
         'tenant_id',
         'agent_id',
         'original_name',
@@ -27,11 +28,10 @@ class Document extends Model
         'file_size',
         'file_hash',
         'document_type',
-        'category',
-        'extraction_method',
         'extraction_status',
         'extracted_text',
         'extraction_metadata',
+        'pipeline_steps',
         'extraction_error',
         'extracted_at',
         'chunk_count',
@@ -48,6 +48,7 @@ class Document extends Model
 
     protected $casts = [
         'extraction_metadata' => 'array',
+        'pipeline_steps' => 'array',
         'is_indexed' => 'boolean',
         'extracted_at' => 'datetime',
         'indexed_at' => 'datetime',
