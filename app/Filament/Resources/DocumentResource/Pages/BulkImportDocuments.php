@@ -90,10 +90,11 @@ class BulkImportDocuments extends Page
                                 'paragraph' => 'Par paragraphe',
                                 'fixed_size' => 'Taille fixe',
                                 'recursive' => 'Récursif',
+                                'markdown' => 'Markdown (par headers)',
                                 'llm_assisted' => 'Assisté par LLM',
                             ])
                             ->default('sentence')
-                            ->helperText('Automatiquement défini selon l\'agent. Vous pouvez modifier si besoin.'),
+                            ->helperText('Markdown: optimal pour HTML/MD. Automatiquement défini selon l\'agent.'),
                     ])
                     ->columns(3),
 

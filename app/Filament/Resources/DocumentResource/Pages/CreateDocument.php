@@ -22,14 +22,6 @@ class CreateDocument extends CreateRecord
         $data['uploaded_by'] = auth()->id();
         $data['extraction_status'] = 'pending';
 
-        // Utiliser la stratégie de chunking de l'agent si non spécifiée
-        if (empty($data['chunk_strategy']) && !empty($data['agent_id'])) {
-            $agent = \App\Models\Agent::find($data['agent_id']);
-            $data['chunk_strategy'] = $agent?->getDefaultChunkStrategy() ?? 'sentence';
-        } else {
-            $data['chunk_strategy'] = $data['chunk_strategy'] ?? 'sentence';
-        }
-
         // Extraire le nom original et le type du fichier uploadé
         if (isset($data['storage_path'])) {
             $storagePath = $data['storage_path'];
@@ -47,6 +39,14 @@ class CreateDocument extends CreateRecord
                 $data['mime_type'] = $this->getMimeTypeFromExtension($extension);
                 $data['file_size'] = 0;
             }
+        }
+
+        // Déterminer la stratégie de chunking optimale (après avoir déterminé le type)
+        if (empty($data['chunk_strategy'])) {
+            $data['chunk_strategy'] = $this->getOptimalChunkStrategy(
+                $data['document_type'] ?? '',
+                $data['agent_id'] ?? null
+            );
         }
 
         return $data;
@@ -83,6 +83,28 @@ class CreateDocument extends CreateRecord
             'md' => 'text/markdown',
             default => 'application/octet-stream',
         };
+    }
+
+    /**
+     * Détermine la stratégie de chunking optimale selon le type de document
+     *
+     * - md, html, htm : utilise 'markdown' (découpage par headers)
+     * - Autres : utilise la stratégie par défaut de l'agent
+     */
+    private function getOptimalChunkStrategy(string $documentType, ?int $agentId): string
+    {
+        // Pour Markdown et HTML, la stratégie 'markdown' est optimale
+        if (in_array(strtolower($documentType), ['md', 'html', 'htm'])) {
+            return 'markdown';
+        }
+
+        // Pour les autres types, utiliser la stratégie de l'agent
+        if ($agentId) {
+            $agent = \App\Models\Agent::find($agentId);
+            return $agent?->getDefaultChunkStrategy() ?? 'sentence';
+        }
+
+        return 'sentence';
     }
 
     protected function getRedirectUrl(): string

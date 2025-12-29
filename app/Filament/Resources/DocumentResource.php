@@ -438,6 +438,7 @@ class DocumentResource extends Resource
                                                     'sentence' => 'Par phrase',
                                                     'paragraph' => 'Par paragraphe',
                                                     'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
                                                     'llm_assisted' => 'Assisté par LLM',
                                                     default => $chunkStrategy,
                                                 };
@@ -647,6 +648,7 @@ class DocumentResource extends Resource
                                                     'sentence' => 'Par phrase',
                                                     'paragraph' => 'Par paragraphe',
                                                     'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
                                                     'llm_assisted' => 'Assisté par LLM',
                                                     default => $chunkStrategy,
                                                 };
@@ -854,6 +856,7 @@ class DocumentResource extends Resource
                                                     'sentence' => 'Par phrase',
                                                     'paragraph' => 'Par paragraphe',
                                                     'fixed_size' => 'Taille fixe',
+                                                    'markdown' => 'Markdown (headers)',
                                                     'llm_assisted' => 'Assisté par LLM',
                                                     default => $chunkStrategy,
                                                 };
@@ -965,6 +968,7 @@ class DocumentResource extends Resource
                                                 'paragraph' => 'Par paragraphe',
                                                 'fixed_size' => 'Taille fixe',
                                                 'recursive' => 'Récursif',
+                                                'markdown' => 'Markdown (par headers)',
                                                 'llm_assisted' => 'Assisté par LLM',
                                             ])
                                             ->default('sentence'),
