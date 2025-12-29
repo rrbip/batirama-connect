@@ -103,6 +103,22 @@ class WebCrawlResource extends Resource
                                             ->helperText('Minimum 100ms'),
                                     ])
                                     ->columns(4),
+
+                                Forms\Components\Section::make('Extraction de texte')
+                                    ->description('Configuration pour la détection automatique de langue')
+                                    ->schema([
+                                        Forms\Components\Select::make('pdf_extraction_method')
+                                            ->label('Méthode d\'extraction PDF')
+                                            ->options([
+                                                'auto' => 'Auto (texte puis OCR si nécessaire)',
+                                                'text' => 'Texte uniquement (pdftotext)',
+                                                'ocr' => 'OCR uniquement (Tesseract)',
+                                                'vision' => 'Vision IA (préserve tableaux)',
+                                            ])
+                                            ->default('auto')
+                                            ->helperText('Vision: utilise un modèle IA pour extraire le texte en préservant la structure des tableaux'),
+                                    ])
+                                    ->columns(1),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Authentification')
@@ -146,8 +162,31 @@ class WebCrawlResource extends Resource
 
                                         Forms\Components\TextInput::make('user_agent')
                                             ->label('User-Agent')
-                                            ->default('IA-Manager/1.0')
-                                            ->helperText('Identifiant envoyé au serveur'),
+                                            ->default(WebCrawl::DEFAULT_USER_AGENT)
+                                            ->placeholder(WebCrawl::DEFAULT_USER_AGENT)
+                                            ->helperText('Laissez vide pour le Chrome par défaut'),
+                                    ])
+                                    ->columns(2),
+
+                                Forms\Components\Section::make('Déduplication')
+                                    ->description('Évite d\'indexer plusieurs fois le même contenu')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('enable_deduplication')
+                                            ->label('Activer la déduplication')
+                                            ->default(true)
+                                            ->live()
+                                            ->helperText('Détecte et ignore les contenus dupliqués'),
+
+                                        Forms\Components\Select::make('dedup_mode')
+                                            ->label('Mode de détection')
+                                            ->options([
+                                                'content_hash' => 'Hash du contenu (exact)',
+                                                'canonical' => 'URL canonique',
+                                                'both' => 'Les deux (recommandé)',
+                                            ])
+                                            ->default('both')
+                                            ->visible(fn ($get) => $get('enable_deduplication'))
+                                            ->helperText('content_hash = doublons exacts, canonical = respect du SEO'),
                                     ])
                                     ->columns(2),
                             ]),

@@ -126,7 +126,7 @@
         </div>
     @empty
         <div class="text-center py-6 text-gray-500 dark:text-gray-400">
-            <x-heroicon-o-user-group class="w-12 h-12 mx-auto mb-2 opacity-50" />
+            <x-heroicon-o-user-group class="w-6 h-6 mx-auto mb-2 opacity-50" />
             <p>Aucun agent lié à ce crawl.</p>
             <p class="text-sm">Utilisez le bouton "Ajouter un agent" pour commencer.</p>
         </div>

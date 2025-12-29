@@ -11,11 +11,26 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 
 #[ObservedBy([DocumentObserver::class])]
 class Document extends Model
 {
     use HasFactory, SoftDeletes;
+
+    /**
+     * Boot the model - Auto-generate UUID on creation.
+     */
+    protected static function boot(): void
+    {
+        parent::boot();
+
+        static::creating(function (Document $document) {
+            if (empty($document->uuid)) {
+                $document->uuid = (string) Str::uuid();
+            }
+        });
+    }
 
     protected $fillable = [
         'uuid',

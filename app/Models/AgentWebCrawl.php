@@ -25,6 +25,7 @@ class AgentWebCrawl extends Model
         'url_filter_mode',
         'url_patterns',
         'content_types',
+        'allowed_locales',
         'chunk_strategy',
         'index_status',
         'pages_indexed',
@@ -36,6 +37,7 @@ class AgentWebCrawl extends Model
     protected $casts = [
         'url_patterns' => 'array',
         'content_types' => 'array',
+        'allowed_locales' => 'array',
         'last_indexed_at' => 'datetime',
     ];
 
@@ -120,6 +122,26 @@ class AgentWebCrawl extends Model
     }
 
     /**
+     * Vérifie si une locale doit être indexée
+     */
+    public function shouldIndexLocale(?string $locale): bool
+    {
+        $allowedLocales = $this->allowed_locales ?? [];
+
+        // Empty array = all locales allowed
+        if (empty($allowedLocales)) {
+            return true;
+        }
+
+        // Null locale = include if we allow unknown languages (could add a setting for this)
+        if ($locale === null) {
+            return true; // By default, include URLs without detected locale
+        }
+
+        return in_array($locale, $allowedLocales, true);
+    }
+
+    /**
      * Vérifie si une URL correspond aux patterns de filtrage
      */
     public function matchesUrlPatterns(string $url): bool
@@ -136,10 +158,18 @@ class AgentWebCrawl extends Model
             return true;
         }
 
+        // Extraire le path et la query string pour le matching
         $path = parse_url($url, PHP_URL_PATH) ?? '/';
+        $query = parse_url($url, PHP_URL_QUERY) ?? '';
+        $pathWithQuery = $query ? "{$path}?{$query}" : $path;
 
         foreach ($patterns as $pattern) {
-            if ($this->urlMatchesPattern($path, $pattern)) {
+            // Tester d'abord sur l'URL complète (path + query)
+            if ($this->urlMatchesPattern($pathWithQuery, $pattern)) {
+                return true;
+            }
+            // Puis sur le path seul (rétro-compatibilité)
+            if ($query && $this->urlMatchesPattern($path, $pattern)) {
                 return true;
             }
         }

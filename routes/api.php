@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\PartnerApiController;
 use App\Http\Controllers\Api\PublicChatController;
+use App\Http\Controllers\Api\Whitelabel\EditorController;
+use App\Http\Controllers\Api\Whitelabel\MarketplaceController;
+use App\Http\Controllers\Api\Whitelabel\WidgetController;
 use App\Http\Middleware\PartnerApiAuth;
 use Illuminate\Support\Facades\Route;
 
@@ -35,6 +38,74 @@ Route::prefix('v1')->group(function () {
         });
 
 });
+
+/*
+|--------------------------------------------------------------------------
+| Whitelabel API Routes
+|--------------------------------------------------------------------------
+|
+| Routes pour l'API whitelabel (éditeurs tiers comme EBP, SAGE, etc.)
+|
+*/
+
+// Widget API (authentifié via deployment_key)
+Route::prefix('whitelabel')
+    ->middleware(['deployment.key', 'deployment.domain', 'deployment.rate', 'deployment.cors'])
+    ->group(function () {
+        // Configuration du déploiement
+        Route::get('/config', [WidgetController::class, 'getConfig']);
+
+        // Sessions
+        Route::post('/sessions', [WidgetController::class, 'init'])
+            ->middleware('editor.quota:session');
+        Route::get('/sessions/{sessionId}', [WidgetController::class, 'getSession']);
+        Route::delete('/sessions/{sessionId}', [WidgetController::class, 'closeSession']);
+        Route::get('/sessions/{sessionId}/messages', [WidgetController::class, 'getMessages']);
+
+        // Messages
+        Route::post('/sessions/{sessionId}/messages', [WidgetController::class, 'sendMessage'])
+            ->middleware('editor.quota:message');
+
+        // Files (upload and list)
+        Route::post('/sessions/{sessionId}/upload', [WidgetController::class, 'uploadFile']);
+        Route::get('/sessions/{sessionId}/files', [WidgetController::class, 'getFiles']);
+    });
+
+// Editor API (authentifié via API key éditeur)
+Route::prefix('editor')
+    ->middleware('editor.auth')
+    ->group(function () {
+        // Déploiements
+        Route::get('/deployments', [EditorController::class, 'listDeployments']);
+        Route::post('/deployments', [EditorController::class, 'createDeployment']);
+        Route::put('/deployments/{deploymentId}', [EditorController::class, 'updateDeployment']);
+
+        // Artisans
+        Route::get('/artisans', [EditorController::class, 'listArtisans']);
+        Route::post('/artisans/link', [EditorController::class, 'linkArtisan']);
+        Route::post('/artisans/create-and-link', [EditorController::class, 'createAndLinkArtisan']);
+
+        // Sessions
+        Route::post('/sessions/create-link', [EditorController::class, 'createSessionLink']);
+
+        // Stats
+        Route::get('/stats', [EditorController::class, 'getStats']);
+
+        // Marketplace
+        Route::prefix('marketplace')->group(function () {
+            // Notification de devis signé
+            Route::post('/quote-signed', [MarketplaceController::class, 'quoteSigned']);
+
+            // Gestion des commandes
+            Route::get('/orders', [MarketplaceController::class, 'listOrders']);
+            Route::get('/orders/{orderId}', [MarketplaceController::class, 'getOrder']);
+            Route::post('/orders/{orderId}/validate', [MarketplaceController::class, 'validateOrder']);
+            Route::post('/orders/{orderId}/cancel', [MarketplaceController::class, 'cancelOrder']);
+
+            // Gestion des items
+            Route::patch('/orders/{orderId}/items/{itemId}', [MarketplaceController::class, 'updateOrderItem']);
+        });
+    });
 
 // Public chat endpoints (no auth, token-based access)
 Route::prefix('c')->group(function () {

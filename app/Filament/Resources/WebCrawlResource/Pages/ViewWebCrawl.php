@@ -14,6 +14,7 @@ use App\Models\AgentWebCrawl;
 use App\Models\WebCrawlUrl;
 use App\Models\WebCrawlUrlCrawl;
 use App\Services\Crawler\UrlNormalizer;
+use App\Services\Marketplace\LanguageDetector;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Infolists\Components\Grid;
@@ -43,6 +44,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         'url_filter_mode' => 'exclude',
         'url_patterns' => '',
         'content_types' => ['html', 'pdf', 'image', 'document'],
+        'allowed_locales' => [],
         'chunk_strategy' => '',
     ];
 
@@ -67,6 +69,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             'url_filter_mode' => $config->url_filter_mode ?? 'exclude',
             'url_patterns' => is_array($config->url_patterns) ? implode("\n", $config->url_patterns) : '',
             'content_types' => $config->content_types ?? ['html', 'pdf', 'image', 'document'],
+            'allowed_locales' => $config->allowed_locales ?? [],
             'chunk_strategy' => $config->chunk_strategy ?? '',
         ];
 
@@ -152,6 +155,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             'url_filter_mode' => $this->editFormData['url_filter_mode'],
             'url_patterns' => $patterns,
             'content_types' => $this->editFormData['content_types'],
+            'allowed_locales' => $this->editFormData['allowed_locales'] ?? [],
             'chunk_strategy' => $this->editFormData['chunk_strategy'] ?: null,
         ]);
 
@@ -183,6 +187,7 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             'url_filter_mode' => $config->url_filter_mode,
             'url_patterns' => is_array($config->url_patterns) ? implode("\n", $config->url_patterns) : '',
             'content_types' => $config->content_types ?? ['html', 'pdf', 'image', 'document'],
+            'allowed_locales' => $config->allowed_locales ?? [],
             'chunk_strategy' => $config->chunk_strategy ?? '',
         ];
     }
@@ -204,11 +209,13 @@ class ViewWebCrawl extends ViewRecord implements HasTable
             return;
         }
 
-        // Vérifier que le crawl est terminé
-        if ($this->record->status !== 'completed') {
+        // Compter d'abord pour afficher l'estimation
+        $estimatedCount = $this->countUrlsToIndex($config);
+
+        if ($estimatedCount === 0) {
             Notification::make()
-                ->title('Crawl en cours')
-                ->body('Attendez que le crawl soit terminé avant de lancer l\'indexation.')
+                ->title('Aucune URL à indexer')
+                ->body('Aucune URL ne correspond aux filtres configurés (patterns, types, langues).')
                 ->warning()
                 ->send();
 
@@ -217,18 +224,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
 
         $config->update(['index_status' => 'indexing']);
 
-        // Pour chaque URL du cache, dispatcher le job d'indexation
-        $count = 0;
-        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
-            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
-                IndexAgentUrlJob::dispatch($config, $entry->url);
-                $count++;
-            }
-        }
+        // Dispatcher les jobs (utilise la même logique de filtrage)
+        $this->dispatchAgentIndexation($config);
 
         Notification::make()
             ->title('Indexation lancée')
-            ->body("{$count} URL(s) vont être indexées pour l'agent {$config->agent->name}.")
+            ->body("{$estimatedCount} URL(s) vont être indexées pour l'agent {$config->agent->name}.")
             ->success()
             ->send();
     }
@@ -328,6 +329,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         ])
                         ->default(['html', 'pdf', 'image', 'document']),
 
+                    Forms\Components\Section::make('Langues à indexer')
+                        ->description('Laissez vide pour indexer toutes les langues')
+                        ->schema(self::getLocaleCheckboxesByContinent())
+                        ->collapsed()
+                        ->compact(),
+
                     Forms\Components\Select::make('chunk_strategy')
                         ->label('Stratégie de chunking')
                         ->options([
@@ -351,18 +358,27 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'url_filter_mode' => $data['url_filter_mode'],
                         'url_patterns' => $patterns,
                         'content_types' => $data['content_types'],
+                        'allowed_locales' => $data['allowed_locales'] ?? [],
                         'chunk_strategy' => $data['chunk_strategy'] ?: null,
                         'index_status' => 'pending',
                     ]);
 
-                    // Si le crawl est terminé, lancer l'indexation pour cet agent
-                    if ($this->record->status === 'completed') {
+                    // Compter les URLs qui correspondent aux filtres
+                    $matchingCount = $this->countUrlsToIndex($agentConfig);
+
+                    // Lancer l'indexation si des URLs correspondent
+                    if ($matchingCount > 0) {
+                        $agentConfig->update(['index_status' => 'indexing']);
                         $this->dispatchAgentIndexation($agentConfig);
                     }
 
+                    $message = $matchingCount > 0
+                        ? "L'indexation démarre sur {$matchingCount} URL(s) correspondant aux filtres."
+                        : 'Aucune URL ne correspond aux filtres actuels. Modifiez les filtres ou attendez plus de données.';
+
                     Notification::make()
                         ->title('Agent ajouté')
-                        ->body('L\'agent a été lié au crawl. L\'indexation démarrera après le crawl.')
+                        ->body($message)
                         ->success()
                         ->send();
                 }),
@@ -442,21 +458,16 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 ->color('success')
                 ->visible(fn () => $this->record->status === 'pending' && $this->record->urlEntries()->count() === 0)
                 ->action(function () {
-                    if ($this->record->agentConfigs()->count() === 0) {
-                        Notification::make()
-                            ->title('Aucun agent')
-                            ->body('Ajoutez au moins un agent avant de lancer le crawl.')
-                            ->warning()
-                            ->send();
-
-                        return;
-                    }
-
                     StartWebCrawlJob::dispatch($this->record);
+
+                    $message = 'Le crawl a démarré.';
+                    if ($this->record->agentConfigs()->count() === 0) {
+                        $message .= ' Vous pourrez ajouter des agents après le crawl pour indexer le contenu.';
+                    }
 
                     Notification::make()
                         ->title('Crawl lancé')
-                        ->body('Le crawl a démarré.')
+                        ->body($message)
                         ->success()
                         ->send();
                 }),
@@ -542,6 +553,72 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'completed_at' => now(),
                     ]);
                     Notification::make()->title('Crawl annulé')->warning()->send();
+                }),
+
+            Actions\Action::make('detect_locales')
+                ->label('Détecter langues')
+                ->icon('heroicon-o-language')
+                ->color('info')
+                ->modalHeading('Détecter les langues')
+                ->modalDescription(function () {
+                    $totalCount = WebCrawlUrl::query()
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+                        ->whereNotNull('storage_path')
+                        ->count();
+
+                    $withoutLocale = WebCrawlUrl::query()
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+                        ->whereNotNull('storage_path')
+                        ->whereNull('locale')
+                        ->count();
+
+                    $withLocale = $totalCount - $withoutLocale;
+
+                    return "Total: {$totalCount} documents • Sans langue: {$withoutLocale} • Avec langue: {$withLocale}";
+                })
+                ->form([
+                    Forms\Components\Radio::make('mode')
+                        ->label('Mode de détection')
+                        ->options([
+                            'new_only' => 'Nouveaux uniquement (documents sans langue détectée)',
+                            'force_all' => 'Tout re-détecter (écrase les langues existantes)',
+                        ])
+                        ->default('new_only')
+                        ->required(),
+                ])
+                ->action(function (array $data) {
+                    $forceAll = $data['mode'] === 'force_all';
+
+                    $query = WebCrawlUrl::query()
+                        ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+                        ->whereNotNull('storage_path');
+
+                    if (!$forceAll) {
+                        $query->whereNull('locale');
+                    }
+
+                    $count = $query->count();
+
+                    if ($count === 0) {
+                        Notification::make()
+                            ->title('Aucun document à traiter')
+                            ->body('Tous les documents ont déjà une langue détectée.')
+                            ->info()
+                            ->send();
+                        return;
+                    }
+
+                    \App\Jobs\DetectCrawlUrlLocalesJob::dispatch($this->record, $forceAll);
+
+                    $message = $forceAll
+                        ? "Re-détection de la langue pour {$count} documents en arrière-plan."
+                        : "Détection de la langue pour {$count} documents sans langue en arrière-plan.";
+
+                    Notification::make()
+                        ->title('Détection lancée')
+                        ->body($message . ' Assurez-vous que le worker de queue est actif.')
+                        ->success()
+                        ->send();
                 }),
 
             Actions\Action::make('edit')
@@ -704,7 +781,8 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                         'fetched' => 'OK',
                         'error' => 'Erreur',
                         default => $state,
-                    }),
+                    })
+                    ->tooltip(fn ($record) => $record->error_message),
 
                 Tables\Columns\TextColumn::make('url.http_status')
                     ->label('HTTP')
@@ -718,6 +796,12 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                 Tables\Columns\TextColumn::make('url.content_type')
                     ->label('Type')
                     ->limit(20),
+
+                Tables\Columns\TextColumn::make('url.locale')
+                    ->label('Langue')
+                    ->badge()
+                    ->formatStateUsing(fn ($state) => $state ? strtoupper($state) : '—')
+                    ->color(fn ($state) => $state ? 'primary' : 'gray'),
 
                 Tables\Columns\TextColumn::make('fetched_at')
                     ->label('Crawlé le')
@@ -784,6 +868,28 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                             };
                         });
                     }),
+
+                Tables\Filters\SelectFilter::make('locale')
+                    ->label('Langue')
+                    ->multiple()
+                    ->options(fn () => $this->getLocaleOptionsForFilter())
+                    ->query(function ($query, array $data) {
+                        if (empty($data['values'])) {
+                            return $query;
+                        }
+
+                        return $query->whereHas('url', fn ($q) => $q->whereIn('locale', $data['values']));
+                    }),
+
+                Tables\Filters\TernaryFilter::make('has_locale')
+                    ->label('Langue détectée')
+                    ->placeholder('Tous')
+                    ->trueLabel('Avec langue')
+                    ->falseLabel('Sans langue')
+                    ->queries(
+                        true: fn ($query) => $query->whereHas('url', fn ($q) => $q->whereNotNull('locale')),
+                        false: fn ($query) => $query->whereHas('url', fn ($q) => $q->whereNull('locale')),
+                    ),
             ])
             ->actions([
                 Tables\Actions\Action::make('view_cache')
@@ -886,6 +992,46 @@ class ViewWebCrawl extends ViewRecord implements HasTable
                             ->success()
                             ->send();
                     }),
+
+                Tables\Actions\BulkAction::make('redetect_locales')
+                    ->label('Re-détecter la langue')
+                    ->icon('heroicon-o-language')
+                    ->color('info')
+                    ->requiresConfirmation()
+                    ->modalHeading('Re-détecter la langue')
+                    ->modalDescription(fn ($records) => "Re-détecter la langue pour {$records->count()} URL(s) sélectionnée(s). Les locales existantes seront écrasées.")
+                    ->action(function ($records) {
+                        $pdfExtractionMethod = $this->record->pdf_extraction_method ?? 'auto';
+                        $detected = 0;
+                        $failed = 0;
+
+                        foreach ($records as $record) {
+                            if (!$record->url?->storage_path) {
+                                $failed++;
+                                continue;
+                            }
+
+                            try {
+                                // Force locale to null to re-detect
+                                $record->url->update(['locale' => null]);
+                                $locale = $record->url->detectAndSaveLocale($pdfExtractionMethod);
+
+                                if ($locale) {
+                                    $detected++;
+                                } else {
+                                    $failed++;
+                                }
+                            } catch (\Throwable $e) {
+                                $failed++;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title('Détection terminée')
+                            ->body("{$detected} langue(s) détectée(s), {$failed} échec(s)")
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->defaultSort('created_at', 'desc')
             ->paginated([25, 50, 100, 250, 500])
@@ -898,14 +1044,58 @@ class ViewWebCrawl extends ViewRecord implements HasTable
      */
     protected function dispatchAgentIndexation(AgentWebCrawl $agentConfig): void
     {
-        $agentConfig->update(['index_status' => 'indexing']);
-
         // Pour chaque URL du cache, créer une entrée et dispatcher le job
+        // UNIQUEMENT si l'URL passe les filtres de l'agent
         foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
             if ($entry->status === 'fetched' && $entry->url?->storage_path) {
-                IndexAgentUrlJob::dispatch($agentConfig, $entry->url);
+                $url = $entry->url;
+
+                // Vérifier les filtres de l'agent AVANT de dispatcher le job
+                if (!$agentConfig->shouldIndexUrl($url->url)) {
+                    continue;
+                }
+
+                if ($url->content_type && !$agentConfig->shouldIndexContentType($url->content_type)) {
+                    continue;
+                }
+
+                if (!$agentConfig->shouldIndexLocale($url->locale)) {
+                    continue;
+                }
+
+                IndexAgentUrlJob::dispatch($agentConfig, $url);
             }
         }
+    }
+
+    /**
+     * Compte le nombre d'URLs qui seront indexées après application des filtres.
+     */
+    protected function countUrlsToIndex(AgentWebCrawl $agentConfig): int
+    {
+        $count = 0;
+
+        foreach ($this->record->urlEntries()->with('url')->get() as $entry) {
+            if ($entry->status === 'fetched' && $entry->url?->storage_path) {
+                $url = $entry->url;
+
+                if (!$agentConfig->shouldIndexUrl($url->url)) {
+                    continue;
+                }
+
+                if ($url->content_type && !$agentConfig->shouldIndexContentType($url->content_type)) {
+                    continue;
+                }
+
+                if (!$agentConfig->shouldIndexLocale($url->locale)) {
+                    continue;
+                }
+
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     /**
@@ -967,5 +1157,94 @@ class ViewWebCrawl extends ViewRecord implements HasTable
         }
 
         return $resources;
+    }
+
+    /**
+     * Get locale options for the filter based on detected locales in this crawl.
+     */
+    protected function getLocaleOptionsForFilter(): array
+    {
+        $locales = WebCrawlUrl::query()
+            ->whereHas('crawls', fn ($q) => $q->where('web_crawls.id', $this->record->id))
+            ->whereNotNull('locale')
+            ->distinct()
+            ->pluck('locale')
+            ->toArray();
+
+        $detector = app(LanguageDetector::class);
+        $options = [];
+
+        foreach ($locales as $locale) {
+            $options[$locale] = $detector->getLocaleName($locale) . ' (' . strtoupper($locale) . ')';
+        }
+
+        asort($options);
+
+        return $options;
+    }
+
+    /**
+     * Get locale checkboxes grouped by continent for the indexing form.
+     */
+    protected static function getLocaleCheckboxesByContinent(): array
+    {
+        $continents = LanguageDetector::getLocalesByContinent();
+        $components = [];
+
+        foreach ($continents as $continentKey => $continent) {
+            $continentLocaleCodes = array_keys($continent['locales']);
+
+            $components[] = Forms\Components\Section::make($continent['label'])
+                ->schema([
+                    Forms\Components\Toggle::make("select_all_{$continentKey}")
+                        ->label('Tout sélectionner / désélectionner')
+                        ->default(false)
+                        ->live()
+                        ->afterStateUpdated(function ($state, Forms\Set $set) use ($continentLocaleCodes, $continentKey) {
+                            if ($state) {
+                                $set("allowed_locales_{$continentKey}", $continentLocaleCodes);
+                            } else {
+                                $set("allowed_locales_{$continentKey}", []);
+                            }
+                        })
+                        ->dehydrated(false),
+
+                    Forms\Components\CheckboxList::make("allowed_locales_{$continentKey}")
+                        ->label('')
+                        ->options($continent['locales'])
+                        ->default([])
+                        ->afterStateHydrated(function ($state, Forms\Set $set, Forms\Get $get) use ($continentLocaleCodes, $continentKey) {
+                            // Load from main allowed_locales
+                            $mainState = $get('allowed_locales');
+                            if (is_array($mainState) && !empty($mainState)) {
+                                $filtered = array_intersect($mainState, $continentLocaleCodes);
+                                $set("allowed_locales_{$continentKey}", array_values($filtered));
+                            }
+                        })
+                        ->live()
+                        ->afterStateUpdated(function ($state, Forms\Set $set) use ($continentLocaleCodes, $continentKey) {
+                            // Update the select all toggle
+                            $allSelected = count(array_intersect($state ?? [], $continentLocaleCodes)) === count($continentLocaleCodes);
+                            $set("select_all_{$continentKey}", $allSelected);
+                        })
+                        ->columns(4),
+                ])
+                ->collapsed()
+                ->compact();
+        }
+
+        // Add a hidden field to aggregate all selected locales
+        $components[] = Forms\Components\Hidden::make('allowed_locales')
+            ->dehydrateStateUsing(function ($state, Forms\Get $get) use ($continents) {
+                // Aggregate all continent selections
+                $allSelected = [];
+                foreach ($continents as $continentKey => $continent) {
+                    $continentSelection = $get("allowed_locales_{$continentKey}") ?? [];
+                    $allSelected = array_merge($allSelected, $continentSelection);
+                }
+                return array_values(array_unique($allSelected));
+            });
+
+        return $components;
     }
 }

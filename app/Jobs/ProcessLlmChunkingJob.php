@@ -52,6 +52,35 @@ class ProcessLlmChunkingJob implements ShouldQueue
             'document_title' => $this->document->title ?? $this->document->original_name,
         ]);
 
+        // Validation du contenu AVANT d'appeler le LLM
+        $text = $this->document->extracted_text;
+
+        if (empty($text)) {
+            $this->document->update([
+                'extraction_status' => 'failed',
+                'extraction_error' => 'Document vide : aucun texte extrait. Vérifiez le fichier source.',
+            ]);
+            Log::warning('ProcessLlmChunkingJob skipped: empty document', [
+                'document_id' => $this->document->id,
+            ]);
+            return;
+        }
+
+        $wordCount = str_word_count($text);
+        $minWords = 20; // Minimum de mots pour justifier un appel LLM
+
+        if ($wordCount < $minWords) {
+            $this->document->update([
+                'extraction_status' => 'failed',
+                'extraction_error' => "Document trop court : {$wordCount} mots (minimum {$minWords}). Le chunking LLM n'est pas adapté pour ce contenu.",
+            ]);
+            Log::warning('ProcessLlmChunkingJob skipped: document too short', [
+                'document_id' => $this->document->id,
+                'word_count' => $wordCount,
+            ]);
+            return;
+        }
+
         // Marquer le document comme en cours de chunking
         $this->document->update([
             'extraction_status' => 'chunking',

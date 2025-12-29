@@ -116,7 +116,7 @@ class CrawlUrlJob implements ShouldQueue
             }
 
             // Contenu non modifié (304) - garder le contenu existant
-            if ($result['not_modified']) {
+            if ($result['not_modified'] ?? false) {
                 $crawlUrl->update(['http_status' => 304]);
 
                 $this->urlEntry->update([
@@ -135,10 +135,10 @@ class CrawlUrlJob implements ShouldQueue
             // Mettre à jour les infos de l'URL
             $crawlUrl->update([
                 'http_status' => $result['status'],
-                'content_type' => $result['content_type'],
-                'content_length' => $result['content_length'],
-                'etag' => $result['etag'],
-                'last_modified' => $result['last_modified'],
+                'content_type' => $result['content_type'] ?? 'text/html',
+                'content_length' => $result['content_length'] ?? 0,
+                'etag' => $result['etag'] ?? null,
+                'last_modified' => $result['last_modified'] ?? null,
             ]);
 
             // Vérifier le code HTTP
@@ -221,12 +221,54 @@ class CrawlUrlJob implements ShouldQueue
                 return;
             }
 
-            // Si c'est du HTML, extraire les liens
+            // Si c'est du HTML, extraire les liens et la canonical URL
+            $canonicalUrl = null;
             if (str_contains($contentType, 'text/html')) {
                 $this->processHtmlPage($result['body'], $url, $crawler, $urlNormalizer, $allowedDomains);
+                $canonicalUrl = $crawler->extractCanonicalUrl($result['body'], $url);
             }
 
-            // Stocker le contenu en cache (toujours, indépendamment des patterns)
+            // Calculer le hash du contenu
+            $oldContentHash = $crawlUrl->content_hash;
+            $newContentHash = hash('sha256', $result['body']);
+            $contentChanged = $oldContentHash !== $newContentHash;
+
+            // Vérifier les doublons (avant de stocker)
+            $duplicate = $crawler->checkForDuplicate(
+                $this->crawl,
+                $crawlUrl,
+                $result['body'],
+                $canonicalUrl
+            );
+
+            if ($duplicate) {
+                // Marquer comme doublon, ne pas stocker le contenu
+                $crawlUrl->update([
+                    'duplicate_of_id' => $duplicate->id,
+                    'content_hash' => $newContentHash,
+                    'canonical_url' => $canonicalUrl,
+                    'canonical_hash' => $canonicalUrl ? hash('sha256', $canonicalUrl) : null,
+                ]);
+
+                $this->urlEntry->update([
+                    'status' => 'fetched',
+                    'fetched_at' => now(),
+                    'error_message' => 'duplicate_of:' . $duplicate->id,
+                ]);
+                $this->crawl->increment('pages_crawled');
+                $this->crawl->increment('pages_skipped');
+
+                Log::info('URL marked as duplicate, skipping indexation', [
+                    'crawl_id' => $this->crawl->id,
+                    'url' => $url,
+                    'duplicate_of' => $duplicate->url,
+                ]);
+
+                $this->checkCrawlCompletion();
+                return;
+            }
+
+            // Stocker le contenu en cache (seulement si pas un doublon)
             $storagePath = $crawler->storeContent(
                 $result['body'],
                 $contentType,
@@ -234,14 +276,17 @@ class CrawlUrlJob implements ShouldQueue
             );
 
             // Mettre à jour l'URL avec le contenu
-            $oldContentHash = $crawlUrl->content_hash;
-            $newContentHash = hash('sha256', $result['body']);
-            $contentChanged = $oldContentHash !== $newContentHash;
-
             $crawlUrl->update([
                 'storage_path' => $storagePath,
                 'content_hash' => $newContentHash,
+                'canonical_url' => $canonicalUrl,
+                'canonical_hash' => $canonicalUrl ? hash('sha256', $canonicalUrl) : null,
             ]);
+
+            // Détecter la langue du contenu HTML
+            if ($crawlUrl->isHtml()) {
+                $crawlUrl->detectAndSaveLocale();
+            }
 
             // Marquer comme récupéré
             $this->urlEntry->update([
@@ -306,10 +351,12 @@ class CrawlUrlJob implements ShouldQueue
             return;
         }
 
-        if ($this->urlEntry->depth >= $this->crawl->max_depth) {
+        // Vérifier la profondeur max (0 = illimité)
+        if ($this->crawl->max_depth > 0 && $this->urlEntry->depth >= $this->crawl->max_depth) {
             Log::debug('Max depth reached for this branch', [
                 'crawl_id' => $this->crawl->id,
                 'depth' => $this->urlEntry->depth,
+                'max_depth' => $this->crawl->max_depth,
             ]);
 
             return;

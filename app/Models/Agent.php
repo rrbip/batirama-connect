@@ -15,6 +15,37 @@ class Agent extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $attributes = [
+        'icon' => 'heroicon-o-chat-bubble-left-right',
+        'color' => 'primary',
+    ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Agent $agent) {
+            // Filament sends explicit null, so we need to set defaults here
+            if (empty($agent->icon)) {
+                $agent->icon = 'heroicon-o-chat-bubble-left-right';
+            }
+            if (empty($agent->color)) {
+                $agent->color = 'primary';
+            }
+            // Generate qdrant_collection from slug if not set
+            if (empty($agent->qdrant_collection) && !empty($agent->slug)) {
+                $agent->qdrant_collection = 'agent_' . $agent->slug;
+            }
+            // Default system prompt
+            if (empty($agent->system_prompt)) {
+                $agent->system_prompt = 'Tu es un assistant IA. Réponds aux questions de manière claire et concise.';
+            }
+            // RAG config defaults (these columns are NOT NULL in prod database)
+            $agent->min_rag_score = $agent->min_rag_score ?? 0.3;
+            $agent->max_learned_responses = $agent->max_learned_responses ?? 10;
+            $agent->learned_min_score = $agent->learned_min_score ?? 0.5;
+            $agent->context_token_limit = $agent->context_token_limit ?? 4096;
+        });
+    }
+
     protected $fillable = [
         'tenant_id',
         'name',
@@ -48,6 +79,18 @@ class Agent extends Model
         'default_extraction_method',
         'default_chunk_strategy',
         'use_category_filtering',
+        // Vision Ollama configuration
+        'vision_ollama_host',
+        'vision_ollama_port',
+        'vision_model',
+        // Chunking Ollama configuration
+        'chunking_ollama_host',
+        'chunking_ollama_port',
+        'chunking_model',
+        // Whitelabel columns
+        'deployment_mode',
+        'is_whitelabel_enabled',
+        'whitelabel_config',
     ];
 
     protected $casts = [
@@ -61,6 +104,10 @@ class Agent extends Model
         'allow_attachments' => 'boolean',
         'allow_public_access' => 'boolean',
         'use_category_filtering' => 'boolean',
+        'is_whitelabel_enabled' => 'boolean',
+        'whitelabel_config' => 'array',
+        'vision_ollama_port' => 'integer',
+        'chunking_ollama_port' => 'integer',
     ];
 
     public function tenant(): BelongsTo
@@ -127,6 +174,90 @@ class Agent extends Model
     public function getModel(): string
     {
         return $this->model ?? config('ai.ollama.default_model');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // VISION OLLAMA CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne l'URL Ollama pour Vision (Agent > Global VisionSetting)
+     */
+    public function getVisionOllamaUrl(): string
+    {
+        $host = $this->vision_ollama_host ?? VisionSetting::getInstance()->ollama_host;
+        $port = $this->vision_ollama_port ?? VisionSetting::getInstance()->ollama_port;
+
+        return "http://{$host}:{$port}";
+    }
+
+    /**
+     * Retourne le modèle Vision (Agent > Global VisionSetting)
+     */
+    public function getVisionModel(): string
+    {
+        return $this->vision_model ?? VisionSetting::getInstance()->model;
+    }
+
+    /**
+     * Retourne la config Vision complète (pour passer au service)
+     */
+    public function getVisionConfig(): array
+    {
+        $globalSettings = VisionSetting::getInstance();
+
+        return [
+            'host' => $this->vision_ollama_host ?? $globalSettings->ollama_host,
+            'port' => $this->vision_ollama_port ?? $globalSettings->ollama_port,
+            'model' => $this->vision_model ?? $globalSettings->model,
+        ];
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // CHUNKING OLLAMA CONFIGURATION
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne l'URL Ollama pour Chunking (Agent > Global LlmChunkingSetting)
+     */
+    public function getChunkingOllamaUrl(): string
+    {
+        $host = $this->chunking_ollama_host ?? LlmChunkingSetting::getInstance()->ollama_host;
+        $port = $this->chunking_ollama_port ?? LlmChunkingSetting::getInstance()->ollama_port;
+
+        return "http://{$host}:{$port}";
+    }
+
+    /**
+     * Retourne le modèle Chunking (Agent > Global LlmChunkingSetting > Agent model)
+     */
+    public function getChunkingModel(): string
+    {
+        if ($this->chunking_model) {
+            return $this->chunking_model;
+        }
+
+        $globalModel = LlmChunkingSetting::getInstance()->model;
+        if ($globalModel) {
+            return $globalModel;
+        }
+
+        // Fallback sur le modèle de chat de l'agent
+        return $this->getModel();
+    }
+
+    /**
+     * Retourne la config Chunking complète (pour passer au service)
+     */
+    public function getChunkingConfig(): array
+    {
+        $globalSettings = LlmChunkingSetting::getInstance();
+
+        return [
+            'host' => $this->chunking_ollama_host ?? $globalSettings->ollama_host,
+            'port' => $this->chunking_ollama_port ?? $globalSettings->ollama_port,
+            'model' => $this->getChunkingModel(),
+        ];
     }
 
     public function usesHydration(): bool
@@ -203,5 +334,105 @@ GUARDRAILS;
     public function getDefaultChunkStrategy(): string
     {
         return $this->default_chunk_strategy ?? 'sentence';
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Les déploiements de cet agent.
+     */
+    public function deployments(): HasMany
+    {
+        return $this->hasMany(AgentDeployment::class);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES WHITELABEL
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si cet agent est disponible en whitelabel.
+     */
+    public function isWhitelabelEnabled(): bool
+    {
+        return $this->is_whitelabel_enabled === true;
+    }
+
+    /**
+     * Vérifie si cet agent est en mode interne uniquement.
+     */
+    public function isInternalOnly(): bool
+    {
+        return $this->deployment_mode === 'internal';
+    }
+
+    /**
+     * Vérifie si cet agent est partagé (même config pour tous).
+     */
+    public function isSharedMode(): bool
+    {
+        return $this->deployment_mode === 'shared';
+    }
+
+    /**
+     * Vérifie si cet agent est dédié (config personnalisable par déploiement).
+     */
+    public function isDedicatedMode(): bool
+    {
+        return $this->deployment_mode === 'dedicated';
+    }
+
+    /**
+     * Retourne le branding par défaut pour les déploiements.
+     */
+    public function getDefaultBranding(): array
+    {
+        return $this->whitelabel_config['default_branding'] ?? [
+            'chat_title' => $this->name,
+            'welcome_message' => "Bonjour, je suis {$this->name}. Comment puis-je vous aider ?",
+            'primary_color' => $this->color ?? '#3B82F6',
+        ];
+    }
+
+    /**
+     * Vérifie si l'override de prompt est autorisé.
+     */
+    public function allowsPromptOverride(): bool
+    {
+        return $this->whitelabel_config['allow_prompt_override'] ?? false;
+    }
+
+    /**
+     * Vérifie si l'override de RAG est autorisé.
+     */
+    public function allowsRagOverride(): bool
+    {
+        return $this->whitelabel_config['allow_rag_override'] ?? false;
+    }
+
+    /**
+     * Vérifie si l'override de modèle est autorisé.
+     */
+    public function allowsModelOverride(): bool
+    {
+        return $this->whitelabel_config['allow_model_override'] ?? false;
+    }
+
+    /**
+     * Retourne le rate limit minimum imposé.
+     */
+    public function getMinRateLimit(): int
+    {
+        return $this->whitelabel_config['min_rate_limit'] ?? 30;
+    }
+
+    /**
+     * Vérifie si le branding "Powered by" est obligatoire.
+     */
+    public function requiresPoweredByBranding(): bool
+    {
+        return $this->whitelabel_config['required_branding'] ?? true;
     }
 }

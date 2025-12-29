@@ -7,14 +7,19 @@ namespace App\Services\AI;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
+use App\Services\StructuredOutput\StructuredOutputParser;
 
 class PromptBuilder
 {
     private HydrationService $hydrationService;
+    private StructuredOutputParser $structuredOutputParser;
 
-    public function __construct(HydrationService $hydrationService)
-    {
+    public function __construct(
+        HydrationService $hydrationService,
+        ?StructuredOutputParser $structuredOutputParser = null
+    ) {
         $this->hydrationService = $hydrationService;
+        $this->structuredOutputParser = $structuredOutputParser ?? new StructuredOutputParser();
     }
 
     /**
@@ -67,6 +72,9 @@ class PromptBuilder
 
         // Ajouter les garde-fous si strict_mode est activé
         $systemContent .= $agent->getStrictModeGuardrails();
+
+        // Ajouter les instructions de structured output si activées
+        $systemContent .= $this->getStructuredOutputInstructions($agent, $session);
 
         // Ajouter les réponses apprises similaires (priorité haute)
         if (!empty($learnedResponses)) {
@@ -261,5 +269,53 @@ class PromptBuilder
         }
 
         return $truncatedResults;
+    }
+
+    /**
+     * Retourne les instructions de structured output si activées.
+     *
+     * Les instructions sont ajoutées si:
+     * - L'agent a structured_output_enabled dans sa config
+     * - La session est une session whitelabel (deployment_id présent)
+     */
+    private function getStructuredOutputInstructions(Agent $agent, ?AiSession $session): string
+    {
+        // Vérifier si structured output est activé pour cet agent
+        $config = $agent->whitelabel_config ?? [];
+        $structuredOutputEnabled = $config['structured_output_enabled'] ?? false;
+
+        // Vérifier aussi si la session est whitelabel
+        $isWhitelabelSession = $session && $session->deployment_id !== null;
+
+        // Activer le structured output si:
+        // 1. Explicitement activé dans la config
+        // 2. OU session whitelabel (pour le cas concret des éditeurs)
+        if (!$structuredOutputEnabled && !$isWhitelabelSession) {
+            return '';
+        }
+
+        // Déterminer le type d'output selon le contexte
+        $outputType = $config['structured_output_type'] ?? StructuredOutputParser::TYPE_PRE_QUOTE;
+
+        return $this->structuredOutputParser->getPromptInstructions($outputType);
+    }
+
+    /**
+     * Parse une réponse pour extraire le structured output.
+     *
+     * Utilisé après génération de la réponse IA pour extraire
+     * les données structurées (pré-devis, projets, etc.)
+     */
+    public function parseStructuredOutput(string $content): ?array
+    {
+        return $this->structuredOutputParser->parse($content);
+    }
+
+    /**
+     * Parse et valide spécifiquement un pré-devis.
+     */
+    public function parsePreQuote(string $content): ?array
+    {
+        return $this->structuredOutputParser->parsePreQuote($content);
     }
 }

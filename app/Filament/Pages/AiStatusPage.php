@@ -852,6 +852,37 @@ class AiStatusPage extends Page
     }
 
     /**
+     * Supprime un document échoué
+     */
+    public function deleteFailedDocument(int $documentId): void
+    {
+        $document = Document::find($documentId);
+        if (!$document) {
+            Notification::make()
+                ->title('Document non trouvé')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        $documentName = $document->original_name ?? $document->title ?? "Document #{$documentId}";
+
+        // Supprimer les chunks associés
+        $document->chunks()->delete();
+
+        // Supprimer le document
+        $document->delete();
+
+        $this->refreshStatus();
+
+        Notification::make()
+            ->title('Document supprimé')
+            ->body("Le document \"{$documentName}\" a été supprimé.")
+            ->success()
+            ->send();
+    }
+
+    /**
      * Relance un job échoué
      */
     public function retryFailedJob(string $uuid): void

@@ -39,6 +39,7 @@ class DocumentChunkerService
             'sentence' => $this->chunkBySentence($text),
             'paragraph' => $this->chunkByParagraph($text),
             'recursive' => $this->chunkRecursive($text),
+            'markdown' => $this->chunkByMarkdownHeaders($text),
             default => $this->chunkByParagraph($text),
         };
 
@@ -54,6 +55,18 @@ class DocumentChunkerService
         // Créer les nouveaux chunks
         $chunks = [];
         foreach ($rawChunks as $index => $chunkData) {
+            // Métadonnées de base
+            $metadata = [
+                'strategy' => $strategy,
+                'document_title' => $document->title ?? $document->original_name,
+                'category' => $document->category,
+            ];
+
+            // Fusionner les métadonnées spécifiques au chunk (ex: markdown headers)
+            if (isset($chunkData['metadata']) && is_array($chunkData['metadata'])) {
+                $metadata = array_merge($metadata, $chunkData['metadata']);
+            }
+
             $chunk = DocumentChunk::create([
                 'document_id' => $document->id,
                 'chunk_index' => $index,
@@ -65,11 +78,7 @@ class DocumentChunkerService
                 'token_count' => $this->estimateTokens($chunkData['content']),
                 'context_before' => $chunkData['context_before'] ?? null,
                 'context_after' => $chunkData['context_after'] ?? null,
-                'metadata' => [
-                    'strategy' => $strategy,
-                    'document_title' => $document->title ?? $document->original_name,
-                    'category' => $document->category,
-                ],
+                'metadata' => $metadata,
                 'is_indexed' => false,
                 'created_at' => now(),
             ]);
@@ -212,6 +221,124 @@ class DocumentChunkerService
         ];
 
         return $this->splitRecursive($text, $separators);
+    }
+
+    /**
+     * Découpage par headers Markdown (optimisé pour HTML→Markdown et fichiers .md)
+     *
+     * Chaque section (header + contenu) devient un chunk.
+     * Préserve la hiérarchie sémantique du document.
+     */
+    private function chunkByMarkdownHeaders(string $text): array
+    {
+        $chunks = [];
+        $currentOffset = 0;
+
+        // Pattern pour détecter les headers Markdown (# à ######)
+        // Capture aussi le contenu jusqu'au prochain header ou fin de texte
+        $pattern = '/^(#{1,6})\s+(.+?)$([\s\S]*?)(?=^#{1,6}\s|\z)/m';
+
+        // Extraire le contenu avant le premier header (intro)
+        $firstHeaderPos = preg_match('/^#{1,6}\s/m', $text, $matches, PREG_OFFSET_CAPTURE);
+        if ($firstHeaderPos && $matches[0][1] > 0) {
+            $intro = trim(mb_substr($text, 0, $matches[0][1]));
+            if (!empty($intro)) {
+                $chunks[] = [
+                    'content' => $intro,
+                    'start_offset' => 0,
+                    'end_offset' => mb_strlen($intro),
+                    'metadata' => [
+                        'section_type' => 'intro',
+                        'header_level' => 0,
+                        'header_title' => null,
+                    ],
+                ];
+                $currentOffset = $matches[0][1];
+            }
+        }
+
+        // Extraire toutes les sections avec leurs headers
+        if (preg_match_all($pattern, $text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+            foreach ($matches as $match) {
+                $headerMarkers = $match[1][0];  // Les # du header
+                $headerTitle = trim($match[2][0]);  // Le titre du header
+                $sectionContent = isset($match[3]) ? trim($match[3][0]) : '';
+                $headerLevel = strlen($headerMarkers);
+
+                // Reconstruire la section complète : header + contenu
+                $fullSection = $headerMarkers . ' ' . $headerTitle;
+                if (!empty($sectionContent)) {
+                    $fullSection .= "\n\n" . $sectionContent;
+                }
+
+                $sectionOffset = $match[0][1];
+
+                // Si la section est trop grande, la découper en sous-chunks
+                if ($this->estimateTokens($fullSection) > $this->maxChunkSize) {
+                    // Garder le header comme contexte et découper le contenu
+                    $headerContext = $headerMarkers . ' ' . $headerTitle;
+
+                    if (!empty($sectionContent)) {
+                        $subChunks = $this->chunkRecursive($sectionContent);
+                        foreach ($subChunks as $index => $subChunk) {
+                            // Préfixer chaque sous-chunk avec le header pour le contexte
+                            $chunkContent = $index === 0
+                                ? $headerContext . "\n\n" . $subChunk['content']
+                                : "[" . $headerTitle . "]\n\n" . $subChunk['content'];
+
+                            $chunks[] = [
+                                'content' => $chunkContent,
+                                'start_offset' => $sectionOffset + $subChunk['start_offset'],
+                                'end_offset' => $sectionOffset + $subChunk['end_offset'],
+                                'metadata' => [
+                                    'section_type' => 'section_part',
+                                    'header_level' => $headerLevel,
+                                    'header_title' => $headerTitle,
+                                    'part_index' => $index,
+                                ],
+                            ];
+                        }
+                    } else {
+                        // Header seul sans contenu
+                        $chunks[] = [
+                            'content' => $fullSection,
+                            'start_offset' => $sectionOffset,
+                            'end_offset' => $sectionOffset + mb_strlen($fullSection),
+                            'metadata' => [
+                                'section_type' => 'section',
+                                'header_level' => $headerLevel,
+                                'header_title' => $headerTitle,
+                            ],
+                        ];
+                    }
+                } else {
+                    // Section complète en un seul chunk
+                    $chunks[] = [
+                        'content' => $fullSection,
+                        'start_offset' => $sectionOffset,
+                        'end_offset' => $sectionOffset + mb_strlen($fullSection),
+                        'metadata' => [
+                            'section_type' => 'section',
+                            'header_level' => $headerLevel,
+                            'header_title' => $headerTitle,
+                        ],
+                    ];
+                }
+            }
+        }
+
+        // Si aucun header trouvé, fallback sur le chunking par paragraphe
+        if (empty($chunks)) {
+            Log::info('No markdown headers found, falling back to paragraph chunking');
+            return $this->chunkByParagraph($text);
+        }
+
+        Log::info('Markdown chunking completed', [
+            'total_sections' => count($chunks),
+            'headers_found' => count($matches ?? []),
+        ]);
+
+        return $chunks;
     }
 
     /**
