@@ -42,7 +42,8 @@ class DocumentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Informations')
                             ->icon('heroicon-o-information-circle')
                             ->schema([
-                                Forms\Components\Section::make('Fichier')
+                                // Section Agent (obligatoire)
+                                Forms\Components\Section::make('Agent')
                                     ->schema([
                                         Forms\Components\Select::make('agent_id')
                                             ->label('Agent')
@@ -51,40 +52,84 @@ class DocumentResource extends Resource
                                             ->searchable()
                                             ->preload()
                                             ->live()
-                                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
-                                                if ($state) {
-                                                    $agent = \App\Models\Agent::find($state);
-                                                    if ($agent) {
-                                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
-                                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
-                                                    }
-                                                }
-                                            }),
+                                            ->helperText('L\'agent détermine la collection Qdrant où sera indexé le document'),
+                                    ])
+                                    ->columns(1),
 
-                                        // Upload pour nouveau document
+                                // Section Source (fichier OU URL)
+                                Forms\Components\Section::make('Source du document')
+                                    ->schema([
+                                        Forms\Components\ToggleButtons::make('source_type')
+                                            ->label('Type de source')
+                                            ->options([
+                                                'file' => 'Fichier',
+                                                'url' => 'URL',
+                                            ])
+                                            ->default('file')
+                                            ->inline()
+                                            ->live()
+                                            ->visible(fn ($record) => !$record),
+
+                                        // Upload pour fichier
                                         Forms\Components\FileUpload::make('storage_path')
                                             ->label('Document')
-                                            ->required()
+                                            ->required(fn (Forms\Get $get) => $get('source_type') === 'file')
                                             ->disk('local')
                                             ->directory('documents')
                                             ->acceptedFileTypes([
                                                 'application/pdf',
                                                 'text/plain',
                                                 'text/markdown',
-                                                'application/msword',
-                                                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                                // Images (OCR)
+                                                'text/html',
                                                 'image/png',
                                                 'image/jpeg',
                                                 'image/gif',
-                                                'image/bmp',
-                                                'image/tiff',
                                                 'image/webp',
                                             ])
-                                            ->maxSize(50 * 1024) // 50MB
+                                            ->maxSize(100 * 1024) // 100MB
                                             ->columnSpanFull()
-                                            ->visible(fn ($record) => !$record),
+                                            ->visible(fn (Forms\Get $get, $record) => !$record && $get('source_type') === 'file')
+                                            ->live()
+                                            ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                                if ($state) {
+                                                    // Auto-fill title from filename
+                                                    $filename = is_string($state) ? basename($state) : '';
+                                                    if ($filename) {
+                                                        $title = pathinfo($filename, PATHINFO_FILENAME);
+                                                        $title = str_replace(['_', '-'], ' ', $title);
+                                                        $title = ucfirst($title);
+                                                        $set('title', $title);
+                                                    }
+                                                }
+                                            }),
 
+                                        // Input URL
+                                        Forms\Components\TextInput::make('source_url')
+                                            ->label('URL')
+                                            ->url()
+                                            ->required(fn (Forms\Get $get) => $get('source_type') === 'url')
+                                            ->maxLength(2000)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get, $record) => !$record && $get('source_type') === 'url')
+                                            ->live()
+                                            ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                                if ($state) {
+                                                    // Auto-extract title from URL
+                                                    $parsed = parse_url($state);
+                                                    $path = $parsed['path'] ?? '';
+                                                    $title = basename($path) ?: ($parsed['host'] ?? '');
+                                                    $title = pathinfo($title, PATHINFO_FILENAME) ?: $title;
+                                                    $title = str_replace(['_', '-'], ' ', $title);
+                                                    $title = ucfirst($title);
+                                                    $set('title', $title);
+                                                }
+                                            }),
+                                    ])
+                                    ->visible(fn ($record) => !$record),
+
+                                // Section Métadonnées
+                                Forms\Components\Section::make('Métadonnées')
+                                    ->schema([
                                         Forms\Components\TextInput::make('title')
                                             ->label('Titre')
                                             ->maxLength(255)
@@ -94,35 +139,79 @@ class DocumentResource extends Resource
                                             ->label('Description')
                                             ->rows(3)
                                             ->columnSpanFull(),
+                                    ]),
 
-                                        Forms\Components\TextInput::make('source_url')
-                                            ->label('URL source')
-                                            ->url()
-                                            ->maxLength(500),
+                                // Section Pipeline (aperçu)
+                                Forms\Components\Section::make('Pipeline de traitement')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('pipeline_preview')
+                                            ->label('')
+                                            ->content(function (Forms\Get $get) {
+                                                $sourceType = $get('source_type') ?? 'file';
+                                                $storagePath = $get('storage_path');
+                                                $sourceUrl = $get('source_url');
 
-                                        Forms\Components\Select::make('category')
-                                            ->label('Catégorie')
-                                            ->options([
-                                                'documentation' => 'Documentation',
-                                                'faq' => 'FAQ',
-                                                'product' => 'Produit',
-                                                'support' => 'Support',
-                                                'legal' => 'Légal',
-                                                'other' => 'Autre',
-                                            ]),
+                                                $extension = null;
+                                                if ($sourceType === 'file' && $storagePath) {
+                                                    $extension = strtolower(pathinfo($storagePath, PATHINFO_EXTENSION));
+                                                } elseif ($sourceType === 'url' && $sourceUrl) {
+                                                    $parsed = parse_url($sourceUrl);
+                                                    $path = $parsed['path'] ?? '';
+                                                    $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+                                                    if (empty($extension) || !in_array($extension, ['pdf', 'html', 'htm', 'md', 'png', 'jpg', 'jpeg', 'gif', 'webp'])) {
+                                                        $extension = 'html'; // Default for URLs
+                                                    }
+                                                }
 
-                                        Forms\Components\Select::make('extraction_method')
-                                            ->label('Méthode d\'extraction (PDF)')
-                                            ->options([
-                                                'auto' => 'Automatique (recommandé)',
-                                                'text' => 'Texte uniquement',
-                                                'ocr' => 'OCR (Tesseract)',
-                                            ])
-                                            ->default('auto')
-                                            ->helperText('Utilisez OCR si le PDF a des problèmes de ligatures (lettres manquantes).')
+                                                if (!$extension) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="text-gray-500 italic">Sélectionnez un fichier ou une URL pour voir le pipeline</div>'
+                                                    );
+                                                }
+
+                                                $pipeline = match ($extension) {
+                                                    'pdf' => [
+                                                        ['name' => 'PDF vers Images', 'tool' => 'pdftoppm', 'icon' => 'document'],
+                                                        ['name' => 'Images vers Markdown', 'tool' => 'Vision LLM', 'icon' => 'eye'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'png', 'jpg', 'jpeg', 'gif', 'webp' => [
+                                                        ['name' => 'Image vers Markdown', 'tool' => 'Vision LLM', 'icon' => 'eye'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'html', 'htm' => [
+                                                        ['name' => 'HTML vers Markdown', 'tool' => 'Turndown', 'icon' => 'code-bracket'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'md' => [
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique (direct)', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    default => [
+                                                        ['name' => 'Type non supporté', 'tool' => '-', 'icon' => 'exclamation-triangle'],
+                                                    ],
+                                                };
+
+                                                $html = '<div class="flex items-center gap-2 flex-wrap">';
+                                                foreach ($pipeline as $index => $step) {
+                                                    if ($index > 0) {
+                                                        $html .= '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>';
+                                                    }
+                                                    $html .= sprintf(
+                                                        '<div class="flex items-center gap-1 px-3 py-1.5 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
+                                                            <span class="text-sm font-medium text-primary-700 dark:text-primary-300">%s</span>
+                                                            <span class="text-xs text-primary-500 dark:text-primary-400">(%s)</span>
+                                                        </div>',
+                                                        e($step['name']),
+                                                        e($step['tool'])
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
                                             ->columnSpanFull(),
                                     ])
-                                    ->columns(2),
+                                    ->visible(fn ($record) => !$record),
 
                                 // Section fichier actuel (uniquement en édition)
                                 Forms\Components\Section::make('Fichier actuel')
@@ -196,23 +285,16 @@ class DocumentResource extends Resource
                                                 'application/pdf',
                                                 'text/plain',
                                                 'text/markdown',
-                                                'application/msword',
-                                                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                                // Images (OCR)
+                                                'text/html',
                                                 'image/png',
                                                 'image/jpeg',
                                                 'image/gif',
-                                                'image/bmp',
-                                                'image/tiff',
                                                 'image/webp',
                                             ])
-                                            ->maxSize(50 * 1024) // 50MB
+                                            ->maxSize(100 * 1024) // 100MB
                                             ->helperText('Uploadez un nouveau fichier pour remplacer l\'actuel. Le document sera automatiquement retraité.')
                                             ->columnSpanFull()
-                                            ->live()
-                                            ->afterStateUpdated(function ($state, $record, Forms\Set $set) {
-                                                // Le fichier sera traité lors de la sauvegarde
-                                            }),
+                                            ->live(),
                                     ])
                                     ->visible(fn ($record) => $record !== null)
                                     ->collapsed(),
@@ -535,15 +617,15 @@ class DocumentResource extends Resource
                 Tables\Filters\TernaryFilter::make('is_indexed')
                     ->label('Indexé'),
 
-                Tables\Filters\SelectFilter::make('category')
-                    ->label('Catégorie')
+                Tables\Filters\SelectFilter::make('document_type')
+                    ->label('Type')
                     ->options([
-                        'documentation' => 'Documentation',
-                        'faq' => 'FAQ',
-                        'product' => 'Produit',
-                        'support' => 'Support',
-                        'legal' => 'Légal',
-                        'other' => 'Autre',
+                        'pdf' => 'PDF',
+                        'html' => 'HTML',
+                        'md' => 'Markdown',
+                        'png' => 'PNG',
+                        'jpg' => 'JPG',
+                        'jpeg' => 'JPEG',
                     ]),
             ])
             ->actions([
