@@ -88,51 +88,84 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     protected function loadAllSettings(): void
     {
-        // Vision settings
-        $visionSettings = VisionSetting::getInstance();
-        $this->visionForm->fill([
-            'model' => $visionSettings->model,
-            'ollama_host' => $visionSettings->ollama_host,
-            'ollama_port' => $visionSettings->ollama_port,
-            'temperature' => $visionSettings->temperature,
-            'timeout_seconds' => $visionSettings->timeout_seconds,
-            'system_prompt' => $visionSettings->system_prompt,
-        ]);
+        try {
+            // Vision settings
+            $visionSettings = VisionSetting::getInstance();
+            $this->visionForm->fill([
+                'model' => $visionSettings->model,
+                'ollama_host' => $visionSettings->ollama_host,
+                'ollama_port' => $visionSettings->ollama_port,
+                'temperature' => $visionSettings->temperature,
+                'timeout_seconds' => $visionSettings->timeout_seconds,
+                'system_prompt' => $visionSettings->system_prompt,
+            ]);
+        } catch (\Exception $e) {
+            // Table doesn't exist yet - use defaults
+            $this->visionForm->fill([
+                'ollama_host' => 'ollama',
+                'ollama_port' => 11434,
+                'temperature' => 0.3,
+                'timeout_seconds' => 300,
+                'system_prompt' => VisionSetting::getDefaultPrompt(),
+            ]);
+        }
 
-        // Chunking LLM settings
-        $chunkingSettings = LlmChunkingSetting::getInstance();
-        $this->chunkingForm->fill([
-            'model' => $chunkingSettings->model,
-            'ollama_host' => $chunkingSettings->ollama_host,
-            'ollama_port' => $chunkingSettings->ollama_port,
-            'temperature' => $chunkingSettings->temperature,
-            'window_size' => $chunkingSettings->window_size,
-            'overlap_percent' => $chunkingSettings->overlap_percent,
-            'max_retries' => $chunkingSettings->max_retries,
-            'timeout_seconds' => $chunkingSettings->timeout_seconds,
-            'system_prompt' => $chunkingSettings->system_prompt,
-        ]);
+        try {
+            // Chunking LLM settings
+            $chunkingSettings = LlmChunkingSetting::getInstance();
+            $this->chunkingForm->fill([
+                'model' => $chunkingSettings->model,
+                'ollama_host' => $chunkingSettings->ollama_host,
+                'ollama_port' => $chunkingSettings->ollama_port,
+                'temperature' => $chunkingSettings->temperature,
+                'window_size' => $chunkingSettings->window_size,
+                'overlap_percent' => $chunkingSettings->overlap_percent,
+                'max_retries' => $chunkingSettings->max_retries,
+                'timeout_seconds' => $chunkingSettings->timeout_seconds,
+                'system_prompt' => $chunkingSettings->system_prompt,
+            ]);
+        } catch (\Exception $e) {
+            // Table doesn't exist yet - use defaults
+        }
 
-        // Q/R Atomique settings
-        $qrSettings = QrAtomiqueSetting::getInstance();
-        $this->qrForm->fill([
-            'model' => $qrSettings->model,
-            'ollama_host' => $qrSettings->ollama_host,
-            'ollama_port' => $qrSettings->ollama_port,
-            'temperature' => $qrSettings->temperature,
-            'threshold' => $qrSettings->threshold,
-            'timeout_seconds' => $qrSettings->timeout_seconds,
-            'system_prompt' => $qrSettings->system_prompt,
-        ]);
+        try {
+            // Q/R Atomique settings
+            $qrSettings = QrAtomiqueSetting::getInstance();
+            $this->qrForm->fill([
+                'model' => $qrSettings->model,
+                'ollama_host' => $qrSettings->ollama_host,
+                'ollama_port' => $qrSettings->ollama_port,
+                'temperature' => $qrSettings->temperature,
+                'threshold' => $qrSettings->threshold,
+                'timeout_seconds' => $qrSettings->timeout_seconds,
+                'system_prompt' => $qrSettings->system_prompt,
+            ]);
+        } catch (\Exception $e) {
+            // Table doesn't exist yet - use defaults
+            $this->qrForm->fill([
+                'ollama_host' => 'ollama',
+                'ollama_port' => 11434,
+                'temperature' => 0.3,
+                'threshold' => 1500,
+                'timeout_seconds' => 120,
+                'system_prompt' => QrAtomiqueSetting::getDefaultPrompt(),
+            ]);
+        }
 
-        // Pipeline tools settings
-        $toolsSettings = PipelineToolsSetting::getInstance();
-        $this->toolsForm->fill([
-            'pdf_tools' => $toolsSettings->pdf_tools,
-            'image_tools' => $toolsSettings->image_tools,
-            'html_tools' => $toolsSettings->html_tools,
-            'markdown_tools' => $toolsSettings->markdown_tools,
-        ]);
+        try {
+            // Pipeline tools settings
+            $toolsSettings = PipelineToolsSetting::getInstance();
+            $this->toolsForm->fill([
+                'pdf_tools' => $toolsSettings->pdf_tools,
+                'image_tools' => $toolsSettings->image_tools,
+                'html_tools' => $toolsSettings->html_tools,
+                'markdown_tools' => $toolsSettings->markdown_tools,
+            ]);
+        } catch (\Exception $e) {
+            // Table doesn't exist yet - use defaults
+            $defaults = PipelineToolsSetting::getDefaults();
+            $this->toolsForm->fill($defaults);
+        }
     }
 
     public function refreshQueueStats(): void
@@ -751,71 +784,103 @@ class GestionRagPage extends Page implements HasForms, HasTable
     // Save actions for each form
     public function saveVisionSettings(): void
     {
-        $data = $this->visionForm->getState();
-        $settings = VisionSetting::getInstance();
-        $settings->update($data);
+        try {
+            $data = $this->visionForm->getState();
+            $settings = VisionSetting::getInstance();
+            $settings->update($data);
 
-        Notification::make()
-            ->title('Configuration Vision sauvegardée')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Configuration Vision sauvegardée')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La table vision_settings n\'existe pas. Exécutez les migrations.')
+                ->danger()
+                ->send();
+        }
     }
 
     public function saveChunkingSettings(): void
     {
-        $data = $this->chunkingForm->getState();
-        $settings = LlmChunkingSetting::getInstance();
-        $settings->update($data);
+        try {
+            $data = $this->chunkingForm->getState();
+            $settings = LlmChunkingSetting::getInstance();
+            $settings->update($data);
 
-        Notification::make()
-            ->title('Configuration Chunking LLM sauvegardée')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Configuration Chunking LLM sauvegardée')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La table llm_chunking_settings n\'existe pas. Exécutez les migrations.')
+                ->danger()
+                ->send();
+        }
     }
 
     public function saveQrSettings(): void
     {
-        $data = $this->qrForm->getState();
-        $settings = QrAtomiqueSetting::getInstance();
-        $settings->update($data);
+        try {
+            $data = $this->qrForm->getState();
+            $settings = QrAtomiqueSetting::getInstance();
+            $settings->update($data);
 
-        Notification::make()
-            ->title('Configuration Q/R Atomique sauvegardée')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Configuration Q/R Atomique sauvegardée')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La table qr_atomique_settings n\'existe pas. Exécutez les migrations.')
+                ->danger()
+                ->send();
+        }
     }
 
     public function saveToolsSettings(): void
     {
-        $data = $this->toolsForm->getState();
+        try {
+            $data = $this->toolsForm->getState();
 
-        // Transform flat structure to array structure
-        $transformed = [
-            'pdf_tools' => [
-                ['name' => 'pdf_to_images', 'tool' => $data['pdf_tools'][0]['tool'] ?? 'pdftoppm', 'enabled' => true],
-                ['name' => 'images_to_markdown', 'tool' => $data['pdf_tools'][1]['tool'] ?? 'vision_llm', 'enabled' => true],
-                ['name' => 'markdown_to_qr', 'tool' => $data['pdf_tools'][2]['tool'] ?? 'qr_atomique', 'enabled' => true],
-            ],
-            'image_tools' => [
-                ['name' => 'image_to_markdown', 'tool' => $data['image_tools'][0]['tool'] ?? 'vision_llm', 'enabled' => true],
-                ['name' => 'markdown_to_qr', 'tool' => $data['image_tools'][1]['tool'] ?? 'qr_atomique', 'enabled' => true],
-            ],
-            'html_tools' => [
-                ['name' => 'html_to_markdown', 'tool' => $data['html_tools'][0]['tool'] ?? 'turndown', 'enabled' => true],
-                ['name' => 'markdown_to_qr', 'tool' => $data['html_tools'][1]['tool'] ?? 'qr_atomique', 'enabled' => true],
-            ],
-            'markdown_tools' => [
-                ['name' => 'markdown_to_qr', 'tool' => $data['markdown_tools'][0]['tool'] ?? 'qr_atomique', 'enabled' => true],
-            ],
-        ];
+            // Transform flat structure to array structure
+            $transformed = [
+                'pdf_tools' => [
+                    ['name' => 'pdf_to_images', 'tool' => $data['pdf_tools'][0]['tool'] ?? 'pdftoppm', 'enabled' => true],
+                    ['name' => 'images_to_markdown', 'tool' => $data['pdf_tools'][1]['tool'] ?? 'vision_llm', 'enabled' => true],
+                    ['name' => 'markdown_to_qr', 'tool' => $data['pdf_tools'][2]['tool'] ?? 'qr_atomique', 'enabled' => true],
+                ],
+                'image_tools' => [
+                    ['name' => 'image_to_markdown', 'tool' => $data['image_tools'][0]['tool'] ?? 'vision_llm', 'enabled' => true],
+                    ['name' => 'markdown_to_qr', 'tool' => $data['image_tools'][1]['tool'] ?? 'qr_atomique', 'enabled' => true],
+                ],
+                'html_tools' => [
+                    ['name' => 'html_to_markdown', 'tool' => $data['html_tools'][0]['tool'] ?? 'turndown', 'enabled' => true],
+                    ['name' => 'markdown_to_qr', 'tool' => $data['html_tools'][1]['tool'] ?? 'qr_atomique', 'enabled' => true],
+                ],
+                'markdown_tools' => [
+                    ['name' => 'markdown_to_qr', 'tool' => $data['markdown_tools'][0]['tool'] ?? 'qr_atomique', 'enabled' => true],
+                ],
+            ];
 
-        $settings = PipelineToolsSetting::getInstance();
-        $settings->update($transformed);
+            $settings = PipelineToolsSetting::getInstance();
+            $settings->update($transformed);
 
-        Notification::make()
-            ->title('Configuration des outils sauvegardée')
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Configuration des outils sauvegardée')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La table pipeline_tools_settings n\'existe pas. Exécutez les migrations.')
+                ->danger()
+                ->send();
+        }
     }
 
     public function testOllamaConnection(): void
