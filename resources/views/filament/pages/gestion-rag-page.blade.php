@@ -27,11 +27,11 @@
             </x-filament::tabs.item>
 
             <x-filament::tabs.item
-                :active="$activeTab === 'chunking'"
-                wire:click="setActiveTab('chunking')"
+                :active="$activeTab === 'configuration'"
+                wire:click="setActiveTab('configuration')"
                 icon="heroicon-o-cog-6-tooth"
             >
-                Chunking LLM
+                Configuration
             </x-filament::tabs.item>
         </x-filament::tabs>
 
@@ -152,13 +152,13 @@
 
             {{ $this->table }}
 
-        @elseif($activeTab === 'chunking')
-            {{-- LLM Chunking Settings Tab --}}
-            <div class="space-y-6">
+        @elseif($activeTab === 'configuration')
+            {{-- Configuration Tab with Collapsible Sections --}}
+            <div class="space-y-4">
                 {{-- Queue Stats --}}
                 <x-filament::section>
                     <x-slot name="heading">
-                        File d'attente LLM Chunking
+                        File d'attente Pipeline
                     </x-slot>
 
                     <div class="grid grid-cols-2 gap-4">
@@ -178,43 +178,155 @@
 
                     <div class="mt-4 text-sm text-gray-500 dark:text-gray-400">
                         <strong>Commande worker :</strong>
-                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=default,llm-chunking</code>
-                        <div class="mt-1 text-xs">💡 Les messages IA (default) sont prioritaires sur le chunking LLM</div>
+                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=default,pipeline,llm-chunking</code>
                     </div>
                 </x-filament::section>
 
-                {{-- Action Buttons --}}
+                {{-- Test Connection Button --}}
                 <div class="flex items-center gap-3">
                     <x-filament::button
-                        wire:click="testLlmConnection"
+                        wire:click="testOllamaConnection"
                         color="info"
                         icon="heroicon-o-signal"
                     >
-                        Tester la connexion
-                    </x-filament::button>
-
-                    <x-filament::button
-                        wire:click="resetLlmPrompt"
-                        wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
-                        color="warning"
-                        icon="heroicon-o-arrow-path"
-                    >
-                        Réinitialiser le prompt
-                    </x-filament::button>
-
-                    <x-filament::button
-                        wire:click="saveLlmSettings"
-                        color="success"
-                        icon="heroicon-o-check"
-                    >
-                        Sauvegarder
+                        Tester la connexion Ollama
                     </x-filament::button>
                 </div>
 
-                {{-- Settings Form --}}
-                <form wire:submit="saveLlmSettings">
-                    {{ $this->llmForm }}
-                </form>
+                {{-- Configuration Vision (Collapsible) --}}
+                <x-filament::section
+                    :collapsed="true"
+                    collapsible
+                >
+                    <x-slot name="heading">
+                        Configuration Vision
+                    </x-slot>
+                    <x-slot name="description">
+                        Paramètres pour l'extraction de texte depuis les images via Vision LLM
+                    </x-slot>
+
+                    <div class="space-y-4">
+                        {{ $this->visionForm }}
+
+                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
+                            <x-filament::button
+                                wire:click="saveVisionSettings"
+                                color="success"
+                                icon="heroicon-o-check"
+                            >
+                                Sauvegarder
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="resetVisionPrompt"
+                                wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
+                                color="warning"
+                                icon="heroicon-o-arrow-path"
+                            >
+                                Réinitialiser le prompt
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::section>
+
+                {{-- Configuration Chunking LLM (Collapsible) --}}
+                <x-filament::section
+                    :collapsed="true"
+                    collapsible
+                >
+                    <x-slot name="heading">
+                        Configuration Chunking LLM
+                    </x-slot>
+                    <x-slot name="description">
+                        Paramètres pour le découpage sémantique du texte via LLM
+                    </x-slot>
+
+                    <div class="space-y-4">
+                        {{ $this->chunkingForm }}
+
+                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
+                            <x-filament::button
+                                wire:click="saveChunkingSettings"
+                                color="success"
+                                icon="heroicon-o-check"
+                            >
+                                Sauvegarder
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="resetChunkingPrompt"
+                                wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
+                                color="warning"
+                                icon="heroicon-o-arrow-path"
+                            >
+                                Réinitialiser le prompt
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::section>
+
+                {{-- Configuration Q/R Atomique (Collapsible) --}}
+                <x-filament::section
+                    :collapsed="true"
+                    collapsible
+                >
+                    <x-slot name="heading">
+                        Configuration Q/R Atomique
+                    </x-slot>
+                    <x-slot name="description">
+                        Paramètres pour la génération de paires Question/Réponse et l'indexation Qdrant
+                    </x-slot>
+
+                    <div class="space-y-4">
+                        {{ $this->qrForm }}
+
+                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
+                            <x-filament::button
+                                wire:click="saveQrSettings"
+                                color="success"
+                                icon="heroicon-o-check"
+                            >
+                                Sauvegarder
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="resetQrPrompt"
+                                wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
+                                color="warning"
+                                icon="heroicon-o-arrow-path"
+                            >
+                                Réinitialiser le prompt
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::section>
+
+                {{-- Outils par défaut par type de fichier (Collapsible) --}}
+                <x-filament::section
+                    :collapsed="true"
+                    collapsible
+                >
+                    <x-slot name="heading">
+                        Outils par défaut par type de fichier
+                    </x-slot>
+                    <x-slot name="description">
+                        Configuration des pipelines de traitement par type de document
+                    </x-slot>
+
+                    <div class="space-y-4">
+                        {{ $this->toolsForm }}
+
+                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
+                            <x-filament::button
+                                wire:click="saveToolsSettings"
+                                color="success"
+                                icon="heroicon-o-check"
+                            >
+                                Sauvegarder
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::section>
             </div>
         @endif
     </div>
