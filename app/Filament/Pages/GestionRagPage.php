@@ -127,6 +127,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
             'max_retries' => $settings->max_retries,
             'timeout_seconds' => $settings->timeout_seconds,
             'system_prompt' => $settings->system_prompt,
+            'enrichment_prompt' => $settings->enrichment_prompt,
         ]);
     }
 
@@ -567,13 +568,26 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ])
                         ->columns(2),
 
-                    Section::make('Prompt système')
+                    Section::make('Prompt système (LLM Chunking)')
+                        ->description('Instructions pour le découpage sémantique complet')
                         ->schema([
                             MarkdownEditor::make('system_prompt')
                                 ->label('')
                                 ->required()
-                                ->columnSpanFull(),
-                        ]),
+                                ->columnSpanFull()
+                                ->helperText('Placeholders : {CATEGORIES}, {INPUT_TEXT}'),
+                        ])
+                        ->collapsed(),
+
+                    Section::make('Prompt d\'enrichissement (Markdown)')
+                        ->description('Instructions pour enrichir les chunks markdown avec catégories, keywords et résumés')
+                        ->schema([
+                            MarkdownEditor::make('enrichment_prompt')
+                                ->label('')
+                                ->columnSpanFull()
+                                ->helperText('Placeholders : {CATEGORIES}, {CHUNKS_JSON}. Laissez vide pour le prompt par défaut.'),
+                        ])
+                        ->collapsed(),
                 ])
                 ->statePath('llmData'),
 
@@ -742,6 +756,21 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
         Notification::make()
             ->title('Prompt réinitialisé')
+            ->info()
+            ->send();
+    }
+
+    public function resetEnrichmentPrompt(): void
+    {
+        $defaultPrompt = LlmChunkingSetting::getDefaultEnrichmentPrompt();
+
+        $this->llmForm->fill([
+            ...$this->llmForm->getState(),
+            'enrichment_prompt' => $defaultPrompt,
+        ]);
+
+        Notification::make()
+            ->title('Prompt d\'enrichissement réinitialisé')
             ->info()
             ->send();
     }

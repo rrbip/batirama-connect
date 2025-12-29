@@ -485,7 +485,16 @@
                         color="warning"
                         icon="heroicon-o-arrow-path"
                     >
-                        Réinitialiser le prompt
+                        Reset prompt chunking
+                    </x-filament::button>
+
+                    <x-filament::button
+                        wire:click="resetEnrichmentPrompt"
+                        wire:confirm="Le prompt d'enrichissement sera remplacé par la version par défaut. Continuer ?"
+                        color="warning"
+                        icon="heroicon-o-arrow-path"
+                    >
+                        Reset prompt enrichissement
                     </x-filament::button>
 
                     <x-filament::button
