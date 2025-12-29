@@ -428,8 +428,9 @@ Forms\Components\Select::make('chunk_strategy')
         'sentence' => 'Par phrases',
         'paragraph' => 'Par paragraphes',
         'fixed' => 'Taille fixe (500 tokens)',
-        'semantic' => 'Sémantique',
-        'llm_assisted' => 'Assisté par LLM',  // NOUVEAU
+        'recursive' => 'Récursif',
+        'markdown' => 'Markdown (par headers)',  // Optimal pour HTML/MD
+        'llm_assisted' => 'Assisté par LLM',
     ])
 ```
 

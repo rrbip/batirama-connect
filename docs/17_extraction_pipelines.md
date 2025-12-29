@@ -55,7 +55,7 @@ Affiche les informations générales et propose une zone dépliable :
 
 | Information | Description |
 |-------------|-------------|
-| **Stratégie** | Par phrase, Par paragraphe, Taille fixe, ou Assisté par LLM |
+| **Stratégie** | Par phrase, Par paragraphe, Taille fixe, Markdown, ou Assisté par LLM |
 | **Chunks générés** | Nombre total de chunks créés |
 | **Vectorisation** | Service utilisé (Ollama nomic-embed-text) |
 | **Base vectorielle** | Base de données vectorielle (Qdrant) |
@@ -288,6 +288,117 @@ La section de pipeline s'affiche uniquement si :
 - Le document a été traité avec cette méthode d'extraction
 - Les métadonnées de traçage existent (documents traités après mise à jour du système)
 - Pour voir le pipeline, utilisez le bouton **"Retraiter"**
+
+---
+
+---
+
+## Stratégie de Chunking Markdown
+
+### Principe
+
+La stratégie `markdown` est **optimisée pour les documents HTML et Markdown**. Elle exploite la structure sémantique des headers (`#`, `##`, `###`...) pour créer des chunks cohérents.
+
+### Avantages
+
+| Aspect | Chunking classique | Chunking Markdown |
+|--------|-------------------|-------------------|
+| **Découpage** | Arbitraire (taille, ponctuation) | Sémantique (par section) |
+| **Contexte** | Peut couper au milieu d'une idée | Chaque chunk = 1 section complète |
+| **Titre** | Perdu | Conservé dans le chunk |
+| **RAG** | Bruit potentiel | Meilleure pertinence |
+
+### Fonctionnement
+
+```
+Document Markdown :
+┌─────────────────────────────────────┐
+│ # Titre principal                   │
+│                                     │
+│ Introduction...                     │
+│                                     │
+│ ## Section 1                        │
+│                                     │
+│ Contenu de la section 1...          │
+│                                     │
+│ ## Section 2                        │
+│                                     │
+│ Contenu de la section 2...          │
+└─────────────────────────────────────┘
+
+         ↓ Chunking Markdown
+
+┌─────────────────────────┐
+│ Chunk 0 (intro)         │
+│ "Introduction..."       │
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│ Chunk 1                 │
+│ "## Section 1           │
+│                         │
+│ Contenu de la section 1"│
+└─────────────────────────┘
+
+┌─────────────────────────┐
+│ Chunk 2                 │
+│ "## Section 2           │
+│                         │
+│ Contenu de la section 2"│
+└─────────────────────────┘
+```
+
+### Métadonnées enrichies
+
+Chaque chunk généré avec la stratégie `markdown` contient des métadonnées supplémentaires :
+
+```json
+{
+  "strategy": "markdown",
+  "section_type": "section",
+  "header_level": 2,
+  "header_title": "Section 1",
+  "document_title": "Mon document",
+  "category": "documentation"
+}
+```
+
+| Champ | Description |
+|-------|-------------|
+| `section_type` | `intro` (avant le 1er header), `section` (section complète), `section_part` (section découpée) |
+| `header_level` | Niveau du header (1 = `#`, 2 = `##`, etc.) |
+| `header_title` | Texte du header de la section |
+
+### Gestion des sections longues
+
+Si une section est trop grande (> `max_chunk_size` tokens), elle est découpée en sous-chunks :
+
+1. Le **premier sous-chunk** garde le header original : `## Section 1\n\nContenu...`
+2. Les **sous-chunks suivants** ont un préfixe contextuel : `[Section 1]\n\nSuite du contenu...`
+
+Cela garantit que chaque chunk reste compréhensible même hors contexte.
+
+### Fallback automatique
+
+Si le document ne contient **aucun header Markdown** (pas de `#`), la stratégie `markdown` bascule automatiquement sur la stratégie `paragraph`.
+
+### Cas d'usage recommandés
+
+| Source | Stratégie recommandée |
+|--------|----------------------|
+| **HTML crawlé** | `markdown` (après conversion HTML→MD) |
+| **Fichiers .md** | `markdown` |
+| **PDF structuré** | `paragraph` ou `recursive` |
+| **PDF scanné** | `fixed_size` avec overlap |
+| **Documents complexes** | `llm_assisted` |
+
+### Configuration
+
+La stratégie `markdown` peut être sélectionnée :
+
+1. **Par document** : Dans le formulaire d'édition, onglet Indexation
+2. **Par agent** : Champ `default_chunk_strategy` dans AgentResource
+3. **À l'import** : Dans le formulaire d'import en masse
 
 ---
 

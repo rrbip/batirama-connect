@@ -196,14 +196,14 @@ Permet de re-découper le document sans refaire l'extraction :
 3. Cliquer sur "Re-chunker" pour appliquer les modifications
 
 **Comportement selon la stratégie** :
-- `sentence`, `paragraph`, `fixed` : Chunking synchrone immédiat
+- `sentence`, `paragraph`, `fixed`, `markdown` : Chunking synchrone immédiat
 - `llm_assisted` : Job asynchrone sur queue `llm-chunking`
 
 ### Onglet "Indexation"
 
 - **Indexé dans Qdrant** : Indicateur booléen
 - **Date d'indexation**
-- **Stratégie de chunking** : fixed_size, sentence, paragraph, recursive, **llm_assisted**
+- **Stratégie de chunking** : fixed_size, sentence, paragraph, recursive, **markdown**, **llm_assisted**
 - **Méthode d'extraction** : Affiche la méthode utilisée (pdftotext, smalot, ocr, etc.)
 
 ### Section "Réponses LLM brutes" (pour llm_assisted)
