@@ -109,12 +109,48 @@ class CategoryDetectionService
                 continue;
             }
 
+            // Vérifier si un mot de la question CONTIENT le nom de la catégorie (stemming basique)
+            // Ex: "diagnostiquer" contient "diagnostic"
+            foreach ($questionWords as $word) {
+                if (strlen($categoryName) >= 4 && strlen($word) >= 4) {
+                    // Le mot de la question contient la catégorie
+                    if (Str::contains($word, $categoryName)) {
+                        $matches->push($category);
+                        break;
+                    }
+                    // Ou la catégorie contient le mot (racine commune)
+                    if (strlen($word) >= 5 && Str::contains($categoryName, substr($word, 0, -2))) {
+                        $matches->push($category);
+                        break;
+                    }
+                }
+            }
+
+            if ($matches->contains('id', $category->id)) {
+                continue;
+            }
+
             // Vérifier les mots individuels de la catégorie
             $categoryWords = preg_split('/[\s\-_]+/', $categoryName);
-            foreach ($categoryWords as $word) {
-                if (strlen($word) >= 4 && in_array($word, $questionWords)) {
-                    $matches->push($category);
-                    break;
+            foreach ($categoryWords as $catWord) {
+                if (strlen($catWord) < 4) {
+                    continue;
+                }
+
+                foreach ($questionWords as $qWord) {
+                    // Match exact
+                    if ($catWord === $qWord) {
+                        $matches->push($category);
+                        break 2;
+                    }
+                    // Match par racine (le mot de la question commence par le mot catégorie ou inverse)
+                    if (strlen($qWord) >= 4) {
+                        $root = substr($catWord, 0, min(strlen($catWord), 6));
+                        if (Str::startsWith($qWord, $root) || Str::startsWith($catWord, substr($qWord, 0, 6))) {
+                            $matches->push($category);
+                            break 2;
+                        }
+                    }
                 }
             }
         }
