@@ -162,10 +162,13 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         $html = $this->cleanHtml($html);
 
         // Use League HTML to Markdown converter
+        // header_style 'atx' ensures all headers use # syntax (not setext === or ---)
+        // This is required for MarkdownChunkerService to detect headers properly
         $converter = new HtmlConverter([
             'strip_tags' => true,
             'remove_nodes' => 'script style nav footer header aside',
             'hard_break' => true,
+            'header_style' => 'atx',
         ]);
 
         $markdown = $converter->convert($html);
