@@ -156,6 +156,19 @@ Tests du filtrage des données via `getEloquentQuery()`.
 | `test_fabricant_sees_only_own_products` | Fabricant voit uniquement les produits de ses catalogues |
 | `test_catalog_dropdown_filtered_for_fabricant` | Le dropdown catalogue est filtré pour fabricant |
 
+**Fichier:** `tests/Feature/Permissions/CatalogRestrictionsTest.php`
+
+Tests des restrictions de création de catalogue pour les fabricants.
+
+| Test | Description |
+|------|-------------|
+| `test_fabricant_can_create_first_catalog` | Fabricant peut créer son premier catalogue |
+| `test_fabricant_cannot_create_second_catalog` | Fabricant ne peut pas créer un 2ème catalogue |
+| `test_fabricant_catalog_url_from_profile` | L'URL catalogue vient de company_info.website |
+| `test_fabricant_without_website_cannot_create` | Fabricant sans URL ne peut pas créer |
+| `test_admin_can_create_multiple_catalogs` | Admin peut créer plusieurs catalogues |
+| `test_create_button_hidden_if_catalog_exists` | Bouton "Créer" masqué si catalogue existe |
+
 **Exemple de test:**
 ```php
 public function test_registered_user_can_login(): void

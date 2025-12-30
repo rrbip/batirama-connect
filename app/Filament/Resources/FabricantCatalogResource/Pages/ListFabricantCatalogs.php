@@ -15,7 +15,9 @@ class ListFabricantCatalogs extends ListRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\CreateAction::make(),
+            Actions\CreateAction::make()
+                // Masquer le bouton si le fabricant a déjà un catalogue
+                ->visible(fn () => ! FabricantCatalogResource::fabricantHasCatalog()),
         ];
     }
 }

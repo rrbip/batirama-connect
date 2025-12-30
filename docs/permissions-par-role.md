@@ -168,17 +168,63 @@ public static function getEloquentQuery(): Builder
 
 ## 4. Interface Fabricant
 
-### 4.1 Menu de navigation
+### 4.1 Restrictions catalogue fabricant
+
+Un fabricant est limité à **un seul catalogue** basé sur l'URL de son site web déclaré dans son profil.
+
+| Règle | Description |
+|-------|-------------|
+| **Un catalogue par fabricant** | Le bouton "Créer" est masqué si un catalogue existe déjà |
+| **URL depuis le profil** | L'URL du site web est récupérée depuis `company_info.website` |
+| **URL non modifiable** | Le champ URL est en lecture seule pour les fabricants |
+| **URL requise** | Si aucune URL n'est configurée dans le profil, la création est bloquée |
+
+#### Implémentation
+
+```php
+// FabricantCatalogResource.php
+
+// Vérifie si le fabricant a déjà un catalogue
+public static function fabricantHasCatalog(): bool
+{
+    $user = auth()->user();
+    if (!$user || !$user->hasRole('fabricant') || $user->hasRole('admin')) {
+        return false;
+    }
+    return static::getModel()::where('fabricant_id', $user->id)->exists();
+}
+
+// Récupère l'URL du site web depuis le profil
+public static function getFabricantWebsiteUrl(): ?string
+{
+    $user = auth()->user();
+    return $user?->company_info['website'] ?? null;
+}
+```
+
+#### Configuration du profil fabricant
+
+L'URL du site web doit être configurée dans le champ `company_info` de l'utilisateur :
+
+```json
+{
+    "website": "https://www.exemple-fabricant.fr",
+    "siret": "12345678901234",
+    "address": "..."
+}
+```
+
+### 4.2 Menu de navigation
 
 Le fabricant ne doit voir que :
 
 ```
 📦 Mon Catalogue
    └── Mes Produits
-   └── Mes Catalogues
+   └── Mes Catalogues (1 max)
 ```
 
-### 4.2 Dashboard personnalisé
+### 4.3 Dashboard personnalisé
 
 Le dashboard affiche des widgets différents selon le rôle :
 
