@@ -10,6 +10,7 @@ use App\Jobs\IndexDocumentChunksJob;
 use App\Jobs\ProcessDocumentJob;
 use App\Jobs\ProcessLlmChunkingJob;
 use App\Services\DocumentChunkerService;
+use App\Services\Pipeline\PipelineOrchestratorService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -18,6 +19,24 @@ use Illuminate\Support\Facades\Storage;
 class EditDocument extends EditRecord
 {
     protected static string $resource = DocumentResource::class;
+
+    /**
+     * Relance le pipeline à partir d'une étape spécifique
+     */
+    public function relaunchFromStep(int $stepIndex): void
+    {
+        $orchestrator = app(PipelineOrchestratorService::class);
+        $orchestrator->relaunchStep($this->record, $stepIndex);
+
+        Notification::make()
+            ->title('Étape relancée')
+            ->body("L'étape " . ($stepIndex + 1) . " a été remise en file d'attente.")
+            ->success()
+            ->send();
+
+        // Refresh the record to update the view
+        $this->record->refresh();
+    }
 
     protected function getHeaderActions(): array
     {

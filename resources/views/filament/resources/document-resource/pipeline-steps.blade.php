@@ -182,7 +182,23 @@
                                 {{ $stepStatusConfig['label'] }}
                             </span>
                         </div>
-                        <span class="text-sm text-gray-600 dark:text-gray-400">Durée: {{ $duration }}</span>
+                        <div class="flex items-center gap-3">
+                            <span class="text-sm text-gray-600 dark:text-gray-400">Durée: {{ $duration }}</span>
+                            @if($displayStatus !== 'running')
+                                <button
+                                    type="button"
+                                    wire:click="relaunchFromStep({{ $index }})"
+                                    wire:loading.attr="disabled"
+                                    wire:target="relaunchFromStep({{ $index }})"
+                                    wire:confirm="Relancer le pipeline à partir de l'étape {{ $index + 1 }} ?"
+                                    class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-warning-600 rounded hover:bg-warning-700 disabled:opacity-50 transition"
+                                    title="Relancer depuis cette étape"
+                                >
+                                    <x-heroicon-o-arrow-path class="w-3.5 h-3.5" wire:loading.class="animate-spin" wire:target="relaunchFromStep({{ $index }})" />
+                                    Relancer
+                                </button>
+                            @endif
+                        </div>
                     </div>
 
                     {{-- Contenu de l'étape --}}
@@ -196,7 +212,7 @@
                             @if(!empty($config))
                                 <div class="flex items-center gap-2">
                                     <span class="text-gray-500 dark:text-gray-400">Config :</span>
-                                    <code class="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded text-xs">
+                                    <code class="px-2 py-0.5 bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-200 rounded text-xs font-medium">
                                         @foreach($config as $key => $value)
                                             {{ $key }}: {{ is_bool($value) ? ($value ? 'oui' : 'non') : $value }}@if(!$loop->last), @endif
                                         @endforeach
@@ -225,13 +241,16 @@
                             </div>
                         @endif
 
-                        {{-- Sélection d'outil (si plusieurs disponibles) --}}
-                        @if(count($tools) > 1)
-                            <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded">
-                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">Changer l'outil :</span>
-                                <div class="flex flex-wrap gap-3">
+                        {{-- Sélection d'outil --}}
+                        @if(!empty($tools))
+                            <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
+                                    <x-heroicon-o-wrench-screwdriver class="w-4 h-4 inline-block mr-1" />
+                                    Outil pour cette étape :
+                                </span>
+                                <div class="flex flex-wrap gap-4">
                                     @foreach($tools as $availableTool)
-                                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                                        <label class="inline-flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition {{ $tool === $availableTool ? 'bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700' : '' }}">
                                             <input
                                                 type="radio"
                                                 name="tool_step_{{ $index }}"
@@ -240,15 +259,20 @@
                                                 class="text-primary-600 focus:ring-primary-500"
                                                 data-step-index="{{ $index }}"
                                             >
-                                            <span class="text-sm text-gray-700 dark:text-gray-300">
+                                            <span class="text-sm {{ $tool === $availableTool ? 'font-medium text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300' }}">
                                                 {{ $toolLabels[$availableTool] ?? $availableTool }}
-                                                @if($tool === $availableTool)
-                                                    <span class="text-xs text-gray-500">(actuel)</span>
-                                                @endif
                                             </span>
+                                            @if($tool === $availableTool)
+                                                <x-heroicon-s-check-circle class="w-4 h-4 text-primary-500" />
+                                            @endif
                                         </label>
                                     @endforeach
                                 </div>
+                                @if(count($tools) === 1)
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 italic">
+                                        Seul cet outil est disponible pour cette étape.
+                                    </p>
+                                @endif
                             </div>
                         @endif
 
