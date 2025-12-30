@@ -1,6 +1,6 @@
 @php
-    // Refresh the record to get latest data
-    $record = $record?->fresh();
+    // Get record from Filament ViewField context
+    $record = $getRecord();
     $pipelineData = $record?->pipeline_steps ?? [];
     $status = $pipelineData['status'] ?? 'not_started';
     $steps = $pipelineData['steps'] ?? [];
