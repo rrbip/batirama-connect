@@ -44,8 +44,16 @@ class DocumentResource extends Resource
     {
         return $form
             ->schema([
+                // Custom navigation (same as ManageChunks page)
+                Forms\Components\View::make('filament.resources.document-resource.tabs-navigation')
+                    ->viewData([
+                        'currentPage' => 'edit',
+                    ])
+                    ->columnSpanFull(),
+
                 Forms\Components\Tabs::make('Document')
                     ->persistTabInQueryString('activeTab')
+                    ->extraAttributes(['class' => 'hidden-tabs-header'])
                     ->tabs([
                         Forms\Components\Tabs\Tab::make('Informations')
                             ->id('informations')
@@ -559,22 +567,6 @@ class DocumentResource extends Resource
                                     ->visible(fn ($record) => $record?->chunk_strategy === 'llm_assisted'),
                             ])
                             ->visible(fn ($record) => $record !== null),
-
-                        Forms\Components\Tabs\Tab::make('Chunks')
-                            ->id('chunks')
-                            ->icon('heroicon-o-squares-2x2')
-                            ->badge(fn ($record) => $record?->chunk_count ?: null)
-                            ->schema([
-                                Forms\Components\Actions::make([
-                                    Forms\Components\Actions\Action::make('go_to_chunks')
-                                        ->label('Ouvrir la gestion des chunks')
-                                        ->icon('heroicon-o-arrow-top-right-on-square')
-                                        ->color('primary')
-                                        ->size('lg')
-                                        ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
-                                ])->columnSpanFull(),
-                            ])
-                            ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
 
                     ])
                     ->columnSpanFull(),
