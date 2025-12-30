@@ -382,6 +382,12 @@
 - Methode de detection: {{ $catDetect['method'] ?? 'N/A' }}
 - Confiance: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%
 - Categories detectees: {{ !empty($catDetect['categories']) ? implode(', ', array_column($catDetect['categories'], 'name')) : 'Aucune' }}
+@if(!empty($catDetect['match_details']))
+- Detail du match:
+@foreach($catDetect['match_details'] as $detail)
+  - [{{ $detail['type'] ?? '?' }}] "{{ $detail['in_question'] ?? '' }}" → "{{ $detail['matched'] ?? '' }}" ({{ $detail['category'] ?? '' }}){{ !empty($detail['rule']) ? ' [' . $detail['rule'] . ']' : '' }}
+@endforeach
+@endif
 - Resultats filtres: {{ $catDetect['filtered_results_count'] ?? 0 }}
 - Resultats totaux: {{ $catDetect['total_results_count'] ?? 0 }}
 - Fallback utilise: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui (pas assez de resultats avec le filtre)' : 'Non' }}
@@ -616,6 +622,41 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                 <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
                                                                                                     {{ $cat['name'] ?? 'Inconnu' }}
                                                                                                 </span>
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @endif
+
+                                                                                {{-- Détails du match --}}
+                                                                                @if(!empty($categoryDetection['match_details']))
+                                                                                    <div>
+                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Détail du matching</p>
+                                                                                        <div class="space-y-2">
+                                                                                            @foreach($categoryDetection['match_details'] as $detail)
+                                                                                                <div class="flex items-center gap-2 text-sm bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded-lg">
+                                                                                                    @php
+                                                                                                        $typeLabel = match($detail['type'] ?? '') {
+                                                                                                            'exact' => ['label' => 'Exact', 'color' => 'green'],
+                                                                                                            'exact_word' => ['label' => 'Mot exact', 'color' => 'green'],
+                                                                                                            'stemming' => ['label' => 'Stemming', 'color' => 'blue'],
+                                                                                                            'root_match' => ['label' => 'Racine', 'color' => 'purple'],
+                                                                                                            'embedding' => ['label' => 'Embedding', 'color' => 'orange'],
+                                                                                                            default => ['label' => $detail['type'] ?? '?', 'color' => 'gray'],
+                                                                                                        };
+                                                                                                    @endphp
+                                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-{{ $typeLabel['color'] }}-100 text-{{ $typeLabel['color'] }}-800 dark:bg-{{ $typeLabel['color'] }}-800 dark:text-{{ $typeLabel['color'] }}-100">
+                                                                                                        {{ $typeLabel['label'] }}
+                                                                                                    </span>
+                                                                                                    <span class="text-gray-600 dark:text-gray-300">
+                                                                                                        "<strong class="text-pink-600 dark:text-pink-400">{{ $detail['in_question'] ?? '' }}</strong>"
+                                                                                                        →
+                                                                                                        "<strong class="text-green-600 dark:text-green-400">{{ $detail['matched'] ?? '' }}</strong>"
+                                                                                                        ({{ $detail['category'] ?? '' }})
+                                                                                                    </span>
+                                                                                                    @if(!empty($detail['rule']))
+                                                                                                        <span class="text-xs text-gray-400">[{{ $detail['rule'] }}]</span>
+                                                                                                    @endif
+                                                                                                </div>
                                                                                             @endforeach
                                                                                         </div>
                                                                                     </div>

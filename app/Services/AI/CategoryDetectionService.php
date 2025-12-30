@@ -36,7 +36,7 @@ class CategoryDetectionService
     /**
      * Détecte la/les catégorie(s) pertinente(s) pour une question
      *
-     * @return array{categories: Collection, confidence: float, method: string}
+     * @return array{categories: Collection, confidence: float, method: string, match_details: array}
      */
     public function detect(string $question, ?Agent $agent = null): array
     {
@@ -48,22 +48,25 @@ class CategoryDetectionService
                 'categories' => collect(),
                 'confidence' => 0,
                 'method' => 'none',
+                'match_details' => [],
             ];
         }
 
         // 1. Essayer d'abord par correspondance de mots-clés (rapide)
-        $keywordMatches = $this->detectByKeywords($question, $categories);
+        $keywordResult = $this->detectByKeywords($question, $categories);
 
-        if ($keywordMatches->isNotEmpty()) {
+        if ($keywordResult['matches']->isNotEmpty()) {
             Log::debug('Category detected by keywords', [
                 'question' => Str::limit($question, 50),
-                'categories' => $keywordMatches->pluck('name')->toArray(),
+                'categories' => $keywordResult['matches']->pluck('name')->toArray(),
+                'details' => $keywordResult['details'],
             ]);
 
             return [
-                'categories' => $keywordMatches,
+                'categories' => $keywordResult['matches'],
                 'confidence' => 0.9,
                 'method' => 'keyword',
+                'match_details' => $keywordResult['details'],
             ];
         }
 
@@ -84,6 +87,11 @@ class CategoryDetectionService
                     'categories' => $embeddingMatches->pluck('category'),
                     'confidence' => $embeddingMatches->first()['score'] ?? 0,
                     'method' => 'embedding',
+                    'match_details' => $embeddingMatches->map(fn($m) => [
+                        'category' => $m['category']->name,
+                        'type' => 'embedding',
+                        'score' => round($m['score'], 3),
+                    ])->toArray(),
                 ];
             }
         } else {
@@ -98,18 +106,21 @@ class CategoryDetectionService
             'categories' => collect(),
             'confidence' => 0,
             'method' => 'none',
+            'match_details' => [],
         ];
     }
 
     /**
      * Détecte les catégories par correspondance de mots-clés
+     * @return array{matches: Collection, details: array}
      */
-    private function detectByKeywords(string $question, Collection $categories): Collection
+    private function detectByKeywords(string $question, Collection $categories): array
     {
         $questionLower = Str::lower($question);
         $questionWords = preg_split('/\s+/', $questionLower);
 
         $matches = collect();
+        $details = [];
 
         foreach ($categories as $category) {
             $categoryName = Str::lower($category->name);
@@ -118,6 +129,12 @@ class CategoryDetectionService
             // Vérifier si le nom de la catégorie apparaît dans la question
             if (Str::contains($questionLower, $categoryName)) {
                 $matches->push($category);
+                $details[] = [
+                    'category' => $category->name,
+                    'type' => 'exact',
+                    'matched' => $categoryName,
+                    'in_question' => $categoryName,
+                ];
                 continue;
             }
 
@@ -128,11 +145,25 @@ class CategoryDetectionService
                     // Le mot de la question contient la catégorie
                     if (Str::contains($word, $categoryName)) {
                         $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'stemming',
+                            'matched' => $categoryName,
+                            'in_question' => $word,
+                            'rule' => 'word_contains_category',
+                        ];
                         break;
                     }
                     // Ou la catégorie contient le mot (racine commune)
                     if (strlen($word) >= 5 && Str::contains($categoryName, substr($word, 0, -2))) {
                         $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'stemming',
+                            'matched' => substr($word, 0, -2),
+                            'in_question' => $word,
+                            'rule' => 'category_contains_root',
+                        ];
                         break;
                     }
                 }
@@ -153,6 +184,12 @@ class CategoryDetectionService
                     // Match exact
                     if ($catWord === $qWord) {
                         $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'exact_word',
+                            'matched' => $catWord,
+                            'in_question' => $qWord,
+                        ];
                         break 2;
                     }
                     // Match par racine (le mot de la question commence par le mot catégorie ou inverse)
@@ -160,6 +197,12 @@ class CategoryDetectionService
                         $root = substr($catWord, 0, min(strlen($catWord), 6));
                         if (Str::startsWith($qWord, $root) || Str::startsWith($catWord, substr($qWord, 0, 6))) {
                             $matches->push($category);
+                            $details[] = [
+                                'category' => $category->name,
+                                'type' => 'root_match',
+                                'matched' => $root,
+                                'in_question' => $qWord,
+                            ];
                             break 2;
                         }
                     }
@@ -167,7 +210,10 @@ class CategoryDetectionService
             }
         }
 
-        return $matches->unique('id');
+        return [
+            'matches' => $matches->unique('id'),
+            'details' => $details,
+        ];
     }
 
     /**
