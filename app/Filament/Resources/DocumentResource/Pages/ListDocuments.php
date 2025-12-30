@@ -28,16 +28,55 @@ class ListDocuments extends ListRecords
                 ->form([
                     Select::make('agent_id')
                         ->label('Agent')
-                        ->options(Agent::whereNotNull('qdrant_collection')->pluck('name', 'id'))
+                        ->options(function () {
+                            $agents = Agent::whereNotNull('qdrant_collection')
+                                ->where('is_active', true)
+                                ->pluck('name', 'id')
+                                ->toArray();
+
+                            // Ajouter l'option "Tous les agents" en premier
+                            return ['all' => '🔄 Tous les agents'] + $agents;
+                        })
                         ->required()
                         ->searchable()
-                        ->helperText('La collection Qdrant sera vidée et reconstruite avec tous les chunks de cet agent.'),
+                        ->helperText('Sélectionnez un agent ou "Tous les agents" pour reconstruire tous les index.'),
                 ])
                 ->requiresConfirmation()
                 ->modalHeading('Reconstruire l\'index Qdrant')
-                ->modalDescription('Cette action va supprimer tous les points de la collection Qdrant de l\'agent et les recréer à partir des chunks en base de données. Cela peut prendre plusieurs minutes.')
+                ->modalDescription('Cette action va supprimer tous les points de la collection Qdrant et les recréer à partir des chunks en base de données. Cela peut prendre plusieurs minutes.')
                 ->modalSubmitActionLabel('Reconstruire')
-                ->action(function (array $data) {
+                ->action(function (array $data): void {
+                    // Option "Tous les agents"
+                    if ($data['agent_id'] === 'all') {
+                        $agents = Agent::whereNotNull('qdrant_collection')
+                            ->where('is_active', true)
+                            ->get();
+
+                        if ($agents->isEmpty()) {
+                            Notification::make()
+                                ->title('Erreur')
+                                ->body('Aucun agent actif avec collection Qdrant configurée.')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        // Dispatcher un job pour chaque agent
+                        foreach ($agents as $agent) {
+                            RebuildAgentIndexJob::dispatch($agent);
+                        }
+
+                        Notification::make()
+                            ->title('Reconstruction lancée')
+                            ->body("La reconstruction de {$agents->count()} agents a été lancée. Suivez la progression dans les logs.")
+                            ->success()
+                            ->send();
+
+                        return;
+                    }
+
+                    // Agent spécifique
                     $agent = Agent::find($data['agent_id']);
 
                     if (! $agent || empty($agent->qdrant_collection)) {
