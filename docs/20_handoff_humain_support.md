@@ -51,6 +51,174 @@ Permettre une transition fluide entre l'IA et un agent humain quand l'IA ne peut
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 2.1 Collecte de l'email utilisateur
+
+Quand l'escalade est déclenchée sans admin connecté, le widget de chat demande l'email :
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  COLLECTE EMAIL (mode asynchrone)                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  [AI] Je n'ai pas trouvé d'information fiable pour répondre à votre        │
+│       question avec certitude.                                               │
+│                                                                              │
+│  [System] Aucun conseiller n'est disponible pour le moment.                 │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │  📧 Laissez-nous votre email pour recevoir une réponse :               │ │
+│  │                                                                         │ │
+│  │  ┌───────────────────────────────────────────────────────────────────┐ │ │
+│  │  │ votre@email.com                                                   │ │ │
+│  │  └───────────────────────────────────────────────────────────────────┘ │ │
+│  │                                                                         │ │
+│  │  📎 Ajouter une pièce jointe (optionnel)                               │ │
+│  │  [Choisir un fichier] capture_ecran.png (téléchargé)                   │ │
+│  │                                                                         │ │
+│  │  [Envoyer ma demande]                                                  │ │
+│  └────────────────────────────────────────────────────────────────────────┘ │
+│                                                                              │
+│  → Fonctionnalité incluse dans le module "Agents IA" (widget de chat)       │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Gestion des pièces jointes
+
+Les utilisateurs peuvent joindre des fichiers via le chat ou par email.
+
+#### Sécurité des fichiers
+
+| Mesure | Configuration |
+|--------|---------------|
+| **Extensions autorisées** | `.pdf`, `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.txt`, `.csv` |
+| **Extensions bloquées** | `.exe`, `.js`, `.php`, `.bat`, `.sh`, `.ps1`, `.vbs`, `.msi`, `.dll`, `.scr`, `.cmd`, `.jar` |
+| **Taille max par fichier** | 10 Mo |
+| **Taille max totale** | 25 Mo par conversation |
+| **Scan antivirus** | ClamAV (open source, gratuit) |
+| **Stockage** | `storage/app/support-attachments/` (hors public) |
+| **Accès** | Via URL signée avec expiration |
+
+#### Table `support_attachments`
+
+```sql
+CREATE TABLE support_attachments (
+    id BIGSERIAL PRIMARY KEY,
+    message_id BIGINT REFERENCES support_messages(id) ON DELETE CASCADE,
+    conversation_id BIGINT REFERENCES support_conversations(id) ON DELETE CASCADE,
+
+    -- Fichier
+    original_name VARCHAR(255) NOT NULL,
+    stored_name VARCHAR(255) NOT NULL,      -- UUID.extension
+    mime_type VARCHAR(100) NOT NULL,
+    size_bytes INTEGER NOT NULL,
+
+    -- Sécurité
+    scan_status VARCHAR(20) DEFAULT 'pending',
+    -- 'pending'  : En attente de scan
+    -- 'clean'    : Scanné, aucun virus
+    -- 'infected' : Virus détecté (fichier supprimé)
+    -- 'error'    : Erreur de scan
+
+    scanned_at TIMESTAMP NULL,
+
+    -- Source
+    source VARCHAR(20) NOT NULL DEFAULT 'chat',
+    -- 'chat'  : Upload via widget
+    -- 'email' : Pièce jointe email
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_attach_message ON support_attachments(message_id);
+CREATE INDEX idx_attach_conv ON support_attachments(conversation_id);
+CREATE INDEX idx_attach_scan ON support_attachments(scan_status) WHERE scan_status = 'pending';
+```
+
+#### Service de scan antivirus
+
+```php
+class AttachmentSecurityService
+{
+    private const ALLOWED_EXTENSIONS = [
+        'pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp',
+        'doc', 'docx', 'xls', 'xlsx', 'txt', 'csv'
+    ];
+
+    private const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 Mo
+
+    public function validateAndStore(UploadedFile $file, SupportConversation $conversation): SupportAttachment
+    {
+        // 1. Vérifier l'extension
+        $extension = strtolower($file->getClientOriginalExtension());
+        if (!in_array($extension, self::ALLOWED_EXTENSIONS)) {
+            throw new InvalidAttachmentException("Type de fichier non autorisé: .{$extension}");
+        }
+
+        // 2. Vérifier la taille
+        if ($file->getSize() > self::MAX_FILE_SIZE) {
+            throw new InvalidAttachmentException("Fichier trop volumineux (max 10 Mo)");
+        }
+
+        // 3. Vérifier le MIME type réel (pas juste l'extension)
+        $mimeType = $file->getMimeType();
+        if (!$this->isAllowedMimeType($mimeType)) {
+            throw new InvalidAttachmentException("Type de contenu non autorisé");
+        }
+
+        // 4. Stocker avec nom unique
+        $storedName = Str::uuid() . '.' . $extension;
+        $path = $file->storeAs('support-attachments', $storedName, 'local');
+
+        // 5. Créer l'enregistrement
+        $attachment = SupportAttachment::create([
+            'conversation_id' => $conversation->id,
+            'original_name' => $file->getClientOriginalName(),
+            'stored_name' => $storedName,
+            'mime_type' => $mimeType,
+            'size_bytes' => $file->getSize(),
+            'scan_status' => 'pending',
+        ]);
+
+        // 6. Lancer le scan en arrière-plan
+        dispatch(new ScanAttachmentJob($attachment));
+
+        return $attachment;
+    }
+
+    public function scanWithClamAV(SupportAttachment $attachment): bool
+    {
+        $filePath = storage_path("app/support-attachments/{$attachment->stored_name}");
+
+        // Utiliser ClamAV via clamscan ou clamd socket
+        $result = Process::run("clamscan --no-summary {$filePath}");
+
+        if ($result->exitCode() === 0) {
+            $attachment->update([
+                'scan_status' => 'clean',
+                'scanned_at' => now(),
+            ]);
+            return true;
+        } elseif ($result->exitCode() === 1) {
+            // Virus détecté - supprimer le fichier
+            Storage::disk('local')->delete("support-attachments/{$attachment->stored_name}");
+            $attachment->update([
+                'scan_status' => 'infected',
+                'scanned_at' => now(),
+            ]);
+            Log::warning('Virus détecté dans pièce jointe', [
+                'attachment_id' => $attachment->id,
+                'original_name' => $attachment->original_name,
+            ]);
+            return false;
+        }
+
+        $attachment->update(['scan_status' => 'error']);
+        return false;
+    }
+}
+```
+
 ---
 
 ## 3. Modèle de données
@@ -1326,7 +1494,121 @@ Cordialement,<br>
 
 ### 8.5 Configuration des fournisseurs email
 
-#### Option A : Webhooks (recommandé)
+#### Comparaison des options
+
+| Fournisseur | Réception | Envoi | Coût | Délai |
+|-------------|-----------|-------|------|-------|
+| **IMAP** ⭐ | Polling (1 min) | Via SMTP existant | **Gratuit** | ~1 min |
+| **Mailgun** | Webhook (temps réel) | 5000 gratuits/mois puis 0.80€/1000 | ~10-30€/mois | Instantané |
+| **SendGrid** | Webhook (temps réel) | 100/jour gratuits | ~15-25€/mois | Instantané |
+
+**Recommandation** : Commencer avec **IMAP** (gratuit), migrer vers webhooks si le volume justifie le coût.
+
+#### Option A : IMAP Polling (recommandé - GRATUIT)
+
+Utilise une boîte mail existante (OVH, Gandi, Gmail, etc.) :
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│  CONFIGURATION IMAP (0€)                                                    │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Créer une boîte mail dédiée: support@votredomaine.com                  │
+│                                                                             │
+│  2. Configurer dans l'agent:                                               │
+│     • Fournisseur: IMAP                                                    │
+│     • Serveur: imap.votrehebergeur.com                                     │
+│     • Port: 993 (SSL)                                                      │
+│     • Utilisateur: support@votredomaine.com                                │
+│     • Mot de passe: ***                                                    │
+│     • Polling: 60 secondes                                                 │
+│                                                                             │
+│  3. L'envoi utilise le SMTP Laravel existant (config/mail.php)            │
+│                                                                             │
+│  Coût total: 0€ (utilise l'hébergement email existant)                    │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+```php
+// app/Console/Kernel.php
+protected function schedule(Schedule $schedule): void
+{
+    // Polling IMAP toutes les minutes
+    $schedule->job(new FetchImapEmailsJob())
+        ->everyMinute()
+        ->withoutOverlapping()
+        ->runInBackground();
+}
+```
+
+```php
+// app/Jobs/Support/FetchImapEmailsJob.php
+class FetchImapEmailsJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function handle(EmailReplyParser $parser): void
+    {
+        // Récupérer tous les agents avec IMAP configuré
+        $agents = Agent::where('human_support_enabled', true)
+            ->whereJsonContains('email_config->provider', 'imap')
+            ->whereJsonContains('email_config->enabled', true)
+            ->get();
+
+        foreach ($agents as $agent) {
+            $this->fetchEmailsForAgent($agent, $parser);
+        }
+    }
+
+    private function fetchEmailsForAgent(Agent $agent, EmailReplyParser $parser): void
+    {
+        $config = $agent->email_config;
+
+        try {
+            $mailbox = new \PhpImap\Mailbox(
+                '{' . $config['imap_host'] . ':' . $config['imap_port'] . '/imap/ssl}INBOX',
+                $config['imap_username'],
+                decrypt($config['imap_password']),
+                storage_path('app/temp-attachments'),
+                'UTF-8'
+            );
+
+            // Récupérer les emails non lus
+            $mailIds = $mailbox->searchMailbox('UNSEEN');
+
+            foreach ($mailIds as $mailId) {
+                $email = $mailbox->getMail($mailId);
+
+                // Traiter l'email
+                dispatch(new ProcessIncomingEmailJob(
+                    agentId: $agent->id,
+                    to: $email->toString ?? '',
+                    from: $email->fromAddress,
+                    subject: $email->subject,
+                    body: $email->textPlain ?? strip_tags($email->textHtml ?? ''),
+                    messageId: $email->messageId,
+                    attachments: $email->getAttachments(),
+                ));
+
+                // Marquer comme lu
+                $mailbox->markMailAsRead($mailId);
+            }
+
+            $mailbox->disconnect();
+        } catch (\Exception $e) {
+            Log::error('Erreur IMAP', [
+                'agent_id' => $agent->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+}
+```
+
+#### Option B : Webhooks (premium - temps réel)
+
+Pour les volumes importants ou besoin de temps réel :
 
 ```php
 // config/services.php
@@ -1369,68 +1651,10 @@ class SupportWebhookController extends Controller
             subject: $request->input('subject'),
             body: $request->input('body-plain') ?? $request->input('stripped-text'),
             messageId: $request->input('Message-Id'),
+            attachments: $request->file('attachments') ?? [],
         ));
 
         return response('OK', 200);
-    }
-}
-```
-
-#### Option B : IMAP Polling
-
-```php
-// app/Console/Kernel.php
-protected function schedule(Schedule $schedule): void
-{
-    // Polling IMAP pour les agents configurés en IMAP
-    $schedule->job(new FetchImapEmailsJob())
-        ->everyMinute()
-        ->withoutOverlapping()
-        ->runInBackground();
-}
-```
-
-```php
-// app/Jobs/Support/FetchImapEmailsJob.php
-class FetchImapEmailsJob implements ShouldQueue
-{
-    public function handle(): void
-    {
-        // Récupérer tous les agents avec IMAP configuré
-        $agents = Agent::whereJsonContains('email_config->provider', 'imap')
-            ->whereJsonContains('email_config->enabled', true)
-            ->get();
-
-        foreach ($agents as $agent) {
-            $this->fetchEmailsForAgent($agent);
-        }
-    }
-
-    private function fetchEmailsForAgent(Agent $agent): void
-    {
-        $config = $agent->email_config;
-
-        $mailbox = new ImapMailbox(
-            host: $config['imap_host'],
-            port: $config['imap_port'],
-            username: $config['imap_username'],
-            password: decrypt($config['imap_password']),
-        );
-
-        $emails = $mailbox->fetchUnread();
-
-        foreach ($emails as $email) {
-            dispatch(new ProcessIncomingEmailJob(
-                to: $email->to,
-                from: $email->from,
-                subject: $email->subject,
-                body: $email->textBody,
-                messageId: $email->messageId,
-            ));
-
-            // Marquer comme lu
-            $mailbox->markAsRead($email->uid);
-        }
     }
 }
 ```
@@ -1612,19 +1836,21 @@ class SupportChatController extends Controller
 
 1. **Authentification utilisateur** : Obligatoire ou optionnel pour le chat ?
 2. **Multi-langue** : Support messages en plusieurs langues ?
-3. **Pièces jointes** : Permettre upload de fichiers/screenshots ?
-4. **Chatbot widget** : Intégrer sur sites externes ou uniquement backoffice ?
-5. **SLA** : Définir des niveaux de service avec alertes ?
-6. **Escalade en chaîne** : Permettre escalade admin → admin senior ?
+3. **Chatbot widget** : Intégrer sur sites externes ou uniquement backoffice ?
+4. **SLA** : Définir des niveaux de service avec alertes ?
+5. **Escalade en chaîne** : Permettre escalade admin → admin senior ?
 
 ### Questions résolues
 
 | Question | Décision |
 |----------|----------|
-| **Fournisseur email** | Configurable par agent : Mailgun (webhooks), SendGrid (webhooks), ou IMAP (polling 1min) |
-| **Connexion boîte mail** | Webhooks recommandés (temps réel), IMAP en alternative avec polling toutes les minutes |
+| **Fournisseur email** | IMAP recommandé (gratuit), Mailgun/SendGrid en option premium |
+| **Coût fournisseur** | IMAP = 0€, Mailgun ~10-30€/mois, SendGrid ~15-25€/mois |
+| **Connexion boîte mail** | IMAP polling toutes les minutes, webhooks pour temps réel si besoin |
 | **Instructions anti-spam** | Incluses dans le premier email de confirmation avec guide de whitelist |
 | **Intégration modules** | Support humain dans "Agents IA", email config dans "Déploiement Agent IA" |
+| **Collecte email utilisateur** | Formulaire dans le widget de chat lors de l'escalade asynchrone |
+| **Pièces jointes** | Oui, avec sécurité : extensions limitées, 10 Mo max, scan ClamAV |
 
 ---
 
@@ -1635,6 +1861,7 @@ app/
 ├── Models/
 │   ├── SupportConversation.php
 │   ├── SupportMessage.php
+│   ├── SupportAttachment.php          # NOUVEAU
 │   ├── SupportEmailThread.php
 │   └── AdminAvailability.php
 ├── Services/
@@ -1643,7 +1870,8 @@ app/
 │       ├── ConversationService.php
 │       ├── SupportTrainingService.php
 │       ├── ConversationToMarkdownService.php
-│       └── EmailReplyParser.php
+│       ├── EmailReplyParser.php
+│       └── AttachmentSecurityService.php    # NOUVEAU
 ├── Events/
 │   ├── ConversationEscalated.php
 │   ├── ConversationAssigned.php
@@ -1656,7 +1884,9 @@ app/
 │   └── Support/
 │       ├── NotifyAdminsOfEscalation.php
 │       ├── NotifyUserOfResponse.php
-│       ├── FetchIncomingEmailsJob.php
+│       ├── FetchImapEmailsJob.php           # Renommé (IMAP spécifique)
+│       ├── ProcessIncomingEmailJob.php      # NOUVEAU
+│       ├── ScanAttachmentJob.php            # NOUVEAU
 │       ├── IndexLearnedResponseJob.php
 │       └── IndexConversationAsDocumentJob.php
 ├── Mail/
@@ -1672,10 +1902,13 @@ app/
 │       ├── SupportChatController.php
 │       └── Api/
 │           └── SupportWebhookController.php
+├── Exceptions/
+│   └── InvalidAttachmentException.php       # NOUVEAU
 database/
 └── migrations/
     ├── xxxx_create_support_conversations_table.php
     ├── xxxx_create_support_messages_table.php
+    ├── xxxx_create_support_attachments_table.php   # NOUVEAU
     ├── xxxx_create_support_email_threads_table.php
     ├── xxxx_create_admin_availability_table.php
     └── xxxx_add_support_fields_to_agents_table.php
