@@ -226,7 +226,16 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
      */
     protected function cleanMarkdown(string $markdown): string
     {
-        // Remove excessive blank lines
+        // Fix headers that are not on their own line
+        // e.g., "Some text# Header" -> "Some text\n\n# Header"
+        // This is critical for MarkdownChunkerService to detect headers
+        $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+
+        // Ensure headers have a blank line before them (if preceded by just one newline)
+        // e.g., "text\n# Header" -> "text\n\n# Header"
+        $markdown = preg_replace('/([^\n])\n(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+
+        // Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
         // Trim whitespace
