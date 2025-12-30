@@ -16,6 +16,9 @@ tests/
 │           ├── ProcessMarkdownToQrJobTest.php
 │           └── ProcessPdfToImagesJobTest.php
 ├── Feature/
+│   ├── Auth/
+│   │   ├── UserAuthenticationTest.php
+│   │   └── UserRegistrationTest.php
 │   └── Pipeline/
 │       └── PipelineIntegrationTest.php
 └── TestCase.php
@@ -83,6 +86,76 @@ tests/
 | `test_full_pdf_pipeline` | Pipeline complet PDF → chunks indexés |
 | `test_pipeline_recovery_after_failure` | Reprise après échec |
 | `test_relaunch_from_specific_step` | Relance depuis une étape spécifique |
+
+### 6. Tests Utilisateurs (Authentification)
+
+**Fichier:** `tests/Feature/Auth/UserAuthenticationTest.php`
+
+| Test | Description |
+|------|-------------|
+| `test_user_can_register` | Vérifie la création d'un compte utilisateur |
+| `test_registered_user_can_login` | Vérifie le login après création de compte |
+| `test_user_can_update_profile` | Vérifie la modification du profil |
+| `test_updated_user_can_login` | Vérifie le login après modification (email/password) |
+| `test_user_cannot_login_with_old_password` | Vérifie que l'ancien mot de passe ne fonctionne plus |
+| `test_user_can_logout` | Vérifie la déconnexion |
+
+**Fichier:** `tests/Feature/Auth/UserRegistrationTest.php`
+
+| Test | Description |
+|------|-------------|
+| `test_registration_requires_valid_email` | Vérifie la validation de l'email |
+| `test_registration_requires_password_confirmation` | Vérifie la confirmation du mot de passe |
+| `test_duplicate_email_rejected` | Vérifie le rejet des emails dupliqués |
+| `test_weak_password_rejected` | Vérifie les règles de complexité du mot de passe |
+
+**Exemple de test:**
+```php
+public function test_registered_user_can_login(): void
+{
+    // Création du compte
+    $user = User::factory()->create([
+        'email' => 'test@example.com',
+        'password' => Hash::make('password123'),
+    ]);
+
+    // Test du login
+    $response = $this->post('/login', [
+        'email' => 'test@example.com',
+        'password' => 'password123',
+    ]);
+
+    $response->assertRedirect('/dashboard');
+    $this->assertAuthenticatedAs($user);
+}
+
+public function test_updated_user_can_login(): void
+{
+    $user = User::factory()->create([
+        'email' => 'old@example.com',
+        'password' => Hash::make('oldpassword'),
+    ]);
+
+    // Modification du compte
+    $this->actingAs($user);
+    $this->put('/profile', [
+        'email' => 'new@example.com',
+        'password' => 'newpassword123',
+        'password_confirmation' => 'newpassword123',
+    ]);
+
+    // Déconnexion
+    $this->post('/logout');
+
+    // Test login avec nouvelles credentials
+    $response = $this->post('/login', [
+        'email' => 'new@example.com',
+        'password' => 'newpassword123',
+    ]);
+
+    $response->assertRedirect('/dashboard');
+}
+```
 
 ## Commandes
 
