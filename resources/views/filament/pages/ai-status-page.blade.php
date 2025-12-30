@@ -117,12 +117,12 @@
                         <div class="flex items-start gap-2">
                             <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
                             <div class="text-sm text-warning-700 dark:text-warning-300">
-                                <strong>Driver database actif.</strong> Assurez-vous qu'un worker est en cours d'exécution:
+                                <strong>Driver database actif.</strong> Le worker Docker (aim_queue) traite automatiquement les jobs.
                                 <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-php artisan queue:work --queue=default,pipeline,llm-chunking
+php artisan queue:work --queue=ai-messages,default,pipeline,llm-chunking
                                 </code>
                                 <div class="mt-2 text-xs text-gray-500">
-                                    💡 <strong>Priorité des queues :</strong> default (messages IA) → pipeline (traitement documents) → llm-chunking (découpage sémantique)
+                                    💡 <strong>Priorité des queues :</strong> ai-messages → default → pipeline (traitement documents) → llm-chunking (découpage sémantique)
                                 </div>
                             </div>
                         </div>
