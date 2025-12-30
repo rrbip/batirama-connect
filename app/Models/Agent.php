@@ -93,6 +93,14 @@ class Agent extends Model
         'deployment_mode',
         'is_whitelabel_enabled',
         'whitelabel_config',
+        // Human support columns
+        'human_support_enabled',
+        'escalation_threshold',
+        'escalation_message',
+        'no_admin_message',
+        'support_email',
+        'support_hours',
+        'ai_assistance_config',
     ];
 
     protected $casts = [
@@ -111,6 +119,11 @@ class Agent extends Model
         'whitelabel_config' => 'array',
         'vision_ollama_port' => 'integer',
         'chunking_ollama_port' => 'integer',
+        // Human support casts
+        'human_support_enabled' => 'boolean',
+        'escalation_threshold' => 'float',
+        'support_hours' => 'array',
+        'ai_assistance_config' => 'array',
     ];
 
     public function tenant(): BelongsTo
@@ -345,6 +358,38 @@ GUARDRAILS;
     public function getIndexingMethod(): IndexingMethod
     {
         return $this->indexing_method ?? IndexingMethod::QR_ATOMIQUE;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS SUPPORT HUMAIN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Utilisateurs assignés au support de cet agent.
+     */
+    public function supportUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'agent_support_users')
+            ->withPivot(['can_close_conversations', 'can_train_ai', 'can_view_analytics', 'notify_on_escalation'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur peut gérer le support de cet agent.
+     */
+    public function userCanHandleSupport(User $user): bool
+    {
+        // Super-admin et admin ont accès à tout
+        if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+            return true;
+        }
+
+        // Vérifier si l'utilisateur est assigné à cet agent
+        if ($user->hasRole('support-agent')) {
+            return $this->supportUsers()->where('user_id', $user->id)->exists();
+        }
+
+        return false;
     }
 
     // ─────────────────────────────────────────────────────────────────

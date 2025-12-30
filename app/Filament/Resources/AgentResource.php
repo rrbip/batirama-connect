@@ -424,6 +424,160 @@ class AgentResource extends Resource
                                     ->columns(2)
                                     ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
                             ]),
+
+                        Forms\Components\Tabs\Tab::make('Handoff Humain')
+                            ->icon('heroicon-o-user-group')
+                            ->schema([
+                                Forms\Components\Section::make('Activation du support humain')
+                                    ->description('Permet de transférer les conversations à un agent humain quand l\'IA ne peut pas répondre')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('human_support_enabled')
+                                            ->label('Activer le handoff humain')
+                                            ->helperText('Active le transfert vers un agent humain quand le score de confiance est trop bas')
+                                            ->live()
+                                            ->columnSpanFull(),
+                                    ]),
+
+                                Forms\Components\Section::make('Configuration de l\'escalade')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('escalation_threshold')
+                                            ->label('Seuil d\'escalade')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->default(0.60)
+                                            ->suffix('/ 1.0')
+                                            ->helperText('Score RAG en dessous duquel l\'escalade est déclenchée (0.60 = 60%)'),
+
+                                        Forms\Components\Textarea::make('escalation_message')
+                                            ->label('Message d\'escalade')
+                                            ->rows(3)
+                                            ->placeholder('Je n\'ai pas trouvé d\'information fiable pour répondre à votre question avec certitude. Un conseiller va prendre en charge votre demande.')
+                                            ->helperText('Message affiché à l\'utilisateur lors du transfert'),
+
+                                        Forms\Components\Textarea::make('no_admin_message')
+                                            ->label('Message si aucun agent disponible')
+                                            ->rows(3)
+                                            ->placeholder('Notre équipe n\'est pas disponible actuellement. Nous avons enregistré votre demande et vous répondrons par email dès que possible.')
+                                            ->helperText('Message affiché quand aucun agent de support n\'est connecté'),
+                                    ])
+                                    ->columns(1)
+                                    ->visible(fn (callable $get) => $get('human_support_enabled')),
+
+                                Forms\Components\Section::make('Horaires de support')
+                                    ->description('Définir les plages horaires où le support live est disponible')
+                                    ->schema([
+                                        Forms\Components\Repeater::make('support_hours')
+                                            ->label('')
+                                            ->schema([
+                                                Forms\Components\Select::make('day')
+                                                    ->label('Jour')
+                                                    ->options([
+                                                        'monday' => 'Lundi',
+                                                        'tuesday' => 'Mardi',
+                                                        'wednesday' => 'Mercredi',
+                                                        'thursday' => 'Jeudi',
+                                                        'friday' => 'Vendredi',
+                                                        'saturday' => 'Samedi',
+                                                        'sunday' => 'Dimanche',
+                                                    ])
+                                                    ->required(),
+                                                Forms\Components\TimePicker::make('start')
+                                                    ->label('Début')
+                                                    ->seconds(false)
+                                                    ->required(),
+                                                Forms\Components\TimePicker::make('end')
+                                                    ->label('Fin')
+                                                    ->seconds(false)
+                                                    ->required(),
+                                            ])
+                                            ->columns(3)
+                                            ->defaultItems(0)
+                                            ->addActionLabel('Ajouter une plage horaire')
+                                            ->collapsible()
+                                            ->itemLabel(fn (array $state): ?string =>
+                                                isset($state['day']) ?
+                                                    match($state['day']) {
+                                                        'monday' => 'Lundi',
+                                                        'tuesday' => 'Mardi',
+                                                        'wednesday' => 'Mercredi',
+                                                        'thursday' => 'Jeudi',
+                                                        'friday' => 'Vendredi',
+                                                        'saturday' => 'Samedi',
+                                                        'sunday' => 'Dimanche',
+                                                        default => $state['day']
+                                                    } . ' : ' . ($state['start'] ?? '?') . ' - ' . ($state['end'] ?? '?')
+                                                : null
+                                            ),
+
+                                        Forms\Components\Placeholder::make('support_hours_help')
+                                            ->label('')
+                                            ->content('💡 Si aucune plage n\'est définie, le support est disponible 24h/24. En dehors des horaires, les demandes sont traitées par email.'),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Agents de support assignés')
+                                    ->description('Utilisateurs avec le rôle "Agent de support" qui peuvent répondre aux conversations de cet agent IA')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('support_agents_info')
+                                            ->label('')
+                                            ->content(fn ($record) =>
+                                                $record?->id
+                                                    ? '👥 ' . ($record->supportUsers()->count() ?? 0) . ' agent(s) de support assigné(s)'
+                                                    : '💡 Sauvegardez d\'abord l\'agent pour pouvoir assigner des agents de support.'
+                                            ),
+
+                                        Forms\Components\Placeholder::make('support_agents_notice')
+                                            ->label('')
+                                            ->content('💡 La gestion des agents de support sera disponible dans une prochaine mise à jour.')
+                                            ->visible(fn ($record) => $record?->id !== null),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled')),
+
+                                Forms\Components\Section::make('Configuration email')
+                                    ->description('Paramètres pour la communication email asynchrone')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('support_email')
+                                            ->label('Email de notification')
+                                            ->email()
+                                            ->placeholder('support@example.com')
+                                            ->helperText('Email générique pour recevoir les notifications d\'escalade (en plus des agents assignés)'),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Assistance IA pour les agents')
+                                    ->description('Configuration de l\'aide IA pour les agents de support humain')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('ai_assistance_config.suggestions_enabled')
+                                            ->label('Afficher les sources RAG')
+                                            ->helperText('Affiche les sources trouvées pour aider l\'agent à répondre')
+                                            ->default(true),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.auto_generate_enabled')
+                                            ->label('Bouton "Générer suggestion"')
+                                            ->helperText('Permet à l\'agent de demander une suggestion de réponse à l\'IA')
+                                            ->default(false),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.improve_enabled')
+                                            ->label('Bouton "Améliorer"')
+                                            ->helperText('Permet d\'améliorer la réponse (orthographe, clarté) avant envoi')
+                                            ->default(true),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.add_politeness')
+                                            ->label('Formules de politesse en chat')
+                                            ->helperText('Ajoute automatiquement Bonjour/Cordialement (toujours actif pour les emails)')
+                                            ->default(false),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+                            ]),
                     ])
                     ->columnSpanFull(),
             ]);
