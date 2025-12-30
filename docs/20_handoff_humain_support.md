@@ -22,7 +22,8 @@
 | EscalationService | ⏳ | À créer |
 | Page Filament "Support Live" | ⏳ | À créer |
 | Widget chat utilisateur | ✅ | `public/whitelabel/widget.html` (existant, à étendre) |
-| Interface temps réel (Ajax Polling Phase 1) | ⏳ | À créer (WebSocket Phase 2) |
+| Interface agent support | ✅ | Extension de `/admin/ai-sessions/{id}` (existant) |
+| Temps réel Soketi | ⏳ | À intégrer au docker-compose |
 | Email bidirectionnel (IMAP) | ⏳ | À créer |
 | Gestion pièces jointes + ClamAV | ⏳ | À créer |
 | Système d'apprentissage IA | ⏳ | À créer |
@@ -2620,10 +2621,48 @@ Phase 2 (Interface Admin)
 | **Collecte email utilisateur** | Formulaire dans le widget de chat lors de l'escalade asynchrone |
 | **Pièces jointes** | Oui, avec sécurité : extensions limitées, 10 Mo max, scan ClamAV |
 | **Widget chat** | Réutiliser le widget whitelabel existant (`public/whitelabel/widget.html`) - ajouter états "en attente agent" et "agent connecté" |
-| **Temps réel (WebSocket vs Ajax)** | **Phase 1** : Ajax Polling (3s) simple et natif Laravel. **Phase 2** : Migration vers Soketi/WebSocket si volume > 50 conversations simultanées |
+| **Temps réel (WebSocket)** | **Soketi** dès le départ : 100% self-hosted, open-source (AGPL-3.0), aucune fuite de données vers tiers, < 512 MB RAM, intégré au docker-compose |
+| **Interface agent support** | Extension de la page existante `/admin/ai-sessions/{id}` : ajout section support humain, champ réponse, bouton "Améliorer avec IA" |
 | **Multi-tenancy** | Conversations scopées par `tenant_id`. Apprentissages remontés sur l'agent parent avec anonymisation des données utilisateur |
 | **File d'attente** | Driver `database` par défaut. Redis en option pour production haute charge (configurable via `.env`) |
 | **ClamAV indisponible** | Fallback autorisé mais message d'avertissement affiché : "Le fichier n'a pas pu être scanné. Téléchargez à vos risques." |
+
+### Configuration Soketi (docker-compose.yml)
+
+```yaml
+  # ===========================================
+  # SOKETI - WEBSOCKET SERVER (Support temps réel)
+  # ===========================================
+  soketi:
+    image: quay.io/soketi/soketi:1.4-16-debian
+    container_name: aim_soketi
+    restart: unless-stopped
+    ports:
+      - "${SOKETI_PORT:-6001}:6001"
+    environment:
+      SOKETI_DEBUG: "${SOKETI_DEBUG:-0}"
+      SOKETI_DEFAULT_APP_ID: "${PUSHER_APP_ID:-app-id}"
+      SOKETI_DEFAULT_APP_KEY: "${PUSHER_APP_KEY:-app-key}"
+      SOKETI_DEFAULT_APP_SECRET: "${PUSHER_APP_SECRET:-app-secret}"
+    networks:
+      - ai_network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+```
+
+**Variables .env requises** :
+```env
+# Soketi / Pusher (pour Laravel Broadcasting)
+BROADCAST_DRIVER=pusher
+PUSHER_APP_ID=app-id
+PUSHER_APP_KEY=app-key
+PUSHER_APP_SECRET=app-secret
+PUSHER_HOST=soketi
+PUSHER_PORT=6001
+PUSHER_SCHEME=http
+```
 
 ---
 
