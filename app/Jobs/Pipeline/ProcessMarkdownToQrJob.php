@@ -21,8 +21,7 @@ class ProcessMarkdownToQrJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
-    public int $backoff = 60;
+    public int $tries = 1; // No automatic retry - LLM timeouts are usually not recoverable
     public int $timeout = 0; // No timeout - can be long
 
     public function __construct(
