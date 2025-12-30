@@ -247,47 +247,73 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
      */
     protected function cleanMarkdown(string $markdown): string
     {
-        // Step 1: Fix headers that are not on their own line FIRST
-        // e.g., "Some text# Header" -> "Some text\n\n# Header"
-        // This is critical for MarkdownChunkerService to detect headers
-        $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+        // ============================================================
+        // ÉTAPE 1: Supprimer les éléments non-textuels
+        // ============================================================
 
-        // Step 2: Ensure headers have a blank line before them (if preceded by just one newline)
-        // e.g., "text\n# Header" -> "text\n\n# Header"
-        $markdown = preg_replace('/([^\n])\n(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+        // Supprimer TOUTES les images (pas seulement standalone)
+        // ![alt text](url) ou ![](url)
+        $markdown = preg_replace('/!\[[^\]]*\]\([^)]+\)/', '', $markdown);
 
-        // Step 3: NOW remove empty headers (lines that are just #, ##, etc. without text)
-        // Must run AFTER header separation so isolated "# " on their own line are caught
-        // Pattern matches: start of line, 1-6 #, optional whitespace, end of line
-        $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
+        // Supprimer les liens CTA courants (même avec texte après)
+        // [Essai Gratuit](url) Demander une démo → ""
+        $ctaPatterns = [
+            'Essai', 'Demo', 'Démo', 'Inscription', 'S\'inscrire', 'Souscrire',
+            'Connexion', 'Se connecter', 'Login', 'Sign up', 'Sign in', 'Register',
+            'Contact', 'Demander', 'Télécharger', 'Download', 'Acheter', 'Buy',
+            'Commander', 'Réserver', 'Book', 'Start', 'Commencer', 'Get started',
+        ];
+        $ctaRegex = implode('|', array_map('preg_quote', $ctaPatterns));
+        $markdown = preg_replace('/\[(' . $ctaRegex . ')[^\]]*\]\([^)]+\)[^\n]*/im', '', $markdown);
 
-        // Step 4: Remove navigation-like lists (consecutive lines of just links)
-        // e.g., "- [Home](/)\n- [About](/about)\n- [Contact](/contact)"
-        $markdown = preg_replace('/^(\s*-\s*\[[^\]]+\]\([^)]+\)\s*\n){3,}/m', '', $markdown);
+        // Supprimer les liens internes de navigation (chemins relatifs courts)
+        // [Solutions](/) [Tarifs](/tarifs) [Blog](/blog)
+        $markdown = preg_replace('/\[[^\]]{1,25}\]\(\/[^)]{0,30}\)/', '', $markdown);
 
-        // Step 5: Remove standalone images (lines that are just an image)
-        // e.g., "![Alt text](/images/logo.png)"
-        $markdown = preg_replace('/^!\[[^\]]*\]\([^)]+\)\s*$/m', '', $markdown);
-
-        // Step 6: Remove lines that are just links with short text (navigation links)
-        // e.g., "[Se connecter](/login)" alone on a line
-        $markdown = preg_replace('/^\s*\[[^\]]{1,30}\]\(\/[^)]*\)\s*$/m', '', $markdown);
-
-        // Step 7: Remove CTA buttons (links in brackets alone)
-        // e.g., "[Essai Gratuit](https://app.example.com/signup)"
-        $markdown = preg_replace('/^\s*\[(Essai|Demo|Inscription|S\'inscrire|Connexion|Se connecter|Login|Sign up|Sign in|Register|Contact|Demander)[^\]]*\]\([^)]+\)\s*$/im', '', $markdown);
-
-        // Step 8: Remove anchor links (links to #something)
-        // e.g., "[](#close)" or "[Close](#close)"
+        // Supprimer les liens vers des ancres #
+        // [Close](#close) → Close
         $markdown = preg_replace('/\[([^\]]*)\]\(#[^)]*\)/', '$1', $markdown);
 
-        // Step 9: Remove lines with only whitespace or punctuation
-        $markdown = preg_replace('/^\s*[\|\-\*\_]+\s*$/m', '', $markdown);
+        // ============================================================
+        // ÉTAPE 2: Nettoyer les lignes problématiques
+        // ============================================================
 
-        // Step 10: Remove excessive blank lines (more than 2 newlines -> 2 newlines)
+        // Supprimer les lignes qui ne contiennent qu'un seul mot court (navigation résiduelle)
+        // "Solutions" "Tarifs" "Contact" seuls sur une ligne
+        $markdown = preg_replace('/^[A-ZÀ-Ÿ][a-zà-ÿ]{2,15}$/m', '', $markdown);
+
+        // Supprimer les listes de navigation (lignes consécutives de liens)
+        $markdown = preg_replace('/^(\s*-\s*\[[^\]]+\]\([^)]+\)\s*\n){2,}/m', '', $markdown);
+
+        // Supprimer les lignes avec seulement des liens (même inline)
+        // "- [Home](/) - [About](/about)" → ""
+        $markdown = preg_replace('/^[\s\-\*]*(\[[^\]]+\]\([^)]+\)[\s\-\*]*)+$/m', '', $markdown);
+
+        // ============================================================
+        // ÉTAPE 3: Nettoyer les headers
+        // ============================================================
+
+        // Séparer les headers collés au texte
+        $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+        $markdown = preg_replace('/([^\n])\n(#{1,6}\s)/m', "$1\n\n$2", $markdown);
+
+        // Supprimer les headers vides
+        $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
+
+        // ============================================================
+        // ÉTAPE 4: Nettoyage final
+        // ============================================================
+
+        // Supprimer les lignes avec seulement ponctuation/symboles
+        $markdown = preg_replace('/^\s*[\|\-\*\_\.\,\:\;\!\?\#\@\&]+\s*$/m', '', $markdown);
+
+        // Supprimer les lignes vides en début de document
+        $markdown = preg_replace('/^\s*\n+/', '', $markdown);
+
+        // Réduire les lignes vides multiples (max 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
-        // Trim whitespace
+        // Trim final
         $markdown = trim($markdown);
 
         return $markdown;
