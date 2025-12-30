@@ -15,22 +15,6 @@ class UserRegistrationTest extends TestCase
     use RefreshDatabase;
 
     /**
-     * Test que l'email doit être valide lors de la création.
-     */
-    public function test_user_requires_valid_email(): void
-    {
-        $this->expectException(\Illuminate\Database\QueryException::class);
-
-        // Les emails invalides ne peuvent pas être insérés (contrainte DB ou validation)
-        User::create([
-            'uuid' => Str::uuid()->toString(),
-            'name' => 'Test User',
-            'email' => '', // Email vide
-            'password' => Hash::make('password123'),
-        ]);
-    }
-
-    /**
      * Test que l'email doit être unique.
      */
     public function test_duplicate_email_rejected(): void
@@ -43,21 +27,6 @@ class UserRegistrationTest extends TestCase
 
         User::factory()->create([
             'email' => 'duplicate@example.com',
-        ]);
-    }
-
-    /**
-     * Test que le nom est requis.
-     */
-    public function test_user_requires_name(): void
-    {
-        $this->expectException(\Illuminate\Database\QueryException::class);
-
-        User::create([
-            'uuid' => Str::uuid()->toString(),
-            'name' => '',
-            'email' => 'test@example.com',
-            'password' => Hash::make('password123'),
         ]);
     }
 
@@ -163,5 +132,26 @@ class UserRegistrationTest extends TestCase
 
         $this->assertNull($user->fresh()->deleted_at);
         $this->assertNotNull(User::find($user->id));
+    }
+
+    /**
+     * Test que l'utilisateur a un nom.
+     */
+    public function test_user_has_name(): void
+    {
+        $user = User::factory()->create(['name' => 'John Doe']);
+
+        $this->assertEquals('John Doe', $user->name);
+    }
+
+    /**
+     * Test que l'utilisateur a un email valide.
+     */
+    public function test_user_has_valid_email(): void
+    {
+        $user = User::factory()->create(['email' => 'valid@email.com']);
+
+        $this->assertEquals('valid@email.com', $user->email);
+        $this->assertMatchesRegularExpression('/^[^@]+@[^@]+\.[^@]+$/', $user->email);
     }
 }

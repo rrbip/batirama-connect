@@ -11,8 +11,10 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Enable ltree extension for hierarchical paths
-        DB::statement('CREATE EXTENSION IF NOT EXISTS ltree');
+        // Enable ltree extension for hierarchical paths (PostgreSQL only)
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS ltree');
+        }
 
         Schema::create('ouvrages', function (Blueprint $table) {
             $table->id();
@@ -63,12 +65,20 @@ return new class extends Migration
             $table->index('tenant_id');
         });
 
-        // Add ltree column for hierarchical paths
-        DB::statement('ALTER TABLE ouvrages ADD COLUMN path ltree');
-        DB::statement('CREATE INDEX idx_ouvrages_path ON ouvrages USING GIST(path)');
+        // PostgreSQL-specific features
+        if (DB::getDriverName() === 'pgsql') {
+            // Add ltree column for hierarchical paths
+            DB::statement('ALTER TABLE ouvrages ADD COLUMN path ltree');
+            DB::statement('CREATE INDEX idx_ouvrages_path ON ouvrages USING GIST(path)');
 
-        // Full-text search index
-        DB::statement("CREATE INDEX idx_ouvrages_search ON ouvrages USING GIN(to_tsvector('french', name || ' ' || COALESCE(description, '')))");
+            // Full-text search index
+            DB::statement("CREATE INDEX idx_ouvrages_search ON ouvrages USING GIN(to_tsvector('french', name || ' ' || COALESCE(description, '')))");
+        } else {
+            // SQLite fallback - simple text column for path
+            Schema::table('ouvrages', function (Blueprint $table) {
+                $table->string('path', 500)->nullable();
+            });
+        }
     }
 
     public function down(): void

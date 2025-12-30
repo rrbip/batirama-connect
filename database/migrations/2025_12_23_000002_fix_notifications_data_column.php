@@ -10,8 +10,8 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Convertir la colonne data de text à jsonb si nécessaire
-        if (!Schema::hasTable('notifications')) {
+        // Convertir la colonne data de text à jsonb si nécessaire (PostgreSQL only)
+        if (!Schema::hasTable('notifications') || DB::getDriverName() !== 'pgsql') {
             return;
         }
 
@@ -28,8 +28,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        // Revenir à text si nécessaire
-        if (Schema::hasTable('notifications')) {
+        // Revenir à text si nécessaire (PostgreSQL only)
+        if (Schema::hasTable('notifications') && DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE notifications ALTER COLUMN data TYPE text');
         }
     }

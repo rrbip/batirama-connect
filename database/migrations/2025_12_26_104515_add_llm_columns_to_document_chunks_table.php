@@ -34,15 +34,21 @@ return new class extends Migration
             $table->index('category_id');
         });
 
-        // Index GIN pour recherche dans les keywords JSON
-        DB::statement('CREATE INDEX idx_document_chunks_keywords ON document_chunks USING GIN(keywords)');
+        // Index GIN pour recherche dans les keywords JSON (PostgreSQL only)
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE INDEX idx_document_chunks_keywords ON document_chunks USING GIN(keywords)');
+        }
     }
 
     public function down(): void
     {
+        // Drop GIN index (PostgreSQL only)
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('DROP INDEX IF EXISTS idx_document_chunks_keywords');
+        }
+
         Schema::table('document_chunks', function (Blueprint $table) {
             $table->dropForeign(['category_id']);
-            $table->dropIndex('idx_document_chunks_keywords');
             $table->dropIndex(['category_id']);
             $table->dropColumn(['original_content', 'summary', 'keywords', 'category_id']);
         });

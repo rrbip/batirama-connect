@@ -62,8 +62,10 @@ return new class extends Migration
             $table->index('file_hash');
         });
 
-        // Full-text search index
-        DB::statement("CREATE INDEX idx_documents_content_search ON documents USING GIN(to_tsvector('french', COALESCE(title, '') || ' ' || COALESCE(extracted_text, '')))");
+        // Full-text search index (PostgreSQL only)
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement("CREATE INDEX idx_documents_content_search ON documents USING GIN(to_tsvector('french', COALESCE(title, '') || ' ' || COALESCE(extracted_text, '')))");
+        }
     }
 
     public function down(): void
