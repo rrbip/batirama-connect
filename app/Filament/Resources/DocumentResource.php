@@ -44,6 +44,13 @@ class DocumentResource extends Resource
     {
         return $form
             ->schema([
+                Forms\Components\View::make('filament.resources.document-resource.tabs-navigation')
+                    ->viewData([
+                        'currentPage' => 'edit',
+                        'activeTab' => request()->query('activeTab', 'informations'),
+                    ])
+                    ->columnSpanFull(),
+
                 Forms\Components\Tabs::make('Document')
                     ->persistTabInQueryString('activeTab')
                     ->tabs([
@@ -467,9 +474,6 @@ class DocumentResource extends Resource
                             ->id('indexation')
                             ->icon('heroicon-o-magnifying-glass')
                             ->schema([
-                                Forms\Components\View::make('filament.resources.document-resource.chunks-link')
-                                    ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
-
                                 Forms\Components\Section::make('Statut indexation')
                                     ->schema([
                                         Forms\Components\Toggle::make('is_indexed')
