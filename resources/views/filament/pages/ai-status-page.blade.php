@@ -261,9 +261,22 @@ php artisan queue:work --queue=ai-messages,default,pipeline,llm-chunking
                                     </span>
                                 </div>
 
-                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    {{ $queue['total'] }} job(s) en file
-                                </span>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {{ $queue['total'] }} job(s) en file
+                                    </span>
+                                    <button
+                                        wire:click="clearQueueJobs('{{ $queue['name'] }}')"
+                                        wire:loading.attr="disabled"
+                                        wire:target="clearQueueJobs('{{ $queue['name'] }}')"
+                                        wire:confirm="Supprimer tous les jobs de la queue '{{ $queue['name'] }}' ? Les documents seront remis en attente."
+                                        class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                        title="Vider la queue"
+                                    >
+                                        <x-heroicon-o-trash class="w-3.5 h-3.5" />
+                                        Vider
+                                    </button>
+                                </div>
                             </div>
 
                             {{-- Queue Content --}}
@@ -339,14 +352,26 @@ php artisan queue:work --queue=ai-messages,default,pipeline,llm-chunking
                                     </div>
                                     <div class="space-y-1">
                                         @foreach($queue['waiting'] as $job)
-                                            <div class="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-800 rounded text-sm">
+                                            <div class="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-800 rounded text-sm group">
                                                 <div class="flex items-center gap-2">
                                                     <span class="text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
                                                     @if($job['document'])
                                                         <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['document'] }}</span>
                                                     @endif
                                                 </div>
-                                                <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['wait_time_human'] }}</span>
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['wait_time_human'] }}</span>
+                                                    <button
+                                                        wire:click="cancelJob({{ $job['id'] }})"
+                                                        wire:loading.attr="disabled"
+                                                        wire:target="cancelJob({{ $job['id'] }})"
+                                                        wire:confirm="Supprimer ce job ?"
+                                                        class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-900/20 rounded transition"
+                                                        title="Supprimer ce job"
+                                                    >
+                                                        <x-heroicon-o-x-mark class="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         @endforeach
                                         @if($queue['total'] > count($queue['waiting']) + ($queue['processing'] ? 1 : 0))
