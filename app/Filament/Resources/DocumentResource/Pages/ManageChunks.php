@@ -141,11 +141,6 @@ class ManageChunks extends Page
     protected function getHeaderActions(): array
     {
         return [
-            Actions\Action::make('back')
-                ->label('Retour au document')
-                ->icon('heroicon-o-arrow-left')
-                ->url(DocumentResource::getUrl('edit', ['record' => $this->record])),
-
             Actions\Action::make('mergeSelected')
                 ->label('Fusionner sélection')
                 ->icon('heroicon-o-link')

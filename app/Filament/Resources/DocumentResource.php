@@ -559,17 +559,7 @@ class DocumentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Chunks')
                             ->icon('heroicon-o-squares-2x2')
                             ->schema([
-                                Forms\Components\Section::make('Chunks indexés')
-                                    ->headerActions([
-                                        Forms\Components\Actions\Action::make('manage_chunks')
-                                            ->label('Gérer les chunks')
-                                            ->icon('heroicon-o-pencil-square')
-                                            ->color('primary')
-                                            ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
-                                    ])
-                                    ->schema([
-                                        Forms\Components\View::make('filament.resources.document-resource.chunks-tab'),
-                                    ]),
+                                Forms\Components\View::make('filament.resources.document-resource.chunks-redirect'),
                             ])
                             ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
                     ])
