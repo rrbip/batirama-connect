@@ -215,6 +215,9 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         $html = preg_replace('/<footer\b[^>]*>(.*?)<\/footer>/is', '', $html);
         $html = preg_replace('/<aside\b[^>]*>(.*?)<\/aside>/is', '', $html);
 
+        // Remove empty header tags (h1-h6 with no content or just whitespace)
+        $html = preg_replace('/<h([1-6])\b[^>]*>\s*<\/h\1>/is', '', $html);
+
         // Remove comments
         $html = preg_replace('/<!--.*?-->/s', '', $html);
 
@@ -226,6 +229,10 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
      */
     protected function cleanMarkdown(string $markdown): string
     {
+        // Remove empty headers (lines that are just #, ##, etc. without text)
+        // These come from empty HTML header tags like <h2></h2>
+        $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
+
         // Fix headers that are not on their own line
         // e.g., "Some text# Header" -> "Some text\n\n# Header"
         // This is critical for MarkdownChunkerService to detect headers
