@@ -1,5 +1,40 @@
 # Système de Handoff Humain pour le Support IA
 
+## État du développement
+
+> **Dernière mise à jour** : 31/12/2024
+
+### Légende
+- ✅ Développé et testé
+- 🔨 En cours de développement
+- ⏳ À développer
+
+### Progression par composant
+
+| Composant | État | Fichiers |
+|-----------|------|----------|
+| **Onglet "Handoff Humain" (AgentResource)** | ✅ | `app/Filament/Resources/AgentResource.php` |
+| **Champs Agent model** | ✅ | `app/Models/Agent.php` |
+| **Migration champs agents** | ✅ | `database/migrations/2025_12_31_003339_add_human_support_fields_to_agents_table.php` |
+| **Table pivot agent_support_users** | ✅ | `database/migrations/2025_12_31_003401_create_agent_support_users_table.php` |
+| **Relation Agent::supportUsers()** | ✅ | `app/Models/Agent.php` |
+| Tables support (conversations, messages, etc.) | ⏳ | À créer |
+| EscalationService | ⏳ | À créer |
+| Page Filament "Support Live" | ⏳ | À créer |
+| Interface temps réel (WebSocket) | ⏳ | À créer |
+| Email bidirectionnel (IMAP) | ⏳ | À créer |
+| Gestion pièces jointes + ClamAV | ⏳ | À créer |
+| Système d'apprentissage IA | ⏳ | À créer |
+| Dashboard analytiques | ⏳ | À créer |
+
+### Migrations à exécuter
+
+```bash
+php artisan migrate
+```
+
+---
+
 ## 1. Objectifs
 
 ### 1.1 Objectif principal
@@ -2588,67 +2623,72 @@ Phase 2 (Interface Admin)
 
 ## 13. Fichiers à créer
 
+> **Légende** : ✅ = créé, ⏳ = à créer
+
 ```
 app/
 ├── Models/
-│   ├── SupportConversation.php
-│   ├── SupportMessage.php
-│   ├── SupportAttachment.php          # NOUVEAU
-│   ├── SupportEmailThread.php
-│   └── AdminAvailability.php
+│   ├── Agent.php                      ✅ MODIFIÉ (champs support + relation supportUsers)
+│   ├── SupportConversation.php        ⏳
+│   ├── SupportMessage.php             ⏳
+│   ├── SupportAttachment.php          ⏳
+│   ├── SupportEmailThread.php         ⏳
+│   └── AdminAvailability.php          ⏳
 ├── Services/
 │   └── Support/
-│       ├── EscalationService.php
-│       ├── ConversationService.php
-│       ├── SupportTrainingService.php
-│       ├── ConversationToMarkdownService.php
-│       ├── EmailReplyParser.php
-│       ├── AttachmentSecurityService.php
-│       └── AgentAssistanceService.php       # Assistance IA pour l'agent
+│       ├── EscalationService.php              ⏳
+│       ├── ConversationService.php            ⏳
+│       ├── SupportTrainingService.php         ⏳
+│       ├── ConversationToMarkdownService.php  ⏳
+│       ├── EmailReplyParser.php               ⏳
+│       ├── AttachmentSecurityService.php      ⏳
+│       └── AgentAssistanceService.php         ⏳
 ├── Events/
-│   ├── ConversationEscalated.php
-│   ├── ConversationAssigned.php
-│   ├── NewSupportMessage.php
-│   └── ConversationResolved.php
+│   ├── ConversationEscalated.php      ⏳
+│   ├── ConversationAssigned.php       ⏳
+│   ├── NewSupportMessage.php          ⏳
+│   └── ConversationResolved.php       ⏳
 ├── Listeners/
 │   └── Support/
-│       └── NotifyAdminsListener.php
+│       └── NotifyAdminsListener.php   ⏳
 ├── Jobs/
 │   └── Support/
-│       ├── NotifyAdminsOfEscalation.php
-│       ├── NotifyUserOfResponse.php
-│       ├── FetchImapEmailsJob.php           # Renommé (IMAP spécifique)
-│       ├── ProcessIncomingEmailJob.php      # NOUVEAU
-│       ├── ScanAttachmentJob.php            # NOUVEAU
-│       ├── IndexLearnedResponseJob.php
-│       └── IndexConversationAsDocumentJob.php
+│       ├── NotifyAdminsOfEscalation.php        ⏳
+│       ├── NotifyUserOfResponse.php            ⏳
+│       ├── FetchImapEmailsJob.php              ⏳
+│       ├── ProcessIncomingEmailJob.php         ⏳
+│       ├── ScanAttachmentJob.php               ⏳
+│       ├── IndexLearnedResponseJob.php         ⏳
+│       └── IndexConversationAsDocumentJob.php  ⏳
 ├── Mail/
 │   └── Support/
-│       ├── EscalationNotificationMail.php      # Notification aux agents de support
-│       ├── EscalationConfirmationMail.php      # Confirmation à l'utilisateur
-│       └── SupportResponseMail.php             # Réponse admin à l'utilisateur
+│       ├── EscalationNotificationMail.php      ⏳
+│       ├── EscalationConfirmationMail.php      ⏳
+│       └── SupportResponseMail.php             ⏳
 ├── Filament/
+│   ├── Resources/
+│   │   └── AgentResource.php          ✅ MODIFIÉ (onglet "Handoff Humain")
 │   └── Pages/
-│       ├── LiveSupport.php
-│       └── SupportAnalytics.php
+│       ├── LiveSupport.php            ⏳
+│       └── SupportAnalytics.php       ⏳
 ├── Http/
 │   └── Controllers/
-│       ├── SupportChatController.php
+│       ├── SupportChatController.php           ⏳
 │       └── Api/
-│           └── SupportWebhookController.php
+│           └── SupportWebhookController.php    ⏳
 ├── Exceptions/
-│   └── InvalidAttachmentException.php       # NOUVEAU
+│   └── InvalidAttachmentException.php          ⏳
 database/
 ├── migrations/
-│   ├── xxxx_create_support_conversations_table.php
-│   ├── xxxx_create_support_messages_table.php
-│   ├── xxxx_create_support_attachments_table.php
-│   ├── xxxx_create_support_email_threads_table.php
-│   ├── xxxx_create_admin_availability_table.php
-│   ├── xxxx_create_agent_support_users_table.php   # Pivot agents ↔ support users
-│   └── xxxx_add_support_fields_to_agents_table.php
+│   ├── 2025_12_31_003339_add_human_support_fields_to_agents_table.php  ✅ CRÉÉ
+│   ├── 2025_12_31_003401_create_agent_support_users_table.php          ✅ CRÉÉ
+│   ├── xxxx_create_support_conversations_table.php     ⏳
+│   ├── xxxx_create_support_messages_table.php          ⏳
+│   ├── xxxx_create_support_attachments_table.php       ⏳
+│   ├── xxxx_create_support_email_threads_table.php     ⏳
+│   └── xxxx_create_admin_availability_table.php        ⏳
 └── seeders/
-    └── SupportAgentRoleSeeder.php                  # Rôle "support-agent"
+    └── SupportAgentRoleSeeder.php              ⏳
 resources/
 └── views/
     ├── components/
