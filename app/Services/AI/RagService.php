@@ -222,6 +222,38 @@ class RagService
             'is_faq' => $qr['is_faq'],
         ]);
 
+        // Construire le contexte complet pour le rapport d'analyse
+        $fullContext = [
+            'system_prompt_sent' => '',
+            'conversation_history' => [],
+            'learned_sources' => [],
+            'document_sources' => [
+                [
+                    'index' => 1,
+                    'id' => $qr['point_id'] ?? null,
+                    'score' => round(($qr['score'] ?? 0) * 100, 1),
+                    'type' => $qr['is_faq'] ? 'faq' : 'qa_pair',
+                    'content' => $qr['answer'],
+                    'question' => $qr['question'],
+                    'category' => $qr['category'],
+                    'source_doc' => $qr['source'],
+                ],
+            ],
+            'category_detection' => $categoryDetection,
+            'stats' => [
+                'learned_count' => 0,
+                'document_count' => 1,
+                'history_count' => 0,
+                'context_window_size' => $agent->context_window_size,
+                'agent_slug' => $agent->slug,
+                'agent_model' => 'direct_qr_match',
+                'temperature' => 0,
+                'use_category_filtering' => $agent->use_category_filtering ?? false,
+                'response_type' => 'direct_qr_match',
+                'direct_qr_threshold' => IndexingStrategyService::DIRECT_QR_THRESHOLD,
+            ],
+        ];
+
         return new LLMResponse(
             content: $answer,
             model: 'direct_qr_match',
@@ -235,13 +267,7 @@ class RagService
                 'source' => $qr['source'],
                 'category' => $qr['category'],
                 'is_faq' => $qr['is_faq'],
-                'context' => [
-                    'category_detection' => $categoryDetection,
-                    'stats' => [
-                        'agent_slug' => $agent->slug,
-                        'response_type' => 'direct_qr_match',
-                    ],
-                ],
+                'context' => $fullContext,
             ]
         );
     }
