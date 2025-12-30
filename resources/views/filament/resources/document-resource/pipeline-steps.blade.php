@@ -45,7 +45,21 @@
     ];
 @endphp
 
-<div class="space-y-6" @if($isRunning) wire:poll.5s @endif>
+{{-- Use Alpine.js to control polling - disable when modal is open --}}
+<div
+    class="space-y-6"
+    x-data="{ modalOpen: false }"
+    @if($isRunning)
+        x-init="
+            // Only poll when no modal is open
+            setInterval(() => {
+                if (!modalOpen) {
+                    $wire.$refresh()
+                }
+            }, 5000)
+        "
+    @endif
+>
     {{-- Status global --}}
     <div class="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
         <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium
@@ -255,7 +269,7 @@
                                     @elseif(in_array($stepName, ['images_to_markdown', 'image_to_markdown', 'html_to_markdown']))
                                         <button
                                             type="button"
-                                            onclick="document.getElementById('markdown-modal-{{ $index }}').showModal()"
+                                            @click="modalOpen = true; document.getElementById('markdown-modal-{{ $index }}').showModal()"
                                             class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
                                         >
                                             <x-heroicon-o-eye class="w-4 h-4" />
@@ -290,11 +304,19 @@
 
                 {{-- Modal pour voir le Markdown --}}
                 @if(in_array($stepName, ['images_to_markdown', 'image_to_markdown', 'html_to_markdown']) && $displayStatus === 'completed')
-                    <dialog id="markdown-modal-{{ $index }}" class="rounded-lg shadow-xl max-w-4xl w-full p-0 backdrop:bg-gray-900/50">
+                    <dialog
+                        id="markdown-modal-{{ $index }}"
+                        class="rounded-lg shadow-xl max-w-4xl w-full p-0 backdrop:bg-gray-900/50"
+                        @close="modalOpen = false"
+                    >
                         <div class="bg-white dark:bg-gray-900">
                             <div class="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
                                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Markdown extrait - Étape {{ $index + 1 }}</h3>
-                                <button onclick="document.getElementById('markdown-modal-{{ $index }}').close()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                                <button
+                                    type="button"
+                                    @click="modalOpen = false; document.getElementById('markdown-modal-{{ $index }}').close()"
+                                    class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                >
                                     <x-heroicon-o-x-mark class="w-5 h-5" />
                                 </button>
                             </div>
