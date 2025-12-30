@@ -15,19 +15,17 @@
 
 @if($currentPage === 'edit')
 <style>
-    /* Hide the Filament tabs header since we use custom navigation */
-    .fi-fo-tabs .fi-tabs,
-    .fi-fo-tabs > nav,
-    .fi-fo-tabs > div > nav,
-    .hidden-tabs-header .fi-tabs,
-    .hidden-tabs-header > nav,
-    [class*="fi-fo-tabs"] > div:first-child:has(button) {
+    /* Hide only the Filament tabs header navigation buttons */
+    .hidden-tabs-header > .fi-tabs-header,
+    .hidden-tabs-header > div > .fi-tabs-header,
+    .hidden-tabs-header > nav.fi-tabs,
+    .fi-fo-tabs > .fi-fo-tabs-header {
         display: none !important;
     }
 </style>
 @endif
 
-<div wire:ignore class="fi-tabs flex max-w-full gap-x-1 overflow-x-auto rounded-xl bg-white p-2 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 mb-6">
+<div wire:ignore class="custom-tabs-nav flex max-w-full gap-x-1 overflow-x-auto rounded-xl bg-white p-2 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10 mb-6">
     {{-- Informations --}}
     <a
         href="{{ $editUrl }}?activeTab=-informations-tab"
