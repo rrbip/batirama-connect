@@ -1155,6 +1155,37 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     public function rebuildQdrantIndex(array $data): void
     {
+        // Option "Tous les agents"
+        if ($data['agent_id'] === 'all') {
+            $agents = Agent::whereNotNull('qdrant_collection')
+                ->where('is_active', true)
+                ->get();
+
+            if ($agents->isEmpty()) {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Aucun agent actif avec collection Qdrant configurée.')
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
+            // Dispatcher un job pour chaque agent
+            foreach ($agents as $agent) {
+                RebuildAgentIndexJob::dispatch($agent);
+            }
+
+            Notification::make()
+                ->title('Reconstruction lancée')
+                ->body("La reconstruction de {$agents->count()} agents a été lancée. Suivez la progression dans les logs.")
+                ->success()
+                ->send();
+
+            return;
+        }
+
+        // Agent spécifique
         $agent = Agent::find($data['agent_id']);
 
         if (! $agent || empty($agent->qdrant_collection)) {
