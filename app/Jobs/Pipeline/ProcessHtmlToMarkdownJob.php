@@ -328,9 +328,58 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
 
     /**
      * Clean up generated markdown
+     * Removes images, navigation patterns, and cleans up formatting
+     * while preserving headings, paragraphs, and lists
      */
     protected function cleanMarkdown(string $markdown): string
     {
+        // ===========================================
+        // 1. Remove images (markdown format)
+        // ===========================================
+        // Remove images with alt text: ![alt text](url)
+        $markdown = preg_replace('/!\[[^\]]*\]\([^)]+\)/', '', $markdown);
+        // Remove images without alt text: ![](url)
+        $markdown = preg_replace('/!\[\]\([^)]+\)/', '', $markdown);
+        // Remove reference-style images: ![alt][ref]
+        $markdown = preg_replace('/!\[[^\]]*\]\[[^\]]*\]/', '', $markdown);
+
+        // ===========================================
+        // 2. Remove navigation-like patterns
+        // ===========================================
+        // Remove lines that are just links (navigation items)
+        // e.g., "[Home](/) [About](/about)"
+        $markdown = preg_replace('/^\s*(\[[^\]]+\]\([^)]+\)\s*)+$/m', '', $markdown);
+
+        // Remove standalone "button" links on their own line (CTAs)
+        // e.g., "[Demander une démo](/demo)" or "[Essai gratuit](url)"
+        $ctaPatterns = [
+            'demo', 'démo', 'essai', 'contact', 'inscription', 'register',
+            'sign up', 'login', 'connexion', 'télécharger', 'download',
+            'acheter', 'buy', 'commander', 'order', 'devis', 'quote',
+        ];
+        $ctaRegex = '/^\s*\[[^\]]*(' . implode('|', $ctaPatterns) . ')[^\]]*\]\([^)]+\)\s*$/im';
+        $markdown = preg_replace($ctaRegex, '', $markdown);
+
+        // Remove breadcrumb-like patterns: "Home > Category > Page" or "Home / Category / Page"
+        $markdown = preg_replace('/^[^#\n]*([>\/]\s*[^#\n>\/]+){2,}\s*$/m', '', $markdown);
+
+        // Remove lines with just social media links
+        $socialPatterns = ['facebook', 'twitter', 'linkedin', 'instagram', 'youtube', 'tiktok', 'pinterest'];
+        $socialRegex = '/^\s*\[[^\]]*(' . implode('|', $socialPatterns) . ')[^\]]*\]\([^)]+\)\s*$/im';
+        $markdown = preg_replace($socialRegex, '', $markdown);
+
+        // ===========================================
+        // 3. Clean up short/empty lines
+        // ===========================================
+        // Remove lines that are just punctuation or very short (< 3 chars excluding whitespace)
+        $markdown = preg_replace('/^[\s\-\*\_\.\,\;\:\!\?\|]+$/m', '', $markdown);
+
+        // Remove lines that are just numbers (often from pagination)
+        $markdown = preg_replace('/^\s*\d+\s*$/m', '', $markdown);
+
+        // ===========================================
+        // 4. Fix headers formatting
+        // ===========================================
         // Fix headers that are not on their own line
         // e.g., "Some text# Header" -> "Some text\n\n# Header"
         $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
@@ -341,6 +390,9 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         // Remove empty headers (lines that are just #, ##, etc. without text)
         $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
 
+        // ===========================================
+        // 5. Final cleanup
+        // ===========================================
         // Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
