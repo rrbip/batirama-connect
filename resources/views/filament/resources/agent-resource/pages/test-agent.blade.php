@@ -390,10 +390,18 @@
 @endif
 
 ### Documents RAG ({{ count($documentSources) }} sources)
+@if(($stats['response_type'] ?? '') === 'direct_qr_match')
+Mode: REPONSE DIRECTE Q/R (score > 95%, pas d'appel LLM)
+@endif
 @foreach($documentSources as $doc)
 --- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
-Categorie: {{ $doc['metadata']['chunk_category'] ?? 'Non categorise' }}
-{{ addslashes($doc['content'] ?? '') }}
+Type: {{ $doc['type'] ?? 'unknown' }}
+Categorie: {{ $doc['category'] ?? $doc['metadata']['chunk_category'] ?? 'Non categorise' }}
+Source: {{ $doc['source_doc'] ?? $doc['metadata']['title'] ?? 'N/A' }}
+@if(!empty($doc['question']))
+Question matchee: {{ addslashes($doc['question']) }}
+@endif
+Contenu: {{ addslashes($doc['content'] ?? '') }}
 @endforeach
 
 ### Sources d'apprentissage ({{ count($learnedSources) }} cas)
@@ -405,10 +413,14 @@ R: {{ addslashes($learned['answer'] ?? '') }}
 
 ## Informations techniques
 - Modele: {{ $message['model_used'] ?? 'Non specifie' }}
+- Type de reponse: {{ ($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans appel LLM)' : 'Generation LLM' }}
 - Tokens: {{ $message['tokens'] ?? 'N/A' }}
 - Temps de generation: {{ isset($message['generation_time_ms']) ? number_format($message['generation_time_ms'] / 1000, 1) . 's' : 'N/A' }}
 - Fallback: {{ !empty($message['used_fallback_model']) ? 'Oui' : 'Non' }}
-- Filtrage par categorie: {{ $useCatFilter ? 'Active' : 'Desactive' }}`;
+- Filtrage par categorie: {{ $useCatFilter ? 'Active' : 'Desactive' }}
+@if(isset($stats['direct_qr_threshold']))
+- Seuil reponse directe: {{ $stats['direct_qr_threshold'] * 100 }}%
+@endif`;
                                                 }
                                             }">
                                                 {{-- Bouton d'ouverture --}}
@@ -652,23 +664,45 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                 <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
                                                                                     <x-heroicon-o-document-text class="w-5 h-5" />
                                                                                     3. Documents indexes - RAG ({{ count($documentSources) }})
+                                                                                    @if(($stats['response_type'] ?? '') === 'direct_qr_match')
+                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100">
+                                                                                            Réponse directe Q/R
+                                                                                        </span>
+                                                                                    @endif
                                                                                 </span>
                                                                             </summary>
                                                                             <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                                                                                 @foreach($documentSources as $doc)
+                                                                                    @php
+                                                                                        $docCategory = $doc['category'] ?? $doc['metadata']['chunk_category'] ?? $doc['metadata']['category'] ?? null;
+                                                                                        $docTitle = $doc['source_doc'] ?? $doc['metadata']['title'] ?? $doc['metadata']['filename'] ?? null;
+                                                                                        $docType = $doc['type'] ?? 'unknown';
+                                                                                        $docQuestion = $doc['question'] ?? null;
+                                                                                    @endphp
                                                                                     <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                                                                                        <details>
+                                                                                        <details {{ $loop->first ? 'open' : '' }}>
                                                                                             <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
                                                                                                 <span class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-2">
                                                                                                     Document #{{ $doc['index'] ?? $loop->iteration }}
-                                                                                                    @if(isset($doc['metadata']['title']))
-                                                                                                        - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
-                                                                                                    @elseif(isset($doc['metadata']['filename']))
-                                                                                                        - {{ $doc['metadata']['filename'] }}
+                                                                                                    @if($docTitle)
+                                                                                                        - {{ \Illuminate\Support\Str::limit($docTitle, 50) }}
                                                                                                     @endif
-                                                                                                    @if(isset($doc['metadata']['chunk_category']))
+                                                                                                    @if($docType === 'qa_pair')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100">
+                                                                                                            Q/R
+                                                                                                        </span>
+                                                                                                    @elseif($docType === 'faq')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
+                                                                                                            FAQ
+                                                                                                        </span>
+                                                                                                    @elseif($docType === 'source_material')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                                                                                                            Source
+                                                                                                        </span>
+                                                                                                    @endif
+                                                                                                    @if($docCategory)
                                                                                                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
-                                                                                                            {{ $doc['metadata']['chunk_category'] }}
+                                                                                                            {{ $docCategory }}
                                                                                                         </span>
                                                                                                     @endif
                                                                                                 </span>
@@ -676,14 +710,23 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                     {{ $doc['score'] ?? 0 }}% pertinent
                                                                                                 </span>
                                                                                             </summary>
-                                                                                            <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
-                                                                                                @if(isset($doc['metadata']['summary']))
-                                                                                                    <div class="mb-3 p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700">
-                                                                                                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mb-1">Résumé</p>
-                                                                                                        <p class="text-sm text-blue-800 dark:text-blue-100">{{ $doc['metadata']['summary'] }}</p>
+                                                                                            <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                                                                                                @if($docQuestion)
+                                                                                                    <div class="p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700">
+                                                                                                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mb-1">Question matchée</p>
+                                                                                                        <p class="text-sm text-blue-800 dark:text-blue-100">{{ $docQuestion }}</p>
                                                                                                     </div>
                                                                                                 @endif
-                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                @if(isset($doc['metadata']['summary']))
+                                                                                                    <div class="p-2 bg-purple-50 dark:bg-purple-900/30 rounded border border-purple-200 dark:border-purple-700">
+                                                                                                        <p class="text-xs font-semibold text-purple-600 dark:text-purple-300 uppercase tracking-wide mb-1">Résumé</p>
+                                                                                                        <p class="text-sm text-purple-800 dark:text-purple-100">{{ $doc['metadata']['summary'] }}</p>
+                                                                                                    </div>
+                                                                                                @endif
+                                                                                                <div>
+                                                                                                    <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Contenu / Réponse</p>
+                                                                                                    <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-white dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-600">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                </div>
                                                                                             </div>
                                                                                         </details>
                                                                                     </div>
