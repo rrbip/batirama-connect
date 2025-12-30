@@ -281,6 +281,22 @@ Schema::table('agents', function (Blueprint $table) {
     // Horaires de support (JSON)
     $table->json('support_hours')->nullable();
     // {"monday": {"start": "09:00", "end": "18:00"}, ...}
+
+    // Configuration email bidirectionnel
+    $table->json('email_config')->nullable();
+    // {
+    //   "enabled": true,
+    //   "provider": "mailgun",  // "mailgun", "sendgrid", "imap"
+    //   "from_address": "support@domain.com",
+    //   "from_name": "Support BTP",
+    //   "reply_domain": "reply.domain.com",  // pour support+conv_123@reply.domain.com
+    //   // Si IMAP:
+    //   "imap_host": "imap.example.com",
+    //   "imap_port": 993,
+    //   "imap_username": "...",
+    //   "imap_password": "...",  // Encrypted
+    //   "imap_poll_interval": 60  // secondes
+    // }
 });
 ```
 
@@ -292,11 +308,63 @@ Agent Settings → Support Humain
 ├── Seuil de confiance: [0.60] (slider 0.0 - 1.0)
 ├── Message d'escalade: [textarea]
 ├── Message hors horaires: [textarea]
-├── Email notifications: [support@example.com]
+├── Email notifications admins: [support@example.com]
 └── Horaires de support:
     ├── Lundi: [09:00] - [18:00]
     ├── Mardi: [09:00] - [18:00]
     └── ...
+
+Agent Settings → Email Bidirectionnel (module Déploiement Agent IA)
+├── [x] Activer la réception email
+├── Fournisseur: [Mailgun ▼] (Mailgun, SendGrid, IMAP)
+├── Adresse d'envoi: [support@domain.com]
+├── Nom expéditeur: [Support BTP]
+├── Domaine de réponse: [reply.domain.com]
+│   → Les utilisateurs répondront à: support+conv_{id}@reply.domain.com
+│
+├── Si IMAP sélectionné:
+│   ├── Serveur IMAP: [imap.example.com]
+│   ├── Port: [993]
+│   ├── Utilisateur: [...]
+│   ├── Mot de passe: [***]
+│   └── Fréquence de polling: [60] secondes
+│
+└── [Tester la connexion]
+```
+
+### 4.3 Intégration dans les modules
+
+Le système de support humain s'intègre dans les modules existants :
+
+| Module | Fonctionnalités concernées |
+|--------|---------------------------|
+| **Agents IA** | Configuration escalade (seuil, messages, horaires), apprentissage Q/R |
+| **Déploiement Agent IA** | Configuration email (fournisseur, IMAP/webhooks, domaine réponse) |
+| **Dashboard Admin** | Interface support live, analytiques, gestion conversations |
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    INTÉGRATION MODULES                                      │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Module "Agents IA"                                                        │
+│  ├── Configuration agent                                                   │
+│  │   ├── Support humain (on/off)                                          │
+│  │   ├── Seuil d'escalade                                                 │
+│  │   ├── Messages personnalisés                                           │
+│  │   └── Horaires de support                                              │
+│  └── Apprentissage                                                         │
+│      ├── Validation Q/R depuis sessions                                   │
+│      └── Validation Q/R depuis support (nouveau)                          │
+│                                                                             │
+│  Module "Déploiement Agent IA"                                             │
+│  ├── Configuration email sortant (déjà existant)                          │
+│  └── Configuration email entrant (nouveau)                                │
+│      ├── Choix fournisseur (Mailgun/SendGrid/IMAP)                       │
+│      ├── Webhooks ou polling IMAP                                         │
+│      └── Test de connexion                                                │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -1167,7 +1235,54 @@ class FetchIncomingEmailsJob implements ShouldQueue
 }
 ```
 
-### 8.4 Template email avec bouton retour chat
+### 8.4 Templates email
+
+#### Premier email (confirmation d'escalade) - avec instructions anti-spam
+
+```blade
+{{-- resources/views/emails/support/escalation-confirmation.blade.php --}}
+@component('mail::message')
+# Votre demande #{{ $conversation->id }} a été enregistrée
+
+Bonjour,
+
+Nous avons bien reçu votre demande et notre équipe vous répondra dans les plus brefs délais.
+
+@component('mail::panel')
+**Votre question :**
+{{ $userQuestion }}
+@endcomponent
+
+---
+
+## 📧 Important : Assurez-vous de recevoir nos réponses
+
+Pour être certain de recevoir nos emails de réponse, nous vous recommandons de :
+
+1. **Ajouter notre adresse à vos contacts** : `{{ $fromAddress }}`
+2. **Vérifier vos courriers indésirables** (spam) - si vous y trouvez notre email, marquez-le comme "Non spam"
+3. **Autoriser notre domaine** : `{{ $replyDomain }}`
+
+@component('mail::subcopy')
+💡 **Astuce** : Sur Gmail, cliquez sur les 3 points → "Filtrer les messages similaires" → "Ne jamais envoyer dans le spam"
+@endcomponent
+
+---
+
+**Vous pouvez répondre directement à cet email** pour ajouter des informations à votre demande.
+
+Ou suivre votre demande en ligne :
+
+@component('mail::button', ['url' => $chatUrl, 'color' => 'primary'])
+💬 Voir ma demande
+@endcomponent
+
+Cordialement,<br>
+{{ $conversation->agent->name }}
+@endcomponent
+```
+
+#### Email de réponse admin
 
 ```blade
 {{-- resources/views/emails/support/response.blade.php --}}
@@ -1198,12 +1313,129 @@ Ou si vous préférez, utilisez notre interface de chat :
 <small>Notre équipe vous répondra dès que possible.</small>
 @endif
 
+---
+
+@component('mail::subcopy')
+📧 Vous ne recevez pas nos emails ? [Consultez notre guide]({{ $whitelistGuideUrl }}) pour ajouter notre adresse à vos contacts.
+@endcomponent
+
 Cordialement,<br>
 {{ $conversation->agent->name }}
 @endcomponent
 ```
 
-### 8.5 Contrôleur de reprise de chat
+### 8.5 Configuration des fournisseurs email
+
+#### Option A : Webhooks (recommandé)
+
+```php
+// config/services.php
+'mailgun' => [
+    'domain' => env('MAILGUN_DOMAIN'),
+    'secret' => env('MAILGUN_SECRET'),
+    'webhook_signing_key' => env('MAILGUN_WEBHOOK_SIGNING_KEY'),
+],
+
+'sendgrid' => [
+    'api_key' => env('SENDGRID_API_KEY'),
+    'webhook_signing_key' => env('SENDGRID_WEBHOOK_SIGNING_KEY'),
+],
+```
+
+```php
+// routes/api.php
+Route::post('/webhooks/mailgun/inbound', [SupportWebhookController::class, 'mailgunInbound'])
+    ->name('webhooks.mailgun.inbound');
+
+Route::post('/webhooks/sendgrid/inbound', [SupportWebhookController::class, 'sendgridInbound'])
+    ->name('webhooks.sendgrid.inbound');
+```
+
+```php
+// app/Http/Controllers/Api/SupportWebhookController.php
+class SupportWebhookController extends Controller
+{
+    public function mailgunInbound(Request $request)
+    {
+        // Vérifier la signature Mailgun
+        if (!$this->verifyMailgunSignature($request)) {
+            abort(401);
+        }
+
+        // Traiter l'email entrant
+        dispatch(new ProcessIncomingEmailJob(
+            to: $request->input('recipient'),
+            from: $request->input('from'),
+            subject: $request->input('subject'),
+            body: $request->input('body-plain') ?? $request->input('stripped-text'),
+            messageId: $request->input('Message-Id'),
+        ));
+
+        return response('OK', 200);
+    }
+}
+```
+
+#### Option B : IMAP Polling
+
+```php
+// app/Console/Kernel.php
+protected function schedule(Schedule $schedule): void
+{
+    // Polling IMAP pour les agents configurés en IMAP
+    $schedule->job(new FetchImapEmailsJob())
+        ->everyMinute()
+        ->withoutOverlapping()
+        ->runInBackground();
+}
+```
+
+```php
+// app/Jobs/Support/FetchImapEmailsJob.php
+class FetchImapEmailsJob implements ShouldQueue
+{
+    public function handle(): void
+    {
+        // Récupérer tous les agents avec IMAP configuré
+        $agents = Agent::whereJsonContains('email_config->provider', 'imap')
+            ->whereJsonContains('email_config->enabled', true)
+            ->get();
+
+        foreach ($agents as $agent) {
+            $this->fetchEmailsForAgent($agent);
+        }
+    }
+
+    private function fetchEmailsForAgent(Agent $agent): void
+    {
+        $config = $agent->email_config;
+
+        $mailbox = new ImapMailbox(
+            host: $config['imap_host'],
+            port: $config['imap_port'],
+            username: $config['imap_username'],
+            password: decrypt($config['imap_password']),
+        );
+
+        $emails = $mailbox->fetchUnread();
+
+        foreach ($emails as $email) {
+            dispatch(new ProcessIncomingEmailJob(
+                to: $email->to,
+                from: $email->from,
+                subject: $email->subject,
+                body: $email->textBody,
+                messageId: $email->messageId,
+            ));
+
+            // Marquer comme lu
+            $mailbox->markAsRead($email->uid);
+        }
+    }
+}
+```
+
+### 8.6 Contrôleur de reprise de chat
 
 ```php
 <?php
@@ -1384,7 +1616,15 @@ class SupportChatController extends Controller
 4. **Chatbot widget** : Intégrer sur sites externes ou uniquement backoffice ?
 5. **SLA** : Définir des niveaux de service avec alertes ?
 6. **Escalade en chaîne** : Permettre escalade admin → admin senior ?
-7. **Fournisseur email** : Mailgun, SendGrid, ou IMAP direct ?
+
+### Questions résolues
+
+| Question | Décision |
+|----------|----------|
+| **Fournisseur email** | Configurable par agent : Mailgun (webhooks), SendGrid (webhooks), ou IMAP (polling 1min) |
+| **Connexion boîte mail** | Webhooks recommandés (temps réel), IMAP en alternative avec polling toutes les minutes |
+| **Instructions anti-spam** | Incluses dans le premier email de confirmation avec guide de whitelist |
+| **Intégration modules** | Support humain dans "Agents IA", email config dans "Déploiement Agent IA" |
 
 ---
 
