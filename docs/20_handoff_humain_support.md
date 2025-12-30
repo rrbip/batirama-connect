@@ -834,14 +834,15 @@ L'IA assiste l'agent humain à plusieurs niveaux pour garantir des réponses de 
 │     ├── L'IA génère une réponse basée sur les sources trouvées             │
 │     └── L'agent peut modifier avant envoi                                   │
 │                                                                              │
-│  3. RELECTURE AVANT ENVOI (mode email uniquement)                           │
-│     ├── Quand utilisateur offline → réponse envoyée par email              │
-│     ├── Popup de confirmation avec preview                                  │
-│     ├── Bouton "✨ Améliorer avec l'IA"                                     │
-│     │   ├── Correction orthographe/grammaire                               │
+│  3. RELECTURE AVANT ENVOI (chat ET email)                                   │
+│     ├── Bouton "✨ Améliorer" à côté du textarea                           │
+│     ├── Mode chat: amélioration inline (remplace le texte)                 │
+│     ├── Mode email: popup de confirmation avec preview                     │
+│     ├── Corrections appliquées:                                            │
+│     │   ├── Orthographe/grammaire                                          │
 │     │   ├── Reformulation plus claire                                       │
-│     │   └── Ajout de formules de politesse                                 │
-│     └── Diff avant/après pour validation                                    │
+│     │   └── Formules de politesse (configurable par agent)                 │
+│     └── Diff avant/après pour validation (Ctrl+Z pour annuler)             │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -859,13 +860,15 @@ L'IA assiste l'agent humain à plusieurs niveaux pour garantir des réponses de 
 │                                                                             │
 │  ───────────────────────────────────────────────────────────────────────── │
 │                                                                             │
-│  📝 Votre réponse:                                                         │
+│  📝 Votre réponse:                                        [✨ Améliorer]   │
 │  ┌───────────────────────────────────────────────────────────────────────┐ │
 │  │ Pour annuler une facture validée, vous devez créer un avoir.         │ │
 │  │ Allez dans Facturation > Avoirs > Nouveau...                         │ │
 │  └───────────────────────────────────────────────────────────────────────┘ │
 │                                                                             │
 │  [Envoyer 📧] [🤖 Générer suggestion] [💾 Sauver Q/R ▼] [Clôturer ▼]      │
+│                                                                             │
+│  💡 Le bouton "Améliorer" corrige et reformule votre texte avant envoi    │
 │                                                                             │
 │  ───────────────────────────────────────────────────────────────────────── │
 │                                                                             │
@@ -888,7 +891,7 @@ L'IA assiste l'agent humain à plusieurs niveaux pour garantir des réponses de 
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Modal de confirmation email (utilisateur offline)
+#### Modal de confirmation (mode email / utilisateur offline)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1014,21 +1017,43 @@ class AgentAssistanceService
     }
 
     /**
-     * Améliore une réponse avant envoi email
+     * Améliore une réponse avant envoi (chat ou email)
+     *
+     * @param string $draftResponse Le brouillon de l'agent
+     * @param SupportConversation $conversation
+     * @param string $mode 'chat' ou 'email'
+     * @return array ['original', 'improved', 'corrections']
      */
-    public function improveForEmail(string $draftResponse, SupportConversation $conversation): array
-    {
+    public function improveResponse(
+        string $draftResponse,
+        SupportConversation $conversation,
+        string $mode = 'chat'
+    ): array {
+        $agent = $conversation->agent;
+        $config = $agent->ai_assistance_config ?? [];
+
+        // Formules de politesse uniquement si configuré ou mode email
+        $addPoliteness = $mode === 'email' || ($config['add_politeness'] ?? false);
+
         $prompt = <<<PROMPT
-        Améliore cette réponse de support qui sera envoyée par email.
+        Améliore cette réponse de support.
 
         Réponse originale:
         {$draftResponse}
 
+        Mode: {$mode}
+
         Améliorations à faire:
-        1. Ajouter une formule de politesse appropriée (Bonjour/Cordialement)
-        2. Corriger les fautes d'orthographe et de grammaire
-        3. Améliorer la clarté et la mise en forme si nécessaire
-        4. Garder le sens et les informations originales
+        1. Corriger les fautes d'orthographe et de grammaire
+        2. Améliorer la clarté et la mise en forme si nécessaire
+        3. Garder le sens et les informations originales
+        PROMPT;
+
+        if ($addPoliteness) {
+            $prompt .= "\n4. Ajouter une formule de politesse appropriée (Bonjour/Cordialement)";
+        }
+
+        $prompt .= <<<PROMPT
 
         Réponds en JSON:
         {
@@ -1047,6 +1072,7 @@ class AgentAssistanceService
             'original' => $draftResponse,
             'improved' => $result['improved_text'],
             'corrections' => $result['corrections'],
+            'mode' => $mode,
         ];
     }
 }
@@ -1058,10 +1084,12 @@ class AgentAssistanceService
 // Nouveaux champs dans la table agents
 $table->json('ai_assistance_config')->nullable();
 // {
-//   "suggestions_enabled": true,      // Afficher le panneau de sources
+//   "suggestions_enabled": true,      // Afficher le panneau de sources RAG
 //   "auto_generate_enabled": false,   // Bouton "Générer suggestion"
-//   "email_review_enabled": true,     // Relecture avant envoi email
-//   "email_review_required": false,   // Obligatoire ou optionnel
+//   "improve_enabled": true,          // Bouton "Améliorer" (chat + email)
+//   "add_politeness": false,          // Ajouter formules de politesse en mode chat
+//                                     // (toujours actif en mode email)
+//   "email_confirm_required": true,   // Popup de confirmation pour emails
 //   "improvement_prompt": "..."       // Prompt personnalisé (optionnel)
 // }
 ```
