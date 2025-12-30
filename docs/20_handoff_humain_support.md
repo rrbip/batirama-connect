@@ -1776,34 +1776,104 @@ class SupportChatController extends Controller
 
 ## 10. Plan d'implémentation
 
-### Phase 1 : Base
-- [ ] Migrations (tables support_conversations, support_messages, admin_availability, support_email_threads)
+### Estimation globale
+
+| Phase | Description | Durée estimée |
+|-------|-------------|---------------|
+| **Phase 1** | Base (modèles, services, migrations) | **6-7 jours** |
+| **Phase 2** | Interface Admin Filament | **7-8 jours** |
+| **Phase 3** | Temps réel (WebSocket) | **4-5 jours** |
+| **Phase 4** | Email bidirectionnel + pièces jointes | **7-8 jours** |
+| **Phase 5** | Apprentissage IA (double flux) | **5-6 jours** |
+| **Phase 6** | Analytiques et reporting | **5-6 jours** |
+| | **Sous-total développement** | **34-40 jours** |
+| | Tests d'intégration + corrections (+20%) | **7-8 jours** |
+| | **TOTAL** | **41-48 jours** |
+
+> **Estimation pour 1 développeur senior** : 8 à 10 semaines de travail effectif
+>
+> **Prérequis** : Stack Laravel/Filament maîtrisée, expérience WebSocket et queues
+
+---
+
+### Phase 1 : Base (6-7 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Migrations | 5 tables (support_conversations, support_messages, support_attachments, support_email_threads, admin_availability) + alter agents | 2 jours |
+| Models Eloquent | 5 models + relations, casts, scopes | 1 jour |
+| EscalationService | shouldEscalate(), getAvailableAdmin(), isWithinSupportHours(), escalate() | 2 jours |
+| Intégration RagService | Modifier chat() pour détecter et gérer l'escalade | 1 jour |
+| Message utilisateur | Affichage message d'escalade dans le widget | 0.5 jour |
+
+- [ ] Migrations (tables support_conversations, support_messages, support_attachments, admin_availability, support_email_threads)
 - [ ] Models Eloquent + relations
 - [ ] EscalationService (logique de base)
 - [ ] Intégration RagService (détection escalade)
 - [ ] Message utilisateur lors de l'escalade
 
-### Phase 2 : Interface Admin
+### Phase 2 : Interface Admin (7-8 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Page Filament "Support Live" | Layout de base, routing, permissions | 2 jours |
+| Liste conversations | Filtres, tri, indicateurs visuels (canal, temps d'attente) | 1.5 jours |
+| Vue conversation | Historique messages, contexte RAG, affichage pièces jointes | 2 jours |
+| Formulaire réponse | Textarea, envoi, templates rapides | 1 jour |
+| Actions de clôture | Menu dropdown avec types de résolution | 1 jour |
+
 - [ ] Page Filament "Support Live"
 - [ ] Liste des conversations escaladées (avec indicateur canal chat/email)
 - [ ] Vue conversation avec historique
 - [ ] Formulaire de réponse
 - [ ] Actions de clôture
 
-### Phase 3 : Temps réel
+### Phase 3 : Temps réel (4-5 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Configuration Echo | Installation Pusher/Soketi, config broadcasting | 1.5 jours |
+| Events | ConversationEscalated, NewMessage, ConversationResolved, AdminStatusChanged | 1 jour |
+| Listeners côté admin | Mise à jour temps réel de l'interface, compteurs | 1 jour |
+| Notifications sonores | Son lors de nouvelle conversation/message | 0.5 jour |
+| Widget utilisateur live | Réception des messages admin en temps réel | 1 jour |
+
 - [ ] Configuration Laravel Echo + Pusher/Soketi
 - [ ] Events (ConversationEscalated, NewMessage, etc.)
 - [ ] Listeners côté admin
 - [ ] Notifications sonores
 
-### Phase 4 : Email bidirectionnel
+### Phase 4 : Email bidirectionnel + pièces jointes (7-8 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Configuration IMAP | Interface Filament, connexion boîte mail, test | 1.5 jours |
+| EmailReplyParser | Extraction contenu sans citations/signatures | 1 jour |
+| FetchImapEmailsJob | Scheduler, lecture IMAP, gestion erreurs | 1 jour |
+| Templates email | Confirmation escalade (avec anti-spam), réponse admin | 1 jour |
+| Contrôleur reprise chat | URL signée, vérification token, widget | 1 jour |
+| AttachmentSecurityService | Validation, stockage sécurisé, intégration ClamAV | 1.5 jours |
+| ProcessIncomingEmailJob | Attachements email → SupportAttachment | 1 jour |
+
 - [ ] Configuration boîte mail (IMAP ou webhook Mailgun/SendGrid)
 - [ ] EmailReplyParser pour extraire les réponses
 - [ ] FetchIncomingEmailsJob (scheduler toutes les minutes)
 - [ ] Templates email avec bouton retour chat
 - [ ] Contrôleur de reprise de conversation
+- [ ] AttachmentSecurityService + ScanAttachmentJob
 
-### Phase 5 : Apprentissage IA (double flux)
+### Phase 5 : Apprentissage IA (5-6 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Composant Blade partagé | `<x-support.qr-correction-form>` avec Alpine.js | 1 jour |
+| Refactor page Sessions | Remplacer code existant par composant partagé | 1 jour |
+| Intégration Support Live | Bouton "Sauver Q/R" sur chaque échange | 0.5 jour |
+| SupportTrainingService | saveQrPair(), création learned_response | 0.5 jour |
+| ConversationToMarkdownService | Conversion chat → Markdown optimisé | 1 jour |
+| IndexConversationAsDocumentJob | Création Document + dispatch pipeline | 1 jour |
+| UI options clôture | Checkboxes apprentissage dans modal clôture | 0.5 jour |
+
 - [ ] Composant Blade partagé `<x-support.qr-correction-form>`
 - [ ] Intégration dans page Sessions (refactor existant)
 - [ ] Intégration dans page Support Live
@@ -1811,11 +1881,40 @@ class SupportChatController extends Controller
 - [ ] IndexConversationAsDocumentJob
 - [ ] Options de clôture avec checkboxes apprentissage
 
-### Phase 6 : Analytiques
+### Phase 6 : Analytiques (5-6 jours)
+
+| Tâche | Détail | Durée |
+|-------|--------|-------|
+| Dashboard métriques | Widgets Filament : taux escalade, temps réponse, satisfaction | 2 jours |
+| Graphiques temporels | Chart.js : évolution par jour/semaine | 1 jour |
+| Export rapports | CSV/Excel des conversations | 1 jour |
+| Alertes | Notifications si seuils dépassés (email + dashboard) | 1 jour |
+| Suggestions automatiques | Détection questions fréquentes → suggestion FAQ | 1 jour |
+
 - [ ] Dashboard métriques
 - [ ] Export rapports
 - [ ] Alertes (taux escalade élevé, temps réponse long)
 - [ ] Suggestions automatiques (FAQ à créer)
+
+---
+
+### Ordre de dépendances
+
+```
+Phase 1 (Base)
+    ↓
+Phase 2 (Interface Admin)
+    ↓
+    ├──→ Phase 3 (Temps réel)
+    │
+    └──→ Phase 4 (Email)
+              ↓
+         Phase 5 (Apprentissage)
+              ↓
+         Phase 6 (Analytiques)
+```
+
+> **Parallélisation possible** : Les phases 3 et 4 peuvent être développées en parallèle par 2 développeurs, réduisant le temps total à ~6-7 semaines.
 
 ---
 
