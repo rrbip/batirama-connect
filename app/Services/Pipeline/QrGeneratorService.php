@@ -59,12 +59,18 @@ class QrGeneratorService
         $categoryName = $result['category'] ?? 'DIVERS';
         $category = $this->findOrCreateCategory($categoryName);
 
-        // Update chunk with Q/R data
+        // Update chunk with Q/R data and raw LLM response
         $chunk->update([
             'useful' => $result['useful'],
             'knowledge_units' => $result['knowledge_units'] ?? [],
             'summary' => $result['summary'] ?? null,
             'category_id' => $category->id,
+            'metadata' => array_merge($chunk->metadata ?? [], [
+                'llm_raw_response' => $llmResponse,
+                'llm_model' => $model,
+                'llm_temperature' => $temperature,
+                'llm_processed_at' => now()->toIso8601String(),
+            ]),
         ]);
 
         // Index to Qdrant if useful
@@ -123,17 +129,18 @@ class QrGeneratorService
 {$contextInfo}Analyse le texte suivant et génère des paires Question/Réponse.
 
 RÈGLES IMPORTANTES:
-1. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
-2. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
-3. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
-4. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
+1. RÉPONDS TOUJOURS EN FRANÇAIS - toutes les questions, réponses et résumés doivent être en français
+2. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
+3. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
+4. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
+5. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
 
 Catégories existantes: {$categoriesList}
 
 TEXTE À ANALYSER:
 {$content}
 
-RÉPONDS UNIQUEMENT avec un JSON valide au format suivant:
+RÉPONDS UNIQUEMENT EN FRANÇAIS avec un JSON valide au format suivant:
 {
   "useful": true,
   "category": "NOM_CATEGORIE",

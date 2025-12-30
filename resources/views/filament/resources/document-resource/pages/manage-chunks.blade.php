@@ -322,8 +322,30 @@
                                     <span>📄</span>
                                     <span>Contenu source :</span>
                                 </div>
-                                <div class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-800 rounded-lg p-3 pl-6">{{ $chunk->original_content ?? $chunk->content }}</div>
+                                <div class="text-sm whitespace-pre-wrap max-h-64 overflow-y-auto rounded-lg p-4 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono leading-relaxed">{!! nl2br(e($chunk->original_content ?? $chunk->content)) !!}</div>
                             </div>
+
+                            {{-- Raw LLM Response (collapsible) --}}
+                            @if($chunk->metadata && isset($chunk->metadata['llm_raw_response']))
+                                <details class="group">
+                                    <summary class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer hover:text-primary-600 dark:hover:text-primary-400">
+                                        <x-heroicon-o-chevron-right class="w-4 h-4 transition-transform group-open:rotate-90" />
+                                        <span>🔧</span>
+                                        <span>Données brutes LLM</span>
+                                        @if(isset($chunk->metadata['llm_model']))
+                                            <span class="text-xs text-gray-400">({{ $chunk->metadata['llm_model'] }})</span>
+                                        @endif
+                                    </summary>
+                                    <div class="mt-2 ml-6">
+                                        <pre class="text-xs whitespace-pre-wrap max-h-96 overflow-y-auto rounded-lg p-4 bg-gray-900 text-green-400 font-mono border border-gray-700">{{ $chunk->metadata['llm_raw_response'] }}</pre>
+                                        @if(isset($chunk->metadata['llm_processed_at']))
+                                            <p class="mt-1 text-xs text-gray-400">
+                                                Traité le {{ \Carbon\Carbon::parse($chunk->metadata['llm_processed_at'])->format('d/m/Y H:i') }}
+                                            </p>
+                                        @endif
+                                    </div>
+                                </details>
+                            @endif
 
                             {{-- Context breadcrumb --}}
                             @if($chunk->parent_context)
