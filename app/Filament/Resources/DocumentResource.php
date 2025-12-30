@@ -357,9 +357,21 @@ class DocumentResource extends Resource
                                                         $jobCount = \DB::table('jobs')->where('queue', 'pipeline')->count();
                                                         $totalJobs = \DB::table('jobs')->count();
 
+                                                        // Debug: check if pipeline_steps was saved
+                                                        $pipelineSteps = $record->pipeline_steps;
+                                                        $stepsCount = count($pipelineSteps['steps'] ?? []);
+                                                        $pipelineStatus = $pipelineSteps['status'] ?? 'N/A';
+
+                                                        \Log::info('Pipeline started - state check', [
+                                                            'document_id' => $record->id,
+                                                            'pipeline_status' => $pipelineStatus,
+                                                            'steps_count' => $stepsCount,
+                                                            'extraction_status' => $record->extraction_status,
+                                                        ]);
+
                                                         Notification::make()
                                                             ->title('Pipeline relancé')
-                                                            ->body("Type: {$documentType} | Queue: {$queueDriver} | Jobs pipeline: {$jobCount} | Total jobs: {$totalJobs}")
+                                                            ->body("Type: {$documentType} | Étapes: {$stepsCount} | Status: {$pipelineStatus} | Queue: {$queueDriver} | Jobs: {$jobCount}")
                                                             ->success()
                                                             ->send();
 
