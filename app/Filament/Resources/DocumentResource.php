@@ -48,6 +48,7 @@ class DocumentResource extends Resource
                     ->persistTabInQueryString('activeTab')
                     ->tabs([
                         Forms\Components\Tabs\Tab::make('Informations')
+                            ->id('informations')
                             ->icon('heroicon-o-information-circle')
                             ->schema([
                                 // Section Agent (obligatoire)
@@ -309,6 +310,7 @@ class DocumentResource extends Resource
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Pipeline')
+                            ->id('pipeline')
                             ->icon('heroicon-o-adjustments-horizontal')
                             ->schema([
                                 // Pipeline Steps (Vue Blade dédiée)
@@ -462,6 +464,7 @@ class DocumentResource extends Resource
                             ->visible(fn ($record) => $record !== null),
 
                         Forms\Components\Tabs\Tab::make('Indexation')
+                            ->id('indexation')
                             ->icon('heroicon-o-magnifying-glass')
                             ->schema([
                                 Forms\Components\View::make('filament.resources.document-resource.chunks-link')
