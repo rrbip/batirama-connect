@@ -11,8 +11,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Observer pour DocumentChunk
  *
- * Gère automatiquement la suppression des points Qdrant
- * quand un chunk est supprimé.
+ * Gère automatiquement:
+ * - La suppression des points Qdrant quand un chunk est supprimé
+ * - La mise à jour des compteurs de catégories
+ * - La suppression des catégories orphelines générées par l'IA
  */
 class DocumentChunkObserver
 {
@@ -27,6 +29,7 @@ class DocumentChunkObserver
     public function deleting(DocumentChunk $chunk): void
     {
         $this->removeFromQdrant($chunk);
+        $this->handleCategoryCleanup($chunk);
     }
 
     /**
@@ -36,6 +39,7 @@ class DocumentChunkObserver
     public function forceDeleting(DocumentChunk $chunk): void
     {
         $this->removeFromQdrant($chunk);
+        $this->handleCategoryCleanup($chunk);
     }
 
     /**
@@ -83,6 +87,37 @@ class DocumentChunkObserver
                 'collection' => $collection,
                 'error' => $e->getMessage(),
             ]);
+        }
+    }
+
+    /**
+     * Gère le nettoyage de la catégorie quand un chunk est supprimé
+     */
+    private function handleCategoryCleanup(DocumentChunk $chunk): void
+    {
+        if (!$chunk->category_id) {
+            return;
+        }
+
+        $category = $chunk->category;
+        if (!$category) {
+            return;
+        }
+
+        // Décrémente le compteur d'utilisation
+        $category->decrementUsage();
+
+        // Recharge pour avoir le compteur à jour
+        $category->refresh();
+
+        // Si la catégorie n'est plus utilisée ET est générée par l'IA, on la supprime
+        if ($category->usage_count <= 0 && $category->is_ai_generated) {
+            Log::info('DocumentChunkObserver: Deleting orphan AI-generated category', [
+                'category_id' => $category->id,
+                'category_name' => $category->name,
+            ]);
+
+            $category->delete();
         }
     }
 
