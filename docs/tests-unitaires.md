@@ -160,18 +160,32 @@ public function test_updated_user_can_login(): void
 ## Commandes
 
 ```bash
-# Lancer tous les tests
-php artisan test
+# Lancer tous les tests (depuis le conteneur Docker)
+docker compose exec app php artisan test
+
+# Lancer les tests d'authentification
+docker compose exec app php artisan test --testsuite=Feature
 
 # Lancer un fichier spécifique
-php artisan test tests/Unit/Services/Pipeline/MarkdownChunkerServiceTest.php
+docker compose exec app php artisan test tests/Feature/Auth/UserAuthenticationTest.php
 
 # Lancer avec couverture
-php artisan test --coverage
+docker compose exec app php artisan test --coverage
 
 # Lancer en parallèle
-php artisan test --parallel
+docker compose exec app php artisan test --parallel
+
+# Alternative : entrer dans le conteneur puis lancer les tests
+docker compose exec app bash
+php artisan test
 ```
+
+### Tests implémentés
+
+Les tests suivants sont déjà implémentés et prêts à être exécutés :
+
+- `tests/Feature/Auth/UserAuthenticationTest.php` - 10 tests
+- `tests/Feature/Auth/UserRegistrationTest.php` - 10 tests
 
 ## Mocks nécessaires
 
