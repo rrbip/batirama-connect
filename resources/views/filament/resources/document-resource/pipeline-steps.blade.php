@@ -262,13 +262,23 @@
                                             Voir le Markdown
                                         </button>
                                     @elseif($stepName === 'markdown_to_qr')
-                                        <a
-                                            href="{{ route('filament.admin.resources.documents.edit', ['record' => $record->id]) }}?activeRelationManager=chunks"
-                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
-                                        >
-                                            <x-heroicon-o-eye class="w-4 h-4" />
-                                            Voir les Q/R (onglet Chunks)
-                                        </a>
+                                        @php
+                                            $chunkCount = $record->chunks()->count();
+                                        @endphp
+                                        @if($chunkCount > 0)
+                                            <a
+                                                href="{{ route('filament.admin.resources.documents.chunks', ['record' => $record->id]) }}"
+                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
+                                            >
+                                                <x-heroicon-o-eye class="w-4 h-4" />
+                                                Voir les {{ $chunkCount }} chunks
+                                            </a>
+                                        @else
+                                            <span class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                                                <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
+                                                Aucun chunk généré
+                                            </span>
+                                        @endif
                                     @endif
                                 @endif
 
@@ -288,8 +298,10 @@
                                     <x-heroicon-o-x-mark class="w-5 h-5" />
                                 </button>
                             </div>
-                            <div class="p-4 max-h-[70vh] overflow-auto">
-                                <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono bg-gray-50 dark:bg-gray-800 p-4 rounded">{{ $record->extracted_text ?? 'Aucun texte extrait' }}</pre>
+                            <div class="p-4 max-h-[70vh] overflow-auto bg-gray-50 dark:bg-gray-800">
+                                <div class="prose prose-sm dark:prose-invert max-w-none">
+                                    {!! nl2br(e($record->extracted_text ?? 'Aucun texte extrait')) !!}
+                                </div>
                             </div>
                         </div>
                     </dialog>
