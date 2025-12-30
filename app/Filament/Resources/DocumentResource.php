@@ -45,6 +45,7 @@ class DocumentResource extends Resource
         return $form
             ->schema([
                 Forms\Components\Tabs::make('Document')
+                    ->persistTabInQueryString('activeTab')
                     ->tabs([
                         Forms\Components\Tabs\Tab::make('Informations')
                             ->icon('heroicon-o-information-circle')
