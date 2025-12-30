@@ -16,7 +16,10 @@
 @if($currentPage === 'edit')
 <style>
     /* Hide the Filament tabs header since we use custom navigation */
-    .hidden-tabs-header > .fi-tabs-header {
+    .hidden-tabs-header .fi-tabs-header,
+    .hidden-tabs-header > div > .fi-tabs-header,
+    .fi-fo-tabs.hidden-tabs-header .fi-tabs-header,
+    [class*="hidden-tabs-header"] .fi-tabs-header {
         display: none !important;
     }
 </style>
