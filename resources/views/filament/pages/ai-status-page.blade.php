@@ -102,8 +102,9 @@
                         @foreach($queueStats['by_queue'] as $queue => $count)
                             <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full {{
                                 $queue === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                ($queue === 'pipeline' ? 'bg-orange-100 text-orange-700 dark:bg-orange-800 dark:text-orange-300' :
                                 ($queue === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'))
                             }}">
                                 {{ $queue }}: {{ $count }}
                             </span>
@@ -118,10 +119,10 @@
                             <div class="text-sm text-warning-700 dark:text-warning-300">
                                 <strong>Driver database actif.</strong> Assurez-vous qu'un worker est en cours d'exécution:
                                 <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-php artisan queue:work --queue=default,llm-chunking
+php artisan queue:work --queue=default,pipeline,llm-chunking
                                 </code>
                                 <div class="mt-2 text-xs text-gray-500">
-                                    💡 L'ordre des queues définit la priorité : les messages IA (default) passent avant le chunking LLM.
+                                    💡 <strong>Priorité des queues :</strong> default (messages IA) → pipeline (traitement documents) → llm-chunking (découpage sémantique)
                                 </div>
                             </div>
                         </div>
@@ -237,8 +238,9 @@ php artisan queue:work --queue=default,llm-chunking
                                 <div class="flex items-center gap-3">
                                     <span class="px-2.5 py-1 text-sm font-semibold rounded-full {{
                                         $queue['name'] === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                        ($queue['name'] === 'pipeline' ? 'bg-orange-100 text-orange-700 dark:bg-orange-800 dark:text-orange-300' :
                                         ($queue['name'] === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                        'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                        'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'))
                                     }}">
                                         {{ $queue['name'] }}
                                     </span>

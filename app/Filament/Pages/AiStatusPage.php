@@ -496,6 +496,7 @@ class AiStatusPage extends Page
                     // Seuils différents par queue (en secondes)
                     $stuckThresholds = [
                         'llm-chunking' => 1800, // 30 minutes - LLM peut être lent
+                        'pipeline' => 1800,     // 30 minutes - Pipeline traitement complet
                         'default' => 600,       // 10 minutes
                         'ai-messages' => 300,   // 5 minutes
                     ];
