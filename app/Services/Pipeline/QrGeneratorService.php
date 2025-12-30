@@ -115,12 +115,14 @@ class QrGeneratorService
         $ollamaHost = $qrSettings->ollama_host ?? config('ai.ollama.host', 'ollama');
         $ollamaPort = $qrSettings->ollama_port ?? config('ai.ollama.port', 11434);
         $ollamaUrl = "http://{$ollamaHost}:{$ollamaPort}";
-        $timeout = $qrSettings->timeout_seconds ?? 120;
+
+        // Timeout 0 = illimité (les appels LLM peuvent prendre plusieurs minutes)
+        $timeout = $qrSettings->timeout_seconds ?? 0;
 
         // Build prompt from configurable settings
         $prompt = $qrSettings->buildPrompt($content, $parentContext);
 
-        // Timeout configurable pour les appels LLM
+        // Timeout illimité pour les appels LLM
         $response = Http::timeout($timeout)
             ->connectTimeout(30)
             ->post("{$ollamaUrl}/api/generate", [
