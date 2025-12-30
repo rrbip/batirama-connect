@@ -24,6 +24,10 @@ class CategoryDetectionService
     // Score bonus pour les correspondances par mot-clé
     private const KEYWORD_MATCH_BONUS = 0.3;
 
+    // Désactiver le fallback embedding (trop peu fiable sans enrichissement des catégories)
+    // Quand activé (false), si keyword matching échoue, la recherche RAG se fait sans filtre catégorie
+    private const ENABLE_EMBEDDING_FALLBACK = false;
+
     public function __construct(EmbeddingService $embeddingService)
     {
         $this->embeddingService = $embeddingService;
@@ -63,23 +67,31 @@ class CategoryDetectionService
             ];
         }
 
-        // 2. Sinon, utiliser la similarité par embedding
-        $embeddingMatches = $this->detectByEmbedding($question, $categories);
+        // 2. Fallback embedding (désactivé par défaut car peu fiable)
+        if (self::ENABLE_EMBEDDING_FALLBACK) {
+            $embeddingMatches = $this->detectByEmbedding($question, $categories);
 
-        if ($embeddingMatches->isNotEmpty()) {
-            Log::debug('Category detected by embedding', [
-                'question' => Str::limit($question, 50),
-                'categories' => $embeddingMatches->map(fn($m) => [
-                    'name' => $m['category']->name,
-                    'score' => round($m['score'], 3),
-                ])->toArray(),
+            if ($embeddingMatches->isNotEmpty()) {
+                Log::debug('Category detected by embedding', [
+                    'question' => Str::limit($question, 50),
+                    'categories' => $embeddingMatches->map(fn($m) => [
+                        'name' => $m['category']->name,
+                        'score' => round($m['score'], 3),
+                    ])->toArray(),
+                ]);
+
+                return [
+                    'categories' => $embeddingMatches->pluck('category'),
+                    'confidence' => $embeddingMatches->first()['score'] ?? 0,
+                    'method' => 'embedding',
+                ];
+            }
+        } else {
+            // Log pour monitoring : aucune catégorie trouvée par mots-clés
+            Log::info('Category detection: no keyword match, searching without category filter', [
+                'question' => Str::limit($question, 80),
+                'available_categories' => $categories->pluck('name')->take(10)->toArray(),
             ]);
-
-            return [
-                'categories' => $embeddingMatches->pluck('category'),
-                'confidence' => $embeddingMatches->first()['score'] ?? 0,
-                'method' => 'embedding',
-            ];
         }
 
         return [

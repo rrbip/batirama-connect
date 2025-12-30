@@ -1,5 +1,42 @@
 # Amélioration de la détection de catégories RAG
 
+## ✅ Quick Fix appliqué (30/12/2024)
+
+### Désactivation du fallback embedding
+
+Le fallback par embedding a été **désactivé** car trop peu fiable avec les noms de catégories courts.
+
+**Changement dans `CategoryDetectionService.php` :**
+```php
+// Constante ajoutée
+private const ENABLE_EMBEDDING_FALLBACK = false;
+```
+
+**Nouveau comportement :**
+```
+Question utilisateur
+       ↓
+1. Keyword matching (rapide + stemming)
+   - Si trouvé → filtre par catégorie (confiance 90%)
+       ↓
+2. Si pas de match → PAS de filtre catégorie
+   - Recherche RAG sur tout l'index
+   - Log info pour monitoring
+```
+
+**Avantages :**
+- Élimine les faux positifs (ex: "Configuration des Cookies" pour une question sur le diagnostic)
+- Qdrant trouve quand même les bons résultats par similarité sémantique
+- Zéro coût LLM supplémentaire
+- Facile à réactiver si on enrichit les catégories plus tard
+
+**Pour réactiver l'embedding fallback :**
+```php
+private const ENABLE_EMBEDDING_FALLBACK = true;
+```
+
+---
+
 ## Problème actuel
 
 La détection de catégorie pour le filtrage RAG est défaillante quand le matching par mots-clés échoue :
@@ -271,6 +308,27 @@ LLM propose "NOUVELLE: Plomberie"
 4. **Comment gérer les catégories multi-mots ?**
    - "Isolation thermique" vs "Isolation acoustique"
    - Keywords différents pour chaque sous-catégorie ?
+
+---
+
+## Autres pistes d'amélioration (futures)
+
+| # | Option | Coût LLM | Complexité | Statut |
+|---|--------|----------|------------|--------|
+| 1 | Enrichir catégories (description + keywords) | One-time batch | Moyenne | À faire |
+| 2 | Désactiver embedding fallback | **Zéro** | Très faible | ✅ **Fait** |
+| 3 | LLM classification (question → catégorie) | Par requête | Faible | Option |
+| 4 | Augmenter seuil embedding (0.45 → 0.60+) | Zéro | Très faible | Option |
+| 5 | Recherche hybride Qdrant (sparse + dense) | Zéro | Moyenne | Option |
+| 6 | Mapping manuel synonymes | Zéro | Admin UI | Option |
+| 7 | Meilleur modèle embedding | Zéro | Config | Option |
+| 8 | Supprimer complètement le filtrage catégorie | Zéro | Très faible | Non recommandé |
+
+### Recommandation long terme
+
+1. **Court terme** : Option 2 (✅ fait) + tests utilisateur
+2. **Moyen terme** : Si insuffisant, implémenter option 1 (enrichissement catégories)
+3. **Long terme** : Option 5 (recherche hybride) pour la meilleure qualité
 
 ---
 
