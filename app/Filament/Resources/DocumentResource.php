@@ -568,8 +568,7 @@ class DocumentResource extends Resource
                                             ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
                                     ])
                                     ->schema([
-                                        Forms\Components\View::make('filament.resources.document-resource.chunks-tab')
-                                            ->viewData(['record' => fn ($record) => $record]),
+                                        Forms\Components\View::make('filament.resources.document-resource.chunks-tab'),
                                     ]),
                             ])
                             ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
