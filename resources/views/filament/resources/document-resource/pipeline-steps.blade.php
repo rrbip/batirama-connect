@@ -345,9 +345,7 @@
                                 </button>
                             </div>
                             <div class="p-4 max-h-[70vh] overflow-auto bg-gray-50 dark:bg-gray-800">
-                                <div class="prose prose-sm dark:prose-invert max-w-none">
-                                    {!! nl2br(e($record->extracted_text ?? 'Aucun texte extrait')) !!}
-                                </div>
+                                <pre class="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200 font-sans leading-relaxed">{{ $record->extracted_text ?? 'Aucun texte extrait' }}</pre>
                             </div>
                         </div>
                     </dialog>
