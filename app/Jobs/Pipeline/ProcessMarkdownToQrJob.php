@@ -6,6 +6,7 @@ namespace App\Jobs\Pipeline;
 
 use App\Models\Document;
 use App\Models\DocumentChunk;
+use App\Services\AI\QdrantService;
 use App\Services\Pipeline\MarkdownChunkerService;
 use App\Services\Pipeline\PipelineOrchestratorService;
 use App\Services\Pipeline\QrGeneratorService;
@@ -35,7 +36,8 @@ class ProcessMarkdownToQrJob implements ShouldQueue
     public function handle(
         MarkdownChunkerService $chunkerService,
         QrGeneratorService $qrService,
-        PipelineOrchestratorService $orchestrator
+        PipelineOrchestratorService $orchestrator,
+        QdrantService $qdrantService
     ): void {
         $document = $this->document->fresh();
 
@@ -61,6 +63,9 @@ class ProcessMarkdownToQrJob implements ShouldQueue
         $orchestrator->markStepStarted($document, $this->stepIndex, $inputSummary);
 
         try {
+            // Clean up existing Qdrant points before reprocessing
+            $this->cleanupQdrantPoints($document, $qdrantService);
+
             // Force delete existing chunks to avoid conflicts
             $document->chunks()->forceDelete();
 
@@ -180,6 +185,59 @@ class ProcessMarkdownToQrJob implements ShouldQueue
     protected function estimateTokenCount(string $text): int
     {
         return (int) ceil(strlen($text) / 4);
+    }
+
+    /**
+     * Clean up existing Qdrant points before reprocessing
+     * This prevents orphan points when relaunching the pipeline
+     */
+    protected function cleanupQdrantPoints(Document $document, QdrantService $qdrantService): void
+    {
+        $agent = $document->agent;
+
+        if (!$agent || empty($agent->qdrant_collection)) {
+            Log::info("No Qdrant collection configured, skipping cleanup", [
+                'document_id' => $document->id,
+            ]);
+            return;
+        }
+
+        // Collect all existing point IDs from chunks
+        $existingChunks = $document->chunks()->get();
+        $pointIdsToDelete = [];
+
+        foreach ($existingChunks as $chunk) {
+            // Handle both old format (single ID) and new format (array of IDs)
+            if (!empty($chunk->qdrant_point_ids) && is_array($chunk->qdrant_point_ids)) {
+                $pointIdsToDelete = array_merge($pointIdsToDelete, $chunk->qdrant_point_ids);
+            } elseif (!empty($chunk->qdrant_point_id)) {
+                $pointIdsToDelete[] = $chunk->qdrant_point_id;
+            }
+        }
+
+        if (empty($pointIdsToDelete)) {
+            Log::info("No existing Qdrant points to delete", [
+                'document_id' => $document->id,
+            ]);
+            return;
+        }
+
+        // Delete points from Qdrant
+        try {
+            $qdrantService->delete($agent->qdrant_collection, $pointIdsToDelete);
+
+            Log::info("Cleaned up existing Qdrant points", [
+                'document_id' => $document->id,
+                'collection' => $agent->qdrant_collection,
+                'points_deleted' => count($pointIdsToDelete),
+            ]);
+        } catch (\Exception $e) {
+            // Log but don't fail - points might already be deleted or collection might not exist
+            Log::warning("Failed to delete some Qdrant points (may already be deleted)", [
+                'document_id' => $document->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     public function failed(Throwable $exception): void
