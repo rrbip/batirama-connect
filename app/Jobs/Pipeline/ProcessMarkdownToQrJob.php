@@ -61,8 +61,8 @@ class ProcessMarkdownToQrJob implements ShouldQueue
         $orchestrator->markStepStarted($document, $this->stepIndex, $inputSummary);
 
         try {
-            // Delete existing chunks
-            $document->chunks()->delete();
+            // Force delete existing chunks to avoid conflicts
+            $document->chunks()->forceDelete();
 
             // Chunk the markdown
             $threshold = $config['threshold'] ?? 1500;
@@ -79,19 +79,23 @@ class ProcessMarkdownToQrJob implements ShouldQueue
             $usefulCount = 0;
 
             foreach ($chunks as $chunkData) {
-                // Create chunk record
-                $chunk = DocumentChunk::create([
-                    'document_id' => $document->id,
-                    'chunk_index' => $chunkData['chunk_index'],
-                    'content' => $chunkData['content'],
-                    'original_content' => $chunkData['content'],
-                    'parent_context' => $chunkData['parent_context'],
-                    'start_offset' => $chunkData['start_offset'],
-                    'end_offset' => $chunkData['end_offset'],
-                    'token_count' => $this->estimateTokenCount($chunkData['content']),
-                    'content_hash' => md5($chunkData['content']),
-                    'created_at' => now(),
-                ]);
+                // Use updateOrCreate to avoid unique constraint violations
+                $chunk = DocumentChunk::updateOrCreate(
+                    [
+                        'document_id' => $document->id,
+                        'chunk_index' => $chunkData['chunk_index'],
+                    ],
+                    [
+                        'content' => $chunkData['content'],
+                        'original_content' => $chunkData['content'],
+                        'parent_context' => $chunkData['parent_context'],
+                        'start_offset' => $chunkData['start_offset'],
+                        'end_offset' => $chunkData['end_offset'],
+                        'token_count' => $this->estimateTokenCount($chunkData['content']),
+                        'content_hash' => md5($chunkData['content']),
+                        'created_at' => now(),
+                    ]
+                );
 
                 // Process Q/R for this chunk
                 $result = $qrService->processChunk($chunk, $document, $config);
