@@ -450,6 +450,34 @@ class GestionRagPage extends Page implements HasForms, HasTable
                 TernaryFilter::make('is_ai_generated')
                     ->label('Générée par IA'),
             ])
+            ->headerActions([
+                Action::make('normalize_all')
+                    ->label('Normaliser tout')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('warning')
+                    ->action(function () {
+                        $count = 0;
+                        foreach (DocumentCategory::all() as $category) {
+                            $normalized = mb_convert_case(
+                                mb_strtolower($category->name, 'UTF-8'),
+                                MB_CASE_TITLE,
+                                'UTF-8'
+                            );
+                            if ($category->name !== $normalized) {
+                                $category->update(['name' => $normalized]);
+                                $count++;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title("{$count} catégorie(s) normalisée(s)")
+                            ->success()
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Normaliser toutes les catégories')
+                    ->modalDescription('Tous les noms seront convertis en "Title Case" (ex: "RÉNOVATION" → "Rénovation", "ELECTRICITé" → "Électricité")'),
+            ])
             ->actions([
                 Action::make('edit')
                     ->label('Modifier')
@@ -466,6 +494,31 @@ class GestionRagPage extends Page implements HasForms, HasTable
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
+
+                    BulkAction::make('normalize_selected')
+                        ->label('Normaliser le formatage')
+                        ->icon('heroicon-o-pencil-square')
+                        ->action(function ($records) {
+                            foreach ($records as $category) {
+                                $normalized = mb_convert_case(
+                                    mb_strtolower($category->name, 'UTF-8'),
+                                    MB_CASE_TITLE,
+                                    'UTF-8'
+                                );
+                                if ($category->name !== $normalized) {
+                                    $category->update(['name' => $normalized]);
+                                }
+                            }
+
+                            Notification::make()
+                                ->title('Catégories normalisées')
+                                ->success()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalHeading('Normaliser le formatage')
+                        ->modalDescription('Les noms seront convertis en "Title Case" (ex: "RÉNOVATION" → "Rénovation")'),
                 ]),
             ])
             ->defaultSort('usage_count', 'desc')
