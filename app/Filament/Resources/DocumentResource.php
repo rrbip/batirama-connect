@@ -320,8 +320,34 @@ class DocumentResource extends Resource
                                                 ->modalHeading('Relancer le pipeline')
                                                 ->modalDescription('Cette action va supprimer les chunks existants et relancer tout le pipeline. Continuer ?')
                                                 ->action(function ($record, $livewire) {
+                                                    // Debug: log action start
+                                                    \Log::info('Pipeline restart action triggered', [
+                                                        'document_id' => $record?->id,
+                                                        'mime_type' => $record?->mime_type,
+                                                        'has_storage_path' => !empty($record?->storage_path),
+                                                        'has_extracted_text' => !empty($record?->extracted_text),
+                                                    ]);
+
                                                     try {
                                                         $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+
+                                                        // Detect document type first
+                                                        $documentType = $orchestrator->detectDocumentType($record);
+                                                        \Log::info('Document type detected', [
+                                                            'document_id' => $record->id,
+                                                            'type' => $documentType,
+                                                        ]);
+
+                                                        if ($documentType === 'unknown') {
+                                                            Notification::make()
+                                                                ->title('Type de document non reconnu')
+                                                                ->body("MIME type: {$record->mime_type}. Aucun pipeline disponible.")
+                                                                ->danger()
+                                                                ->persistent()
+                                                                ->send();
+                                                            return;
+                                                        }
+
                                                         $orchestrator->startPipeline($record);
 
                                                         // Refresh to show updated pipeline_steps
@@ -329,15 +355,15 @@ class DocumentResource extends Resource
 
                                                         $queueDriver = config('queue.default');
                                                         $jobCount = \DB::table('jobs')->where('queue', 'pipeline')->count();
+                                                        $totalJobs = \DB::table('jobs')->count();
 
                                                         Notification::make()
                                                             ->title('Pipeline relancé')
-                                                            ->body("Queue: {$queueDriver}, Jobs en attente: {$jobCount}")
+                                                            ->body("Type: {$documentType} | Queue: {$queueDriver} | Jobs pipeline: {$jobCount} | Total jobs: {$totalJobs}")
                                                             ->success()
+                                                            ->persistent()
                                                             ->send();
 
-                                                        // Force page refresh
-                                                        $livewire->redirect(request()->header('Referer'));
                                                     } catch (\Throwable $e) {
                                                         \Log::error('Pipeline start failed', [
                                                             'document_id' => $record->id,
@@ -349,6 +375,7 @@ class DocumentResource extends Resource
                                                             ->title('Erreur lors du lancement')
                                                             ->body($e->getMessage())
                                                             ->danger()
+                                                            ->persistent()
                                                             ->send();
                                                     }
                                                 }),
@@ -357,12 +384,13 @@ class DocumentResource extends Resource
                                                 ->label('Continuer depuis l\'échec')
                                                 ->icon('heroicon-o-play')
                                                 ->color('success')
-                                                ->visible(fn ($record) => ($record?->pipeline_steps['status'] ?? '') === 'failed')
+                                                ->visible(fn ($record) => in_array($record?->pipeline_steps['status'] ?? '', ['failed', 'error']))
                                                 ->action(function ($record) {
                                                     $pipelineData = $record->pipeline_steps ?? [];
                                                     $failedIndex = null;
                                                     foreach (($pipelineData['steps'] ?? []) as $index => $step) {
-                                                        if (($step['status'] ?? '') === 'failed') {
+                                                        // Check for both 'failed' and 'error' status
+                                                        if (in_array($step['status'] ?? '', ['failed', 'error'])) {
                                                             $failedIndex = $index;
                                                             break;
                                                         }
@@ -370,7 +398,17 @@ class DocumentResource extends Resource
                                                     if ($failedIndex !== null) {
                                                         $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
                                                         $orchestrator->relaunchStep($record, $failedIndex);
-                                                        Notification::make()->title('Étape relancée')->success()->send();
+                                                        Notification::make()
+                                                            ->title('Étape relancée')
+                                                            ->body("Étape {$failedIndex} remise en file d'attente")
+                                                            ->success()
+                                                            ->persistent()
+                                                            ->send();
+                                                    } else {
+                                                        Notification::make()
+                                                            ->title('Aucune étape en échec trouvée')
+                                                            ->warning()
+                                                            ->send();
                                                     }
                                                 }),
                                         ])->columnSpanFull(),
