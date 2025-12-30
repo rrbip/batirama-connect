@@ -845,6 +845,9 @@ class EscalationService
         // Mode différé avec email
         $this->createAsyncEmailThread($conversation, $reason);
 
+        // Notifier tous les agents de support assignés à cet agent IA
+        $this->notifySupportAgentsOfEscalation($conversation, $context);
+
         return new EscalationResult(
             success: true,
             mode: 'async_email',
@@ -853,6 +856,49 @@ class EscalationService
                 "Notre équipe n'est pas disponible actuellement. " .
                 "Nous avons enregistré votre demande et vous répondrons par email dès que possible."
         );
+    }
+
+    /**
+     * Notifie par email tous les agents de support assignés
+     * quand aucun n'est connecté
+     */
+    private function notifySupportAgentsOfEscalation(
+        SupportConversation $conversation,
+        array $context
+    ): void {
+        $agent = $conversation->agent;
+
+        // Récupérer les agents de support avec notifications activées
+        $supportUsers = $agent->supportUsers()
+            ->wherePivot('notify_on_escalation', true)
+            ->get();
+
+        // Ajouter les super-admin/admin si configuré
+        if ($agent->support_email) {
+            // Email générique de l'agent (en plus des users)
+        }
+
+        // Récupérer le contenu de la demande
+        $userMessage = $conversation->messages()
+            ->where('sender_type', 'user')
+            ->latest()
+            ->first();
+
+        foreach ($supportUsers as $supportUser) {
+            Mail::to($supportUser->email)
+                ->queue(new EscalationNotificationMail(
+                    conversation: $conversation,
+                    supportUser: $supportUser,
+                    userQuestion: $userMessage?->content ?? '',
+                    context: $context
+                ));
+        }
+
+        Log::info('Notification escalade envoyée aux agents de support', [
+            'conversation_id' => $conversation->id,
+            'agent_id' => $agent->id,
+            'notified_users' => $supportUsers->pluck('email')->toArray(),
+        ]);
     }
 }
 ```
@@ -1958,6 +2004,116 @@ Cordialement,<br>
 @endcomponent
 ```
 
+#### Email de notification aux agents de support (aucun connecté)
+
+```blade
+{{-- resources/views/emails/support/escalation-notification.blade.php --}}
+@component('mail::message')
+# 🚨 Nouvelle demande de support - {{ $conversation->agent->name }}
+
+Bonjour {{ $supportUser->name }},
+
+Une nouvelle demande de support a été escaladée et **aucun agent n'est actuellement connecté**.
+
+@component('mail::panel')
+**Demande #{{ $conversation->id }}**
+
+**Question de l'utilisateur :**
+{{ $userQuestion }}
+
+@if($conversation->user_email)
+**Email utilisateur :** {{ $conversation->user_email }}
+@endif
+
+**Raison de l'escalade :** {{ $escalationReason }}
+
+@if(isset($context['max_rag_score']))
+**Score IA :** {{ round($context['max_rag_score'] * 100) }}% (seuil : {{ round($context['threshold'] * 100) }}%)
+@endif
+@endcomponent
+
+---
+
+@component('mail::button', ['url' => $dashboardUrl, 'color' => 'primary'])
+📋 Voir la demande dans le dashboard
+@endcomponent
+
+@component('mail::button', ['url' => $takeChargeUrl, 'color' => 'success'])
+✋ Prendre en charge
+@endcomponent
+
+---
+
+<small>
+Vous recevez cet email car vous êtes assigné comme agent de support pour **{{ $conversation->agent->name }}**.
+Pour modifier vos préférences de notification, contactez votre administrateur.
+</small>
+
+Cordialement,<br>
+{{ config('app.name') }}
+@endcomponent
+```
+
+#### Mailable pour la notification
+
+```php
+<?php
+
+namespace App\Mail\Support;
+
+class EscalationNotificationMail extends Mailable implements ShouldQueue
+{
+    use Queueable, SerializesModels;
+
+    public function __construct(
+        public SupportConversation $conversation,
+        public User $supportUser,
+        public string $userQuestion,
+        public array $context = []
+    ) {}
+
+    public function envelope(): Envelope
+    {
+        return new Envelope(
+            subject: "🚨 Nouvelle demande de support #{$this->conversation->id} - {$this->conversation->agent->name}",
+        );
+    }
+
+    public function content(): Content
+    {
+        $escalationReasons = [
+            'low_confidence' => 'Score IA insuffisant',
+            'user_request' => 'Demandé par l\'utilisateur',
+            'negative_feedback' => 'Feedback négatif',
+        ];
+
+        return new Content(
+            markdown: 'emails.support.escalation-notification',
+            with: [
+                'dashboardUrl' => route('filament.admin.pages.live-support', [
+                    'conversation' => $this->conversation->id
+                ]),
+                'takeChargeUrl' => route('support.take-charge', [
+                    'conversation' => $this->conversation->id,
+                    'token' => $this->generateTakeChargeToken()
+                ]),
+                'escalationReason' => $escalationReasons[$this->conversation->escalation_reason]
+                    ?? $this->conversation->escalation_reason,
+            ],
+        );
+    }
+
+    private function generateTakeChargeToken(): string
+    {
+        return Crypt::encryptString(json_encode([
+            'conversation_id' => $this->conversation->id,
+            'user_id' => $this->supportUser->id,
+            'expires_at' => now()->addHours(24)->timestamp,
+        ]));
+    }
+}
+```
+
 ### 8.5 Configuration des fournisseurs email
 
 #### Comparaison des options
@@ -2467,9 +2623,10 @@ app/
 │       ├── IndexLearnedResponseJob.php
 │       └── IndexConversationAsDocumentJob.php
 ├── Mail/
-│   ├── NewEscalatedConversation.php
-│   ├── SupportResponseReceived.php
-│   └── ConversationConfirmation.php
+│   └── Support/
+│       ├── EscalationNotificationMail.php      # Notification aux agents de support
+│       ├── EscalationConfirmationMail.php      # Confirmation à l'utilisateur
+│       └── SupportResponseMail.php             # Réponse admin à l'utilisateur
 ├── Filament/
 │   └── Pages/
 │       ├── LiveSupport.php
@@ -2499,8 +2656,9 @@ resources/
     │       └── qr-correction-form.blade.php
     ├── emails/
     │   └── support/
-    │       ├── escalation-confirmation.blade.php
-    │       └── response.blade.php
+    │       ├── escalation-confirmation.blade.php   # Email à l'utilisateur
+    │       ├── escalation-notification.blade.php   # Email aux agents de support
+    │       └── response.blade.php                  # Réponse admin à l'utilisateur
     ├── filament/
     │   └── pages/
     │       ├── live-support.blade.php
