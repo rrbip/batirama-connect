@@ -11,11 +11,11 @@
             </a>
 
             <a
-                href="{{ \App\Filament\Resources\DocumentResource::getUrl('edit', ['record' => $this->record]) }}?activeTab=statut"
+                href="{{ \App\Filament\Resources\DocumentResource::getUrl('edit', ['record' => $this->record]) }}?activeTab=indexation"
                 class="fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75 hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5"
             >
-                <x-heroicon-o-clock class="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
-                <span class="text-gray-500 dark:text-gray-400">Statut</span>
+                <x-heroicon-o-magnifying-glass class="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
+                <span class="text-gray-500 dark:text-gray-400">Indexation</span>
             </a>
 
             <div class="fi-tabs-item flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium bg-gray-50 dark:bg-white/5">

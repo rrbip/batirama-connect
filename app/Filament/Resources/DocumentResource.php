@@ -463,6 +463,9 @@ class DocumentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Indexation')
                             ->icon('heroicon-o-magnifying-glass')
                             ->schema([
+                                Forms\Components\View::make('filament.resources.document-resource.chunks-link')
+                                    ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
+
                                 Forms\Components\Section::make('Statut indexation')
                                     ->schema([
                                         Forms\Components\Toggle::make('is_indexed')
@@ -556,12 +559,6 @@ class DocumentResource extends Resource
                             ])
                             ->visible(fn ($record) => $record !== null),
 
-                        Forms\Components\Tabs\Tab::make('Chunks')
-                            ->icon('heroicon-o-squares-2x2')
-                            ->schema([
-                                Forms\Components\View::make('filament.resources.document-resource.chunks-redirect'),
-                            ])
-                            ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
                     ])
                     ->columnSpanFull(),
             ]);
