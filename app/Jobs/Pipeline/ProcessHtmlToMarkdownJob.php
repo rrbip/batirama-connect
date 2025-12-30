@@ -210,17 +210,34 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
         $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
 
-        // Remove nav, header, footer, aside
-        $html = preg_replace('/<nav\b[^>]*>(.*?)<\/nav>/is', '', $html);
-        $html = preg_replace('/<header\b[^>]*>(.*?)<\/header>/is', '', $html);
-        $html = preg_replace('/<footer\b[^>]*>(.*?)<\/footer>/is', '', $html);
-        $html = preg_replace('/<aside\b[^>]*>(.*?)<\/aside>/is', '', $html);
+        // Remove nav, header, footer, aside (can be nested, so run multiple times)
+        for ($i = 0; $i < 3; $i++) {
+            $html = preg_replace('/<nav\b[^>]*>(.*?)<\/nav>/is', '', $html);
+            $html = preg_replace('/<header\b[^>]*>(.*?)<\/header>/is', '', $html);
+            $html = preg_replace('/<footer\b[^>]*>(.*?)<\/footer>/is', '', $html);
+            $html = preg_replace('/<aside\b[^>]*>(.*?)<\/aside>/is', '', $html);
+        }
+
+        // Remove common navigation classes/ids
+        $html = preg_replace('/<[^>]*(class|id)=["\'][^"\']*\b(nav|menu|sidebar|breadcrumb|footer|header|toolbar|topbar|bottombar)[^"\']*["\'][^>]*>(.*?)<\/[^>]+>/is', '', $html);
+
+        // Remove form elements (login forms, search boxes, etc.)
+        $html = preg_replace('/<form\b[^>]*>(.*?)<\/form>/is', '', $html);
+
+        // Remove button elements
+        $html = preg_replace('/<button\b[^>]*>(.*?)<\/button>/is', '', $html);
 
         // Remove empty header tags (h1-h6 with no content or just whitespace)
         $html = preg_replace('/<h([1-6])\b[^>]*>\s*<\/h\1>/is', '', $html);
 
         // Remove comments
         $html = preg_replace('/<!--.*?-->/s', '', $html);
+
+        // Remove noscript content
+        $html = preg_replace('/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $html);
+
+        // Remove iframe
+        $html = preg_replace('/<iframe\b[^>]*>(.*?)<\/iframe>/is', '', $html);
 
         return $html;
     }
@@ -244,7 +261,30 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         // Pattern matches: start of line, 1-6 #, optional whitespace, end of line
         $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
 
-        // Step 4: Remove excessive blank lines (more than 2 newlines -> 2 newlines)
+        // Step 4: Remove navigation-like lists (consecutive lines of just links)
+        // e.g., "- [Home](/)\n- [About](/about)\n- [Contact](/contact)"
+        $markdown = preg_replace('/^(\s*-\s*\[[^\]]+\]\([^)]+\)\s*\n){3,}/m', '', $markdown);
+
+        // Step 5: Remove standalone images (lines that are just an image)
+        // e.g., "![Alt text](/images/logo.png)"
+        $markdown = preg_replace('/^!\[[^\]]*\]\([^)]+\)\s*$/m', '', $markdown);
+
+        // Step 6: Remove lines that are just links with short text (navigation links)
+        // e.g., "[Se connecter](/login)" alone on a line
+        $markdown = preg_replace('/^\s*\[[^\]]{1,30}\]\(\/[^)]*\)\s*$/m', '', $markdown);
+
+        // Step 7: Remove CTA buttons (links in brackets alone)
+        // e.g., "[Essai Gratuit](https://app.example.com/signup)"
+        $markdown = preg_replace('/^\s*\[(Essai|Demo|Inscription|S\'inscrire|Connexion|Se connecter|Login|Sign up|Sign in|Register|Contact|Demander)[^\]]*\]\([^)]+\)\s*$/im', '', $markdown);
+
+        // Step 8: Remove anchor links (links to #something)
+        // e.g., "[](#close)" or "[Close](#close)"
+        $markdown = preg_replace('/\[([^\]]*)\]\(#[^)]*\)/', '$1', $markdown);
+
+        // Step 9: Remove lines with only whitespace or punctuation
+        $markdown = preg_replace('/^\s*[\|\-\*\_]+\s*$/m', '', $markdown);
+
+        // Step 10: Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
         // Trim whitespace
