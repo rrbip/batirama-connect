@@ -15,17 +15,9 @@ class VisionSetting extends Model
         'temperature',
         'timeout_seconds',
         'system_prompt',
-    ];
-
-    protected $casts = [
-        'temperature' => 'float',
-        'ollama_port' => 'integer',
-        'timeout_seconds' => 'integer',
         'image_dpi',
         'output_format',
         'max_pages',
-        'timeout_seconds',
-        'system_prompt',
         'store_images',
         'store_markdown',
         'storage_disk',
@@ -34,6 +26,7 @@ class VisionSetting extends Model
     ];
 
     protected $casts = [
+        'temperature' => 'float',
         'ollama_port' => 'integer',
         'image_dpi' => 'integer',
         'max_pages' => 'integer',
@@ -132,15 +125,6 @@ class VisionSetting extends Model
     }
 
     /**
-     * Prompt par défaut pour extraction vision
-     * Retourne l'URL complète d'Ollama
-     */
-    public function getOllamaUrl(): string
-    {
-        return "http://{$this->ollama_host}:{$this->ollama_port}";
-    }
-
-    /**
      * Vérifie si le modèle configuré est compatible CPU
      */
     public function isCpuCompatible(): bool
@@ -226,17 +210,6 @@ class VisionSetting extends Model
     public static function getDefaultPrompt(): string
     {
         return <<<'PROMPT'
-Analyse cette image et extrait son contenu textuel en Markdown structuré.
-
-RÈGLES:
-1. Préserve la hiérarchie des titres (# ## ### etc.)
-2. Préserve les listes et tableaux
-3. Ignore les éléments de navigation et décoration
-4. Retourne UNIQUEMENT le contenu Markdown, pas d'explication
-
-MARKDOWN:
-PROMPT;
-    }
 Tu es un expert en extraction de documents techniques. Analyse cette image de document et extrais son contenu en Markdown.
 
 # Règles d'extraction

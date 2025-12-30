@@ -89,9 +89,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     public array $queueStats = [];
 
-    // Vision settings properties
-    public ?array $visionData = [];
-
     public array $visionDiagnostics = [];
 
     // Calibration properties
@@ -940,7 +937,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ->columns(1),
                 ])
                 ->statePath('toolsData'),
-                ->statePath('visionData'),
         ];
     }
 
@@ -1196,34 +1192,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
                 'error' => $e->getMessage(),
             ];
         }
-    }
-
-    public function saveVisionSettings(): void
-    {
-        $data = $this->visionForm->getState();
-
-        $settings = VisionSetting::getInstance();
-        $settings->update($data);
-
-        Notification::make()
-            ->title('Configuration Vision sauvegardée')
-            ->success()
-            ->send();
-    }
-
-    public function resetVisionPrompt(): void
-    {
-        $defaultPrompt = VisionSetting::getDefaultPrompt();
-
-        $this->visionForm->fill([
-            ...$this->visionForm->getState(),
-            'system_prompt' => $defaultPrompt,
-        ]);
-
-        Notification::make()
-            ->title('Prompt réinitialisé')
-            ->info()
-            ->send();
     }
 
     public function testVisionConnection(): void

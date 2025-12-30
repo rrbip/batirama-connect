@@ -208,7 +208,7 @@ class DocumentResource extends Resource
                                                 $html .= '</div>';
 
                                                 return new \Illuminate\Support\HtmlString($html);
-                                            })
+                                            }),
                                         Forms\Components\Select::make('category')
                                             ->label('Catégorie')
                                             ->options([
@@ -340,16 +340,6 @@ class DocumentResource extends Resource
                                                     'failed' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
                                                     default => ['label' => $status, 'color' => 'gray', 'icon' => 'question-mark-circle'],
                                                 };
-                                        Forms\Components\Placeholder::make('extraction_method_display')
-                                            ->label('Méthode utilisée')
-                                            ->content(fn ($record) => match ($record?->extraction_method) {
-                                                'auto' => 'Automatique',
-                                                'text' => 'Texte uniquement',
-                                                'ocr' => 'OCR (Tesseract)',
-                                                'vision' => 'Vision IA',
-                                                null => '-',
-                                                default => $record?->extraction_method,
-                                            }),
 
                                                 $startedAt = isset($pipelineData['started_at']) ? \Carbon\Carbon::parse($pipelineData['started_at'])->format('d/m/Y H:i') : '-';
                                                 $completedAt = isset($pipelineData['completed_at']) ? \Carbon\Carbon::parse($pipelineData['completed_at'])->format('d/m/Y H:i') : '-';
@@ -369,6 +359,16 @@ class DocumentResource extends Resource
                                                 ));
                                             })
                                             ->columnSpanFull(),
+                                        Forms\Components\Placeholder::make('extraction_method_display')
+                                            ->label('Méthode utilisée')
+                                            ->content(fn ($record) => match ($record?->extraction_method) {
+                                                'auto' => 'Automatique',
+                                                'text' => 'Texte uniquement',
+                                                'ocr' => 'OCR (Tesseract)',
+                                                'vision' => 'Vision IA',
+                                                null => '-',
+                                                default => $record?->extraction_method,
+                                            }),
                                     ]),
 
                                 // Pipeline Steps
