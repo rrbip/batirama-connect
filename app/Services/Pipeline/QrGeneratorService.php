@@ -193,24 +193,80 @@ class QrGeneratorService
      */
     protected function findOrCreateCategory(string $name): DocumentCategory
     {
-        $slug = Str::slug($name);
+        // Normalize name: Title Case with proper UTF-8 support
+        $normalizedName = $this->normalizeCategory($name);
+        $slug = Str::slug($normalizedName);
 
+        // First try exact slug match
         $category = DocumentCategory::where('slug', $slug)->first();
+
+        // If not found, try fuzzy match on existing categories
+        if (!$category) {
+            $category = $this->findSimilarCategory($normalizedName, $slug);
+        }
 
         if (!$category) {
             $category = DocumentCategory::create([
-                'name' => strtoupper($name),
+                'name' => $normalizedName,
                 'slug' => $slug,
                 'description' => "Catégorie générée automatiquement",
                 'is_ai_generated' => true,
             ]);
 
-            Log::info("Created new category", ['name' => $name, 'slug' => $slug]);
+            Log::info("Created new category", ['name' => $normalizedName, 'slug' => $slug]);
         }
 
         $category->incrementUsage();
 
         return $category;
+    }
+
+    /**
+     * Normalize category name to Title Case with proper UTF-8 support
+     */
+    protected function normalizeCategory(string $name): string
+    {
+        // Trim and handle empty
+        $name = trim($name);
+        if (empty($name)) {
+            return 'Divers';
+        }
+
+        // Convert to Title Case (first letter uppercase, rest lowercase) with UTF-8 support
+        return mb_convert_case(mb_strtolower($name, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+    }
+
+    /**
+     * Try to find a similar existing category
+     */
+    protected function findSimilarCategory(string $name, string $slug): ?DocumentCategory
+    {
+        // Get all categories for comparison
+        $categories = DocumentCategory::all();
+
+        foreach ($categories as $category) {
+            // Check if slugs are similar (handles plurals, minor typos)
+            $existingSlug = $category->slug;
+
+            // Exact slug match (already checked, but double-check)
+            if ($existingSlug === $slug) {
+                return $category;
+            }
+
+            // One is prefix of the other (e.g., "renovation" vs "renovations")
+            if (str_starts_with($existingSlug, $slug) || str_starts_with($slug, $existingSlug)) {
+                $lengthDiff = abs(strlen($existingSlug) - strlen($slug));
+                if ($lengthDiff <= 2) {
+                    Log::info("Category fuzzy match", [
+                        'input' => $name,
+                        'matched' => $category->name,
+                    ]);
+                    return $category;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
