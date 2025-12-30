@@ -813,6 +813,272 @@ private function handleEscalation(...): LLMResponse
 └── 🔄 Doublon - Déjà traité
 ```
 
+### 6.4 Assistance IA pour l'agent de support
+
+L'IA assiste l'agent humain à plusieurs niveaux pour garantir des réponses de qualité.
+
+#### Vue d'ensemble
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ASSISTANCE IA POUR L'AGENT                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. SUGGESTIONS AUTOMATIQUES (panneau latéral)                              │
+│     ├── Recherche RAG en temps réel sur la question                        │
+│     ├── Affiche les sources pertinentes avec extraits                       │
+│     └── Bouton "Utiliser cette source" → pré-remplit la réponse            │
+│                                                                              │
+│  2. GÉNÉRATION DE BROUILLON (optionnel)                                     │
+│     ├── Bouton "🤖 Générer une suggestion"                                  │
+│     ├── L'IA génère une réponse basée sur les sources trouvées             │
+│     └── L'agent peut modifier avant envoi                                   │
+│                                                                              │
+│  3. RELECTURE AVANT ENVOI (mode email uniquement)                           │
+│     ├── Quand utilisateur offline → réponse envoyée par email              │
+│     ├── Popup de confirmation avec preview                                  │
+│     ├── Bouton "✨ Améliorer avec l'IA"                                     │
+│     │   ├── Correction orthographe/grammaire                               │
+│     │   ├── Reformulation plus claire                                       │
+│     │   └── Ajout de formules de politesse                                 │
+│     └── Diff avant/après pour validation                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Interface utilisateur enrichie
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│  CONVERSATION #4521                          [Utilisateur: 📧 Hors ligne]  │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [User] Comment annuler une facture validée ?                              │
+│                                                                             │
+│  [AI] Je n'ai pas trouvé d'information fiable... (Score: 45%)              │
+│                                                                             │
+│  ───────────────────────────────────────────────────────────────────────── │
+│                                                                             │
+│  📝 Votre réponse:                                                         │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │ Pour annuler une facture validée, vous devez créer un avoir.         │ │
+│  │ Allez dans Facturation > Avoirs > Nouveau...                         │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  [Envoyer 📧] [🤖 Générer suggestion] [💾 Sauver Q/R ▼] [Clôturer ▼]      │
+│                                                                             │
+│  ───────────────────────────────────────────────────────────────────────── │
+│                                                                             │
+│  🤖 ASSISTANCE IA                                                          │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │ 📚 Sources trouvées:                                                  │ │
+│  │                                                                        │ │
+│  │ 1. "Gestion des avoirs" (Score: 67%)                                  │ │
+│  │    > Pour annuler une facture, créez un avoir depuis le menu         │ │
+│  │    > Facturation. L'avoir vient en déduction du solde client...      │ │
+│  │    [📋 Copier] [✏️ Utiliser comme base]                               │ │
+│  │                                                                        │ │
+│  │ 2. "Facturation - FAQ" (Score: 52%)                                   │ │
+│  │    > Une facture validée ne peut pas être supprimée pour des         │ │
+│  │    > raisons légales. Seul un avoir permet de l'annuler...           │ │
+│  │    [📋 Copier] [✏️ Utiliser comme base]                               │ │
+│  │                                                                        │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Modal de confirmation email (utilisateur offline)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  📧 Confirmation d'envoi par email                                     [X] │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  L'utilisateur est hors ligne. Votre réponse sera envoyée par email.       │
+│                                                                              │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                              │
+│  📄 Aperçu de votre réponse:                                                │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Pour annuler une facture validée, vous devez créer un avoir.       │   │
+│  │ Allez dans Facturation > Avoirs > Nouveau, selectionnez la         │   │
+│  │ facture concerné.                                                   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  [✨ Améliorer avec l'IA]                                                   │
+│                                                                              │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                              │
+│  ✨ Suggestion de l'IA:                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Bonjour,                                                            │   │
+│  │                                                                      │   │
+│  │ Pour annuler une facture validée, vous devez créer un avoir.       │   │
+│  │ Voici la procédure :                                                │   │
+│  │                                                                      │   │
+│  │ 1. Allez dans **Facturation > Avoirs > Nouveau**                   │   │
+│  │ 2. Sélectionnez la facture concernée                               │   │
+│  │ 3. Validez l'avoir                                                  │   │
+│  │                                                                      │   │
+│  │ L'avoir viendra en déduction du solde client.                       │   │
+│  │                                                                      │
+│  │ N'hésitez pas si vous avez d'autres questions.                      │   │
+│  │                                                                      │   │
+│  │ Cordialement,                                                       │   │
+│  │ L'équipe Support                                                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│  Corrections effectuées:                                                    │
+│  • ✓ Ajout formule de politesse (Bonjour/Cordialement)                     │
+│  • ✓ Mise en forme avec liste numérotée                                    │
+│  • ✓ Correction: "selectionnez" → "Sélectionnez"                           │
+│  • ✓ Correction: "concerné" → "concernée"                                  │
+│                                                                              │
+│  [Utiliser la version IA] [Garder ma version] [Modifier manuellement]      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Service d'assistance IA
+
+```php
+<?php
+
+namespace App\Services\Support;
+
+class AgentAssistanceService
+{
+    public function __construct(
+        private RagService $ragService,
+        private LLMService $llmService
+    ) {}
+
+    /**
+     * Recherche des sources pertinentes pour la question
+     */
+    public function findRelevantSources(SupportConversation $conversation): array
+    {
+        $userQuestion = $conversation->messages()
+            ->where('sender_type', 'user')
+            ->latest()
+            ->first()
+            ?->content;
+
+        if (!$userQuestion) {
+            return [];
+        }
+
+        // Recherche RAG avec seuil bas pour trouver plus de sources
+        $results = $this->ragService->search(
+            query: $userQuestion,
+            agent: $conversation->agent,
+            limit: 5,
+            minScore: 0.30 // Seuil bas pour suggestions
+        );
+
+        return collect($results)->map(fn($r) => [
+            'title' => $r['document_name'] ?? 'Source',
+            'score' => round($r['score'] * 100),
+            'excerpt' => Str::limit($r['content'], 200),
+            'full_content' => $r['content'],
+        ])->toArray();
+    }
+
+    /**
+     * Génère une suggestion de réponse basée sur les sources
+     */
+    public function generateSuggestion(SupportConversation $conversation): string
+    {
+        $sources = $this->findRelevantSources($conversation);
+        $userQuestion = $conversation->getLastUserMessage();
+
+        $prompt = <<<PROMPT
+        Tu es un assistant de support. Génère une réponse professionnelle et utile.
+
+        Question de l'utilisateur:
+        {$userQuestion}
+
+        Sources disponibles:
+        {$this->formatSources($sources)}
+
+        Consignes:
+        - Réponds de manière claire et concise
+        - Utilise les informations des sources si pertinentes
+        - Si aucune source n'est pertinente, indique-le
+        - Ne fabrique pas d'informations
+        - Garde un ton professionnel mais accessible
+        PROMPT;
+
+        return $this->llmService->generate($prompt);
+    }
+
+    /**
+     * Améliore une réponse avant envoi email
+     */
+    public function improveForEmail(string $draftResponse, SupportConversation $conversation): array
+    {
+        $prompt = <<<PROMPT
+        Améliore cette réponse de support qui sera envoyée par email.
+
+        Réponse originale:
+        {$draftResponse}
+
+        Améliorations à faire:
+        1. Ajouter une formule de politesse appropriée (Bonjour/Cordialement)
+        2. Corriger les fautes d'orthographe et de grammaire
+        3. Améliorer la clarté et la mise en forme si nécessaire
+        4. Garder le sens et les informations originales
+
+        Réponds en JSON:
+        {
+            "improved_text": "...",
+            "corrections": [
+                {"type": "spelling", "original": "...", "fixed": "..."},
+                {"type": "formatting", "description": "..."},
+                {"type": "politeness", "description": "..."}
+            ]
+        }
+        PROMPT;
+
+        $result = $this->llmService->generateJson($prompt);
+
+        return [
+            'original' => $draftResponse,
+            'improved' => $result['improved_text'],
+            'corrections' => $result['corrections'],
+        ];
+    }
+}
+```
+
+#### Configuration par agent
+
+```php
+// Nouveaux champs dans la table agents
+$table->json('ai_assistance_config')->nullable();
+// {
+//   "suggestions_enabled": true,      // Afficher le panneau de sources
+//   "auto_generate_enabled": false,   // Bouton "Générer suggestion"
+//   "email_review_enabled": true,     // Relecture avant envoi email
+//   "email_review_required": false,   // Obligatoire ou optionnel
+//   "improvement_prompt": "..."       // Prompt personnalisé (optionnel)
+// }
+```
+
+#### Ajout à l'estimation
+
+| Tâche | Durée |
+|-------|-------|
+| Panneau sources latéral | 0.5 jour |
+| Bouton "Générer suggestion" | 0.5 jour |
+| Modal confirmation email | 0.5 jour |
+| AgentAssistanceService (3 méthodes) | 1 jour |
+| Tests et intégration | 0.5 jour |
+| **Total assistance IA** | **3 jours** |
+
+> Cette fonctionnalité s'ajoute à la Phase 2 (Interface Admin), portant son total à **10-11 jours**.
+
 ---
 
 ## 7. Système d'apprentissage IA (double flux)
@@ -1781,16 +2047,16 @@ class SupportChatController extends Controller
 | Phase | Description | Durée estimée |
 |-------|-------------|---------------|
 | **Phase 1** | Base (modèles, services, migrations) | **6-7 jours** |
-| **Phase 2** | Interface Admin Filament | **7-8 jours** |
+| **Phase 2** | Interface Admin Filament + Assistance IA | **10-11 jours** |
 | **Phase 3** | Temps réel (WebSocket) | **4-5 jours** |
 | **Phase 4** | Email bidirectionnel + pièces jointes | **7-8 jours** |
 | **Phase 5** | Apprentissage IA (double flux) | **5-6 jours** |
 | **Phase 6** | Analytiques et reporting | **5-6 jours** |
-| | **Sous-total développement** | **34-40 jours** |
-| | Tests d'intégration + corrections (+20%) | **7-8 jours** |
-| | **TOTAL** | **41-48 jours** |
+| | **Sous-total développement** | **37-43 jours** |
+| | Tests d'intégration + corrections (+20%) | **7-9 jours** |
+| | **TOTAL** | **44-52 jours** |
 
-> **Estimation pour 1 développeur senior** : 8 à 10 semaines de travail effectif
+> **Estimation pour 1 développeur senior** : 9 à 11 semaines de travail effectif
 >
 > **Prérequis** : Stack Laravel/Filament maîtrisée, expérience WebSocket et queues
 
@@ -1812,7 +2078,7 @@ class SupportChatController extends Controller
 - [ ] Intégration RagService (détection escalade)
 - [ ] Message utilisateur lors de l'escalade
 
-### Phase 2 : Interface Admin (7-8 jours)
+### Phase 2 : Interface Admin + Assistance IA (10-11 jours)
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
@@ -1821,12 +2087,20 @@ class SupportChatController extends Controller
 | Vue conversation | Historique messages, contexte RAG, affichage pièces jointes | 2 jours |
 | Formulaire réponse | Textarea, envoi, templates rapides | 1 jour |
 | Actions de clôture | Menu dropdown avec types de résolution | 1 jour |
+| Panneau sources IA | Recherche RAG, affichage sources, boutons copier/utiliser | 0.5 jour |
+| Génération suggestion | Bouton "Générer suggestion" avec LLM | 0.5 jour |
+| Modal confirmation email | Preview, bouton "Améliorer avec IA", diff | 0.5 jour |
+| AgentAssistanceService | findRelevantSources(), generateSuggestion(), improveForEmail() | 1 jour |
+| Tests assistance IA | Tests unitaires et intégration | 0.5 jour |
 
 - [ ] Page Filament "Support Live"
 - [ ] Liste des conversations escaladées (avec indicateur canal chat/email)
 - [ ] Vue conversation avec historique
 - [ ] Formulaire de réponse
 - [ ] Actions de clôture
+- [ ] Panneau d'assistance IA (sources + suggestions)
+- [ ] Modal de confirmation email avec amélioration IA
+- [ ] AgentAssistanceService
 
 ### Phase 3 : Temps réel (4-5 jours)
 
@@ -1970,7 +2244,8 @@ app/
 │       ├── SupportTrainingService.php
 │       ├── ConversationToMarkdownService.php
 │       ├── EmailReplyParser.php
-│       └── AttachmentSecurityService.php    # NOUVEAU
+│       ├── AttachmentSecurityService.php
+│       └── AgentAssistanceService.php       # Assistance IA pour l'agent
 ├── Events/
 │   ├── ConversationEscalated.php
 │   ├── ConversationAssigned.php
