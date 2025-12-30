@@ -113,7 +113,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
     public function mount(): void
     {
         $this->loadAllSettings();
-        $this->loadLlmSettings();
         $this->loadVisionSettings();
         $this->refreshQueueStats();
     }
@@ -198,20 +197,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
             $defaults = PipelineToolsSetting::getDefaults();
             $this->toolsForm->fill($defaults);
         }
-        $settings = LlmChunkingSetting::getInstance();
-
-        $this->llmForm->fill([
-            'model' => $settings->model,
-            'ollama_host' => $settings->ollama_host,
-            'ollama_port' => $settings->ollama_port,
-            'temperature' => $settings->temperature,
-            'window_size' => $settings->window_size,
-            'overlap_percent' => $settings->overlap_percent,
-            'max_retries' => $settings->max_retries,
-            'timeout_seconds' => $settings->timeout_seconds,
-            'system_prompt' => $settings->system_prompt,
-            'enrichment_prompt' => $settings->enrichment_prompt,
-        ]);
     }
 
     protected function loadVisionSettings(): void
@@ -584,53 +569,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
     protected function getForms(): array
     {
         return [
-            'visionForm' => $this->makeForm()
-                ->schema([
-                    Section::make('Connexion Ollama')
-                        ->schema([
-                            Select::make('model')
-                                ->label('Modèle Vision')
-                                ->options(fn () => $this->getVisionModels())
-                                ->placeholder('Utiliser le modèle de l\'agent'),
-
-                            TextInput::make('ollama_host')
-                                ->label('Host')
-                                ->required()
-                                ->default('ollama'),
-
-                            TextInput::make('ollama_port')
-                                ->label('Port')
-                                ->numeric()
-                                ->required()
-                                ->default(11434),
-
-                            TextInput::make('temperature')
-                                ->label('Température')
-                                ->numeric()
-                                ->minValue(0)
-                                ->maxValue(1)
-                                ->step(0.1)
-                                ->default(0.3),
-
-                            TextInput::make('timeout_seconds')
-                                ->label('Timeout')
-                                ->numeric()
-                                ->default(300)
-                                ->suffix('s'),
-                        ])
-                        ->columns(5),
-
-                    Section::make('Prompt système')
-                        ->schema([
-                            Textarea::make('system_prompt')
-                                ->label('')
-                                ->rows(8)
-                                ->required()
-                                ->columnSpanFull(),
-                        ]),
-                ])
-                ->statePath('visionData'),
-
             'chunkingForm' => $this->makeForm()
                 ->schema([
                     Section::make('Connexion Ollama')
@@ -716,7 +654,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ])
                         ->collapsed(),
                 ])
-                ->statePath('llmData'),
+                ->statePath('chunkingData'),
 
             'visionForm' => $this->makeForm()
                 ->schema([
@@ -816,7 +754,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
                                 ->columnSpanFull(),
                         ]),
                 ])
-                ->statePath('chunkingData'),
+                ->statePath('visionData'),
 
             'qrForm' => $this->makeForm()
                 ->schema([
@@ -1138,8 +1076,8 @@ class GestionRagPage extends Page implements HasForms, HasTable
     {
         $defaultPrompt = LlmChunkingSetting::getDefaultEnrichmentPrompt();
 
-        $this->llmForm->fill([
-            ...$this->llmForm->getState(),
+        $this->chunkingForm->fill([
+            ...$this->chunkingForm->getState(),
             'enrichment_prompt' => $defaultPrompt,
         ]);
 
