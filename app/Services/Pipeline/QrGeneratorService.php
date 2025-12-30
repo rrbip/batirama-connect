@@ -148,7 +148,9 @@ RÉPONDS UNIQUEMENT avec un JSON valide au format suivant:
 }
 PROMPT;
 
-        $response = Http::timeout(120)
+        // Timeout illimité pour les appels LLM (peuvent prendre plusieurs minutes)
+        $response = Http::timeout(0)
+            ->connectTimeout(30)
             ->post("{$ollamaUrl}/api/generate", [
                 'model' => $model,
                 'prompt' => $prompt,
