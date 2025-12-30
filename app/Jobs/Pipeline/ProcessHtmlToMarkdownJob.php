@@ -94,9 +94,11 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
             $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
 
             if ($nextStepIndex !== null && $this->autoChain) {
+                // Auto mode: dispatch next step
                 $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
-            } elseif ($nextStepIndex === null) {
-                $orchestrator->markPipelineCompleted($document->fresh());
+            } else {
+                // Manual mode or last step: check if all steps are done
+                $orchestrator->checkAndCompletePipeline($document->fresh());
             }
 
         } catch (Throwable $e) {

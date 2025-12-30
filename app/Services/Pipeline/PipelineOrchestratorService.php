@@ -302,6 +302,30 @@ class PipelineOrchestratorService
     }
 
     /**
+     * Check if all steps are completed and mark pipeline as completed if so
+     */
+    public function checkAndCompletePipeline(Document $document): bool
+    {
+        $pipelineData = $document->pipeline_steps ?? ['steps' => []];
+        $steps = $pipelineData['steps'] ?? [];
+
+        if (empty($steps)) {
+            return false;
+        }
+
+        // Check if all steps are successful
+        foreach ($steps as $step) {
+            if ($step['status'] !== 'success') {
+                return false;
+            }
+        }
+
+        // All steps are completed - mark pipeline as completed
+        $this->markPipelineCompleted($document);
+        return true;
+    }
+
+    /**
      * Get the next step index in the pipeline
      */
     public function getNextStepIndex(Document $document, int $currentStepIndex): ?int
