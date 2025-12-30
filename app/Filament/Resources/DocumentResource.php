@@ -361,8 +361,10 @@ class DocumentResource extends Resource
                                                             ->title('Pipeline relancé')
                                                             ->body("Type: {$documentType} | Queue: {$queueDriver} | Jobs pipeline: {$jobCount} | Total jobs: {$totalJobs}")
                                                             ->success()
-                                                            ->persistent()
                                                             ->send();
+
+                                                        // Force page refresh to show updated pipeline
+                                                        return redirect(request()->header('Referer'));
 
                                                     } catch (\Throwable $e) {
                                                         \Log::error('Pipeline start failed', [

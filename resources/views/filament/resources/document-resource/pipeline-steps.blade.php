@@ -1,13 +1,19 @@
 @php
+    // Refresh the record to get latest data
+    $record = $record?->fresh();
     $pipelineData = $record?->pipeline_steps ?? [];
     $status = $pipelineData['status'] ?? 'not_started';
     $steps = $pipelineData['steps'] ?? [];
+
+    // Enable polling when pipeline is running
+    $isRunning = $status === 'running';
 
     $statusConfig = match ($status) {
         'not_started' => ['label' => 'Non démarré', 'color' => 'gray', 'icon' => 'clock'],
         'running' => ['label' => 'En cours', 'color' => 'warning', 'icon' => 'arrow-path'],
         'completed' => ['label' => 'Terminé', 'color' => 'success', 'icon' => 'check-circle'],
         'failed' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
+        'error' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
         default => ['label' => $status, 'color' => 'gray', 'icon' => 'question-mark-circle'],
     };
 
@@ -39,7 +45,7 @@
     ];
 @endphp
 
-<div class="space-y-6">
+<div class="space-y-6" @if($isRunning) wire:poll.5s @endif>
     {{-- Status global --}}
     <div class="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
         <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium
@@ -70,6 +76,36 @@
             <span class="text-sm text-gray-500 dark:text-gray-400">
                 Terminé: {{ \Carbon\Carbon::parse($pipelineData['completed_at'])->format('d/m/Y H:i') }}
             </span>
+        @endif
+
+        {{-- Auto-refresh indicator --}}
+        @if($isRunning)
+            <span class="inline-flex items-center gap-1 text-xs text-warning-600 dark:text-warning-400">
+                <x-heroicon-s-arrow-path class="w-3 h-3 animate-spin" />
+                Auto-refresh actif
+            </span>
+        @endif
+
+        {{-- Manual refresh button --}}
+        <button
+            type="button"
+            onclick="window.location.reload()"
+            class="ml-auto inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition"
+        >
+            <x-heroicon-o-arrow-path class="w-3 h-3" />
+            Actualiser
+        </button>
+    </div>
+
+    {{-- Debug info (document type) --}}
+    <div class="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-4">
+        <span>Type MIME: {{ $record?->mime_type ?? 'N/A' }}</span>
+        <span>Extraction: {{ $record?->extraction_status ?? 'N/A' }}</span>
+        @if($record?->storage_path)
+            <span>Fichier: ✓</span>
+        @endif
+        @if($record?->extracted_text)
+            <span>Texte: ✓ ({{ number_format(strlen($record->extracted_text)) }} chars)</span>
         @endif
     </div>
 
