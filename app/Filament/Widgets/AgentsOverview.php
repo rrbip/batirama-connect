@@ -16,6 +16,13 @@ class AgentsOverview extends ChartWidget
 
     protected int|string|array $columnSpan = 'half';
 
+    public static function canView(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     protected function getData(): array
     {
         $agents = Agent::withCount('documents')

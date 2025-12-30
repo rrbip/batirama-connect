@@ -1,7 +1,8 @@
 # Permissions par Rôle - Admin Filament
 
-> **Statut** : Spécification - En attente de développement
+> **Statut** : ✅ Implémenté
 > **Date de création** : 2025-12-30
+> **Date de mise à jour** : 2025-12-30
 > **Branche** : `claude/rag-refactor-planning-3F9Bx`
 
 ---
@@ -177,13 +178,51 @@ Le fabricant ne doit voir que :
    └── Mes Catalogues
 ```
 
-### 4.2 Dashboard personnalisé (optionnel - v2)
+### 4.2 Dashboard personnalisé
 
-Un dashboard spécifique pour les fabricants pourrait afficher :
-- Nombre de produits
-- Nombre de catalogues
-- Statistiques d'utilisation
-- Dernières commandes (si applicable)
+Le dashboard affiche des widgets différents selon le rôle :
+
+#### Widgets Admin (super-admin, admin)
+
+| Widget | Description |
+|--------|-------------|
+| `StatsOverview` | Stats globales (utilisateurs, agents, sessions, messages) |
+| `RecentActivity` | Activité récente du système (audit logs) |
+| `AiSessionsChart` | Graphique des sessions IA (7 jours) |
+| `AgentsOverview` | Distribution des documents par agent |
+| `PendingValidationWidget` | Réponses IA à valider |
+
+#### Widgets Fabricant
+
+| Widget | Description |
+|--------|-------------|
+| `FabricantStatsOverview` | Stats fabricant (catalogues, produits, en attente, ventes*) |
+| `FabricantRecentProducts` | Tableau des derniers produits ajoutés |
+| `FabricantProductsChart` | Distribution des produits par catalogue |
+
+*\* Les statistiques de ventes seront disponibles dans une version ultérieure*
+
+#### Implémentation
+
+Chaque widget utilise `canView()` pour contrôler sa visibilité :
+
+```php
+// Exemple : Widget admin only
+public static function canView(): bool
+{
+    $user = auth()->user();
+    return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+}
+
+// Exemple : Widget fabricant only
+public static function canView(): bool
+{
+    $user = auth()->user();
+    return $user && $user->hasRole('fabricant')
+        && !$user->hasRole('super-admin')
+        && !$user->hasRole('admin');
+}
+```
 
 ---
 
@@ -220,10 +259,12 @@ Un dashboard spécifique pour les fabricants pourrait afficher :
 
 ## 6. Checklist de développement
 
-- [ ] Ajouter `canAccess()` sur toutes les ressources admin-only
-- [ ] Ajouter filtrage `getEloquentQuery()` sur `FabricantCatalogResource`
-- [ ] Ajouter filtrage sur `FabricantProductResource` (via relation catalogue)
-- [ ] Vérifier les pages personnalisées (GestionRagPage, etc.)
+- [x] Ajouter `canAccess()` sur toutes les ressources admin-only
+- [x] Ajouter filtrage `getEloquentQuery()` sur `FabricantCatalogResource`
+- [x] Ajouter filtrage sur `FabricantProductResource` (via relation catalogue)
+- [x] Vérifier les pages personnalisées (GestionRagPage, etc.)
+- [x] Ajouter `canView()` sur tous les widgets admin
+- [x] Créer les widgets fabricant (stats, produits récents, chart)
 - [ ] Tester avec un compte fabricant
 - [ ] Tester avec un compte admin
 - [ ] Documenter les tests effectués
