@@ -7,6 +7,7 @@ namespace App\Services\Pipeline;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentChunk;
+use App\Models\QrAtomiqueSetting;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\QdrantService;
 use Illuminate\Support\Facades\Http;
@@ -36,20 +37,19 @@ class QrGeneratorService
         Document $document,
         array $config = []
     ): array {
-        $model = $config['model'] ?? $document->agent?->model ?? config('ai.ollama.default_model');
-        $temperature = $config['temperature'] ?? 0.3;
+        // Get Q/R settings from database configuration
+        $qrSettings = QrAtomiqueSetting::getInstance();
 
-        // Get existing categories for the prompt
-        $existingCategories = DocumentCategory::orderBy('name')->pluck('name')->toArray();
+        $model = $config['model'] ?? $qrSettings->getModelFor($document->agent);
+        $temperature = $config['temperature'] ?? $qrSettings->temperature ?? 0.3;
 
-        // Generate Q/R via LLM
+        // Generate Q/R via LLM using configured prompt
         $llmResponse = $this->callLlm(
             $chunk->content,
             $chunk->parent_context,
-            $existingCategories,
             $model,
             $temperature,
-            $document
+            $qrSettings
         );
 
         // Parse response
@@ -107,56 +107,21 @@ class QrGeneratorService
     protected function callLlm(
         string $content,
         ?string $parentContext,
-        array $existingCategories,
         string $model,
         float $temperature,
-        Document $document
+        QrAtomiqueSetting $qrSettings
     ): string {
-        $agent = $document->agent;
-        $ollamaHost = $agent?->ollama_host ?? config('ai.ollama.host');
-        $ollamaPort = $agent?->ollama_port ?? config('ai.ollama.port');
+        // Use settings for Ollama connection
+        $ollamaHost = $qrSettings->ollama_host ?? config('ai.ollama.host', 'ollama');
+        $ollamaPort = $qrSettings->ollama_port ?? config('ai.ollama.port', 11434);
         $ollamaUrl = "http://{$ollamaHost}:{$ollamaPort}";
+        $timeout = $qrSettings->timeout_seconds ?? 120;
 
-        $categoriesList = !empty($existingCategories)
-            ? implode(', ', $existingCategories)
-            : 'Aucune catégorie existante';
+        // Build prompt from configurable settings
+        $prompt = $qrSettings->buildPrompt($content, $parentContext);
 
-        $contextInfo = $parentContext
-            ? "Contexte du document: {$parentContext}\n\n"
-            : '';
-
-        $prompt = <<<PROMPT
-{$contextInfo}Analyse le texte suivant et génère des paires Question/Réponse.
-
-RÈGLES IMPORTANTES:
-1. RÉPONDS TOUJOURS EN FRANÇAIS - toutes les questions, réponses et résumés doivent être en français
-2. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
-3. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
-4. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
-5. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
-
-Catégories existantes: {$categoriesList}
-
-TEXTE À ANALYSER:
-{$content}
-
-RÉPONDS UNIQUEMENT EN FRANÇAIS avec un JSON valide au format suivant:
-{
-  "useful": true,
-  "category": "NOM_CATEGORIE",
-  "knowledge_units": [
-    {
-      "question": "Question claire et précise ?",
-      "answer": "Réponse autonome et complète."
-    }
-  ],
-  "summary": "Résumé en une phrase du contenu.",
-  "raw_content_clean": "Texte nettoyé..."
-}
-PROMPT;
-
-        // Timeout illimité pour les appels LLM (peuvent prendre plusieurs minutes)
-        $response = Http::timeout(0)
+        // Timeout configurable pour les appels LLM
+        $response = Http::timeout($timeout)
             ->connectTimeout(30)
             ->post("{$ollamaUrl}/api/generate", [
                 'model' => $model,
