@@ -64,12 +64,16 @@ class MarkdownChunkerService
         $currentSection = null;
         $currentStart = 0;
         $offset = 0;
+        $contentBeforeFirstHeader = '';
+        $contentBeforeFirstHeaderEnd = 0;
+        $foundFirstHeader = false;
 
         foreach ($lines as $lineIndex => $line) {
             $lineLength = strlen($line) + 1; // +1 for newline
 
             // Check if line is a header
             if (preg_match('/^(#{1,6})\s+(.+)$/', $line, $matches)) {
+                $foundFirstHeader = true;
                 $level = strlen($matches[1]);
                 $title = trim($matches[2]);
 
@@ -104,6 +108,10 @@ class MarkdownChunkerService
             } elseif ($currentSection !== null) {
                 // Add line to current section content
                 $currentSection['content'] .= $line . "\n";
+            } elseif (!$foundFirstHeader) {
+                // Capture content before the first header
+                $contentBeforeFirstHeader .= $line . "\n";
+                $contentBeforeFirstHeaderEnd = $offset + $lineLength;
             }
 
             $offset += $lineLength;
@@ -116,6 +124,34 @@ class MarkdownChunkerService
             if (!empty($currentSection['content'])) {
                 $sections[] = $currentSection;
             }
+        }
+
+        // If we found content before headers, add it as a section
+        $contentBeforeFirstHeader = trim($contentBeforeFirstHeader);
+        if (!empty($contentBeforeFirstHeader)) {
+            array_unshift($sections, [
+                'level' => 0,
+                'title' => '',
+                'content' => $contentBeforeFirstHeader,
+                'parents' => [],
+                'parent_context' => '',
+                'start' => 0,
+                'end' => $contentBeforeFirstHeaderEnd,
+            ]);
+        }
+
+        // FALLBACK: If NO headers were found at all, treat entire content as one section
+        if (empty($sections) && !empty(trim($markdown))) {
+            Log::info("No headers found in markdown, treating entire content as one section");
+            $sections[] = [
+                'level' => 0,
+                'title' => '',
+                'content' => trim($markdown),
+                'parents' => [],
+                'parent_context' => '',
+                'start' => 0,
+                'end' => strlen($markdown),
+            ];
         }
 
         return $sections;

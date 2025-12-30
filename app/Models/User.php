@@ -119,8 +119,13 @@ class User extends Authenticatable implements FilamentUser
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        // Vérifier si l'utilisateur a un rôle admin
+        // Vérifier si l'utilisateur a un rôle autorisé
         if ($this->hasRole('super-admin') || $this->hasRole('admin')) {
+            return true;
+        }
+
+        // Les fabricants ont accès au panel pour gérer leur catalogue
+        if ($this->hasRole('fabricant')) {
             return true;
         }
 

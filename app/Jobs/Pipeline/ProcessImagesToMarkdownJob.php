@@ -89,14 +89,15 @@ class ProcessImagesToMarkdownJob implements ShouldQueue
                 'token_count' => $tokenCount,
             ]);
 
-            // Chain to next step if auto mode
-            if ($this->autoChain) {
-                $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
-                if ($nextStepIndex !== null) {
-                    $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
-                } else {
-                    $orchestrator->markPipelineCompleted($document->fresh());
-                }
+            // Chain to next step or complete pipeline
+            $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
+
+            if ($nextStepIndex !== null && $this->autoChain) {
+                // Auto mode: dispatch next step
+                $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
+            } else {
+                // Manual mode or last step: check if all steps are done
+                $orchestrator->checkAndCompletePipeline($document->fresh());
             }
 
         } catch (Throwable $e) {

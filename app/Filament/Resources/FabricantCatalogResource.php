@@ -30,6 +30,30 @@ class FabricantCatalogResource extends Resource
 
     protected static ?int $navigationSort = 15;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && (
+            $user->hasRole('super-admin') ||
+            $user->hasRole('admin') ||
+            $user->hasRole('fabricant')
+        );
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+        $user = auth()->user();
+
+        // Les fabricants ne voient que leurs propres catalogues
+        if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+            $query->where('fabricant_id', $user->id);
+        }
+
+        return $query;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -59,7 +83,20 @@ class FabricantCatalogResource extends Resource
                                             ->required()
                                             ->searchable()
                                             ->preload()
-                                            ->helperText('Utilisateur avec le rôle Fabricant'),
+                                            ->helperText('Utilisateur avec le rôle Fabricant')
+                                            // Pour les fabricants: auto-assigner et masquer
+                                            ->default(function () {
+                                                $user = auth()->user();
+                                                if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+                                                    return $user->id;
+                                                }
+                                                return null;
+                                            })
+                                            ->disabled(function () {
+                                                $user = auth()->user();
+                                                return $user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin');
+                                            })
+                                            ->dehydrated(true),
 
                                         Forms\Components\TextInput::make('website_url')
                                             ->label('URL du site web')
@@ -67,7 +104,13 @@ class FabricantCatalogResource extends Resource
                                             ->url()
                                             ->maxLength(2048)
                                             ->placeholder('https://www.weber.fr')
-                                            ->helperText('Page d\'accueil ou page catalogue du fabricant'),
+                                            ->helperText(fn () => self::isFabricantOnly()
+                                                ? 'URL définie dans votre profil utilisateur'
+                                                : 'Page d\'accueil ou page catalogue du fabricant')
+                                            // Pour les fabricants: auto-remplir depuis le profil et verrouiller
+                                            ->default(fn () => self::isFabricantOnly() ? self::getFabricantWebsiteUrl() : null)
+                                            ->disabled(fn () => self::isFabricantOnly())
+                                            ->dehydrated(true),
 
                                         Forms\Components\Textarea::make('description')
                                             ->label('Description')
@@ -660,7 +703,52 @@ class FabricantCatalogResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
+        $user = auth()->user();
+
+        // Les fabricants voient le badge de leur propre catalogue
+        if ($user && $user->hasRole('fabricant') && ! $user->hasRole('admin') && ! $user->hasRole('super-admin')) {
+            return (string) static::getModel()::where('fabricant_id', $user->id)->count();
+        }
+
         return (string) static::getModel()::count();
+    }
+
+    /**
+     * Check if the current fabricant user already has a catalog.
+     */
+    public static function fabricantHasCatalog(): bool
+    {
+        $user = auth()->user();
+
+        if (! $user || ! $user->hasRole('fabricant') || $user->hasRole('admin') || $user->hasRole('super-admin')) {
+            return false;
+        }
+
+        return static::getModel()::where('fabricant_id', $user->id)->exists();
+    }
+
+    /**
+     * Get the website URL from the fabricant's profile.
+     */
+    public static function getFabricantWebsiteUrl(): ?string
+    {
+        $user = auth()->user();
+
+        if (! $user) {
+            return null;
+        }
+
+        return $user->company_info['website'] ?? null;
+    }
+
+    /**
+     * Check if the current user is a fabricant (not admin).
+     */
+    public static function isFabricantOnly(): bool
+    {
+        $user = auth()->user();
+
+        return $user && $user->hasRole('fabricant') && ! $user->hasRole('admin') && ! $user->hasRole('super-admin');
     }
 
     /**

@@ -96,20 +96,25 @@ class QrAtomiqueSetting extends Model
 {CONTEXT}Analyse le texte suivant et génère des paires Question/Réponse.
 
 RÈGLES IMPORTANTES:
-1. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
-2. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
-3. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
-4. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
+1. RÉPONDS TOUJOURS EN FRANÇAIS - toutes les questions, réponses et résumés doivent être en français
+2. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
+3. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
+4. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
+5. CATÉGORIE - RÈGLE STRICTE:
+   - Tu DOIS OBLIGATOIREMENT utiliser une catégorie de la liste existante ci-dessous
+   - Cherche la catégorie la plus proche sémantiquement (ex: "travaux" → "Rénovation", "courant électrique" → "Électricité")
+   - Crée une nouvelle catégorie UNIQUEMENT si aucune existante ne correspond, même de loin
+   - Format: Première lettre en majuscule, reste en minuscule (ex: "Rénovation", "Électricité", "Plomberie")
 
 Catégories existantes: {CATEGORIES}
 
 TEXTE À ANALYSER:
 {CONTENT}
 
-RÉPONDS UNIQUEMENT avec un JSON valide au format suivant:
+RÉPONDS UNIQUEMENT EN FRANÇAIS avec un JSON valide au format suivant:
 {
   "useful": true,
-  "category": "NOM_CATEGORIE",
+  "category": "Nom de catégorie",
   "knowledge_units": [
     {
       "question": "Question claire et précise ?",

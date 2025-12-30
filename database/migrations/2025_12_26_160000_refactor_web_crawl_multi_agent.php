@@ -85,42 +85,46 @@ return new class extends Migration
         // 3. Migrer les données existantes
         $this->migrateExistingData();
 
-        // 4. Modifier web_crawls : supprimer les colonnes agent-specific
-        Schema::table('web_crawls', function (Blueprint $table) {
-            // Supprimer la contrainte foreign key sur agent_id
-            $table->dropForeign(['agent_id']);
-            $table->dropColumn([
-                'agent_id',
-                'url_filter_mode',
-                'url_patterns',
-                'pages_indexed',
-                'pages_skipped',
-                'pages_error',
-                'documents_found',
-                'images_found',
-            ]);
-        });
-
-        // Supprimer chunk_strategy s'il existe (ajouté par migration précédente)
-        if (Schema::hasColumn('web_crawls', 'chunk_strategy')) {
+        // 4. Modifier web_crawls : supprimer les colonnes agent-specific (PostgreSQL only)
+        if (DB::getDriverName() === 'pgsql') {
             Schema::table('web_crawls', function (Blueprint $table) {
-                $table->dropColumn('chunk_strategy');
+                // Supprimer la contrainte foreign key sur agent_id
+                $table->dropForeign(['agent_id']);
+                $table->dropColumn([
+                    'agent_id',
+                    'url_filter_mode',
+                    'url_patterns',
+                    'pages_indexed',
+                    'pages_skipped',
+                    'pages_error',
+                    'documents_found',
+                    'images_found',
+                ]);
             });
+
+            // Supprimer chunk_strategy s'il existe (ajouté par migration précédente)
+            if (Schema::hasColumn('web_crawls', 'chunk_strategy')) {
+                Schema::table('web_crawls', function (Blueprint $table) {
+                    $table->dropColumn('chunk_strategy');
+                });
+            }
         }
 
-        // 5. Modifier web_crawl_url_crawl : simplifier
-        Schema::table('web_crawl_url_crawl', function (Blueprint $table) {
-            // Supprimer la contrainte foreign key sur document_id
-            if (Schema::hasColumn('web_crawl_url_crawl', 'document_id')) {
-                $table->dropForeign(['document_id']);
-                $table->dropColumn([
-                    'document_id',
-                    'matched_pattern',
-                    'skip_reason',
-                    'indexed_at',
-                ]);
-            }
-        });
+        // 5. Modifier web_crawl_url_crawl : simplifier (PostgreSQL only - SQLite can't drop columns with indexes)
+        if (DB::getDriverName() === 'pgsql') {
+            Schema::table('web_crawl_url_crawl', function (Blueprint $table) {
+                // Supprimer la contrainte foreign key sur document_id
+                if (Schema::hasColumn('web_crawl_url_crawl', 'document_id')) {
+                    $table->dropForeign(['document_id']);
+                    $table->dropColumn([
+                        'document_id',
+                        'matched_pattern',
+                        'skip_reason',
+                        'indexed_at',
+                    ]);
+                }
+            });
+        }
     }
 
     public function down(): void

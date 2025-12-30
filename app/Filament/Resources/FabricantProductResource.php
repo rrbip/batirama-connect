@@ -28,6 +28,32 @@ class FabricantProductResource extends Resource
 
     protected static ?int $navigationSort = 16;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && (
+            $user->hasRole('super-admin') ||
+            $user->hasRole('admin') ||
+            $user->hasRole('fabricant')
+        );
+    }
+
+    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        $query = parent::getEloquentQuery();
+        $user = auth()->user();
+
+        // Les fabricants ne voient que les produits de leurs propres catalogues
+        if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+            $query->whereHas('catalog', function ($q) use ($user) {
+                $q->where('fabricant_id', $user->id);
+            });
+        }
+
+        return $query;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -41,7 +67,13 @@ class FabricantProductResource extends Resource
                                     ->schema([
                                         Forms\Components\Select::make('catalog_id')
                                             ->label('Catalogue')
-                                            ->relationship('catalog', 'name')
+                                            ->relationship('catalog', 'name', function ($query) {
+                                                $user = auth()->user();
+                                                // Les fabricants ne voient que leurs propres catalogues
+                                                if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+                                                    $query->where('fabricant_id', $user->id);
+                                                }
+                                            })
                                             ->required()
                                             ->searchable()
                                             ->preload(),

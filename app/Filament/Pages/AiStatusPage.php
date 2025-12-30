@@ -33,6 +33,13 @@ class AiStatusPage extends Page
 
     protected static ?int $navigationSort = 10;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public array $services = [];
     public array $queueStats = [];
     public array $pendingJobs = [];
@@ -159,6 +166,63 @@ class AiStatusPage extends Page
             Notification::make()
                 ->title('Job annulé')
                 ->body('Le job a été supprimé de la file d\'attente.')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Supprime tous les jobs en attente d'une queue spécifique
+     */
+    public function clearQueueJobs(string $queueName): void
+    {
+        try {
+            $count = DB::table('jobs')->where('queue', $queueName)->count();
+
+            if ($count === 0) {
+                Notification::make()
+                    ->title('Queue vide')
+                    ->body("Aucun job à supprimer dans la queue '{$queueName}'.")
+                    ->warning()
+                    ->send();
+                return;
+            }
+
+            // Récupérer les jobs pour mettre à jour les documents associés
+            $jobs = DB::table('jobs')->where('queue', $queueName)->get();
+
+            foreach ($jobs as $job) {
+                $payload = json_decode($job->payload, true);
+                $data = $payload['data']['command'] ?? '';
+
+                // Remettre les documents en pending
+                if (preg_match('/document[";:\s]+[{]?[^}]*?"id";i:(\d+)/', $data, $matches) ||
+                    preg_match('/document_id[";:\s]+(\d+)/', $data, $matches)) {
+                    $documentId = (int) $matches[1];
+                    $document = Document::find($documentId);
+                    if ($document && $document->extraction_status === 'processing') {
+                        $document->update([
+                            'extraction_status' => 'pending',
+                            'extraction_error' => 'Job supprimé manuellement',
+                        ]);
+                    }
+                }
+            }
+
+            // Supprimer tous les jobs de la queue
+            DB::table('jobs')->where('queue', $queueName)->delete();
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Queue vidée')
+                ->body("{$count} job(s) supprimé(s) de la queue '{$queueName}'.")
                 ->success()
                 ->send();
         } catch (\Exception $e) {
@@ -496,6 +560,7 @@ class AiStatusPage extends Page
                     // Seuils différents par queue (en secondes)
                     $stuckThresholds = [
                         'llm-chunking' => 1800, // 30 minutes - LLM peut être lent
+                        'pipeline' => 1800,     // 30 minutes - Pipeline traitement complet
                         'default' => 600,       // 10 minutes
                         'ai-messages' => 300,   // 5 minutes
                     ];

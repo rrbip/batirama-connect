@@ -1,0 +1,325 @@
+# Permissions par Rôle - Admin Filament
+
+> **Statut** : ✅ Implémenté
+> **Date de création** : 2025-12-30
+> **Date de mise à jour** : 2025-12-30
+> **Branche** : `claude/rag-refactor-planning-3F9Bx`
+
+---
+
+## 1. Vue d'ensemble
+
+Ce document définit les permissions d'accès au panel admin Filament selon les rôles utilisateurs.
+
+### 1.1 Rôles existants
+
+| Rôle | Slug | Description |
+|------|------|-------------|
+| Super Admin | `super-admin` | Accès total à toutes les fonctionnalités |
+| Admin | `admin` | Administration générale |
+| Fabricant | `fabricant` | Gestion de son catalogue produits |
+| Éditeur | `editeur` | Gestion des déploiements d'agents |
+| Artisan | `artisan` | Utilisateur final (pas d'accès admin) |
+| Particulier | `particulier` | Utilisateur final (pas d'accès admin) |
+| Métreur | `metreur` | Utilisateur spécialisé |
+
+### 1.2 Principe d'accès au panel
+
+```php
+// App\Models\User::canAccessPanel()
+public function canAccessPanel(Panel $panel): bool
+{
+    // Admins : accès total
+    if ($this->hasRole('super-admin') || $this->hasRole('admin')) {
+        return true;
+    }
+
+    // Fabricants : accès limité à leur catalogue
+    if ($this->hasRole('fabricant')) {
+        return true;
+    }
+
+    // Autres rôles : pas d'accès au panel admin
+    return false;
+}
+```
+
+---
+
+## 2. Matrice des Permissions par Ressource
+
+### 2.1 Légende
+
+- ✅ Accès complet (CRUD)
+- 👁️ Lecture seule
+- 🔒 Filtré (voit uniquement ses propres données)
+- ❌ Pas d'accès
+
+### 2.2 Ressources Administration
+
+| Ressource | Super Admin | Admin | Fabricant |
+|-----------|-------------|-------|-----------|
+| **Users** | ✅ | ✅ | ❌ |
+| **Roles** | ✅ | 👁️ | ❌ |
+| **Tenants** | ✅ | ✅ | ❌ |
+| **Settings** | ✅ | ✅ | ❌ |
+| **Audit Logs** | ✅ | 👁️ | ❌ |
+
+### 2.3 Ressources IA / RAG
+
+| Ressource | Super Admin | Admin | Fabricant |
+|-----------|-------------|-------|-----------|
+| **AI Agents** | ✅ | ✅ | ❌ |
+| **Documents** | ✅ | ✅ | ❌ |
+| **Document Categories** | ✅ | ✅ | ❌ |
+| **AI Sessions** | ✅ | ✅ | ❌ |
+| **Gestion RAG** | ✅ | ✅ | ❌ |
+
+### 2.4 Ressources Marketplace
+
+| Ressource | Super Admin | Admin | Fabricant |
+|-----------|-------------|-------|-----------|
+| **Fabricant Catalogs** | ✅ | ✅ | 🔒 Ses catalogues |
+| **Fabricant Products** | ✅ | ✅ | 🔒 Ses produits |
+| **Agent Deployments** | ✅ | ✅ | ❌ |
+| **User Editor Links** | ✅ | ✅ | ❌ |
+
+### 2.5 Ressources Crawl
+
+| Ressource | Super Admin | Admin | Fabricant |
+|-----------|-------------|-------|-----------|
+| **Web Crawls** | ✅ | ✅ | ❌ |
+
+---
+
+## 3. Implémentation Technique
+
+### 3.1 Méthode `canAccess()` sur les ressources
+
+Chaque ressource Filament doit implémenter une méthode `canAccess()` pour contrôler la visibilité :
+
+```php
+// Exemple : App\Filament\Resources\UserResource.php
+
+public static function canAccess(): bool
+{
+    $user = auth()->user();
+
+    // Seuls les admins peuvent gérer les utilisateurs
+    return $user->hasRole('super-admin') || $user->hasRole('admin');
+}
+```
+
+### 3.2 Filtrage des données pour les fabricants
+
+Pour les ressources où le fabricant a un accès filtré, utiliser `getEloquentQuery()` :
+
+```php
+// Exemple : App\Filament\Resources\FabricantCatalogResource.php
+
+public static function canAccess(): bool
+{
+    $user = auth()->user();
+
+    return $user->hasRole('super-admin')
+        || $user->hasRole('admin')
+        || $user->hasRole('fabricant');
+}
+
+public static function getEloquentQuery(): Builder
+{
+    $query = parent::getEloquentQuery();
+    $user = auth()->user();
+
+    // Les fabricants ne voient que leurs propres catalogues
+    if ($user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+        $query->where('fabricant_id', $user->id);
+    }
+
+    return $query;
+}
+```
+
+### 3.3 Liste des ressources à modifier
+
+| Fichier | Action |
+|---------|--------|
+| `UserResource.php` | Ajouter `canAccess()` → admin only |
+| `RoleResource.php` | Ajouter `canAccess()` → admin only |
+| `TenantResource.php` | Ajouter `canAccess()` → admin only |
+| `AiAgentResource.php` | Ajouter `canAccess()` → admin only |
+| `DocumentResource.php` | Ajouter `canAccess()` → admin only |
+| `DocumentCategoryResource.php` | Ajouter `canAccess()` → admin only |
+| `AiSessionResource.php` | Ajouter `canAccess()` → admin only |
+| `WebCrawlResource.php` | Ajouter `canAccess()` → admin only |
+| `AgentDeploymentResource.php` | Ajouter `canAccess()` → admin only |
+| `UserEditorLinkResource.php` | Ajouter `canAccess()` → admin only |
+| `FabricantCatalogResource.php` | Ajouter `canAccess()` + filtre `fabricant_id` |
+| `FabricantProductResource.php` | Ajouter `canAccess()` + filtre via catalogue |
+
+### 3.4 Pages personnalisées
+
+| Page | Action |
+|------|--------|
+| `GestionRagPage.php` | Ajouter `canAccess()` → admin only |
+| Autres pages admin | Vérifier et restreindre si nécessaire |
+
+---
+
+## 4. Interface Fabricant
+
+### 4.1 Restrictions catalogue fabricant
+
+Un fabricant est limité à **un seul catalogue** basé sur l'URL de son site web déclaré dans son profil.
+
+| Règle | Description |
+|-------|-------------|
+| **Un catalogue par fabricant** | Le bouton "Créer" est masqué si un catalogue existe déjà |
+| **URL depuis le profil** | L'URL du site web est récupérée depuis `company_info.website` |
+| **URL non modifiable** | Le champ URL est en lecture seule pour les fabricants |
+| **URL requise** | Si aucune URL n'est configurée dans le profil, la création est bloquée |
+
+#### Implémentation
+
+```php
+// FabricantCatalogResource.php
+
+// Vérifie si le fabricant a déjà un catalogue
+public static function fabricantHasCatalog(): bool
+{
+    $user = auth()->user();
+    if (!$user || !$user->hasRole('fabricant') || $user->hasRole('admin')) {
+        return false;
+    }
+    return static::getModel()::where('fabricant_id', $user->id)->exists();
+}
+
+// Récupère l'URL du site web depuis le profil
+public static function getFabricantWebsiteUrl(): ?string
+{
+    $user = auth()->user();
+    return $user?->company_info['website'] ?? null;
+}
+```
+
+#### Configuration du profil fabricant
+
+L'URL du site web doit être configurée dans le champ `company_info` de l'utilisateur :
+
+```json
+{
+    "website": "https://www.exemple-fabricant.fr",
+    "siret": "12345678901234",
+    "address": "..."
+}
+```
+
+### 4.2 Menu de navigation
+
+Le fabricant ne doit voir que :
+
+```
+📦 Mon Catalogue
+   └── Mes Produits
+   └── Mes Catalogues (1 max)
+```
+
+### 4.3 Dashboard personnalisé
+
+Le dashboard affiche des widgets différents selon le rôle :
+
+#### Widgets Admin (super-admin, admin)
+
+| Widget | Description |
+|--------|-------------|
+| `StatsOverview` | Stats globales (utilisateurs, agents, sessions, messages) |
+| `RecentActivity` | Activité récente du système (audit logs) |
+| `AiSessionsChart` | Graphique des sessions IA (7 jours) |
+| `AgentsOverview` | Distribution des documents par agent |
+| `PendingValidationWidget` | Réponses IA à valider |
+
+#### Widgets Fabricant
+
+| Widget | Description |
+|--------|-------------|
+| `FabricantStatsOverview` | Stats fabricant (catalogues, produits, en attente, ventes*) |
+| `FabricantRecentProducts` | Tableau des derniers produits ajoutés |
+| `FabricantProductsChart` | Distribution des produits par catalogue |
+
+*\* Les statistiques de ventes seront disponibles dans une version ultérieure*
+
+#### Implémentation
+
+Chaque widget utilise `canView()` pour contrôler sa visibilité :
+
+```php
+// Exemple : Widget admin only
+public static function canView(): bool
+{
+    $user = auth()->user();
+    return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+}
+
+// Exemple : Widget fabricant only
+public static function canView(): bool
+{
+    $user = auth()->user();
+    return $user && $user->hasRole('fabricant')
+        && !$user->hasRole('super-admin')
+        && !$user->hasRole('admin');
+}
+```
+
+---
+
+## 5. Tests à effectuer
+
+### 5.1 Tests de connexion
+
+| Test | Résultat attendu |
+|------|------------------|
+| Login super-admin | ✅ Accès total |
+| Login admin | ✅ Accès total |
+| Login fabricant | ✅ Accès limité (catalogue) |
+| Login artisan | ❌ Refusé |
+| Login particulier | ❌ Refusé |
+
+### 5.2 Tests de visibilité des ressources
+
+| Test | Résultat attendu |
+|------|------------------|
+| Fabricant accède à /admin/users | ❌ 403 Forbidden |
+| Fabricant accède à /admin/fabricant-catalogs | ✅ Voit ses catalogues |
+| Fabricant crée un catalogue | ✅ `fabricant_id` = son ID |
+| Fabricant modifie catalogue d'un autre | ❌ 404 ou 403 |
+
+### 5.3 Tests de filtrage des données
+
+| Test | Résultat attendu |
+|------|------------------|
+| Admin liste les catalogues | Voit tous les catalogues |
+| Fabricant A liste les catalogues | Voit uniquement ses catalogues |
+| Fabricant A accède à l'URL du catalogue de B | ❌ 404 |
+
+---
+
+## 6. Checklist de développement
+
+- [x] Ajouter `canAccess()` sur toutes les ressources admin-only
+- [x] Ajouter filtrage `getEloquentQuery()` sur `FabricantCatalogResource`
+- [x] Ajouter filtrage sur `FabricantProductResource` (via relation catalogue)
+- [x] Vérifier les pages personnalisées (GestionRagPage, etc.)
+- [x] Ajouter `canView()` sur tous les widgets admin
+- [x] Créer les widgets fabricant (stats, produits récents, chart)
+- [ ] Tester avec un compte fabricant
+- [ ] Tester avec un compte admin
+- [ ] Documenter les tests effectués
+
+---
+
+## 7. Notes de sécurité
+
+1. **Ne jamais faire confiance au frontend** - Toutes les vérifications doivent être côté serveur
+2. **Vérifier les policies Laravel** - En plus de `canAccess()`, les policies peuvent ajouter une couche de sécurité
+3. **Auditer les accès** - Logger les tentatives d'accès non autorisées
+4. **Tester les URLs directes** - Un utilisateur peut essayer d'accéder directement à `/admin/users/1/edit`

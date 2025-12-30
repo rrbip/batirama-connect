@@ -76,6 +76,12 @@ class PendingValidationWidget extends BaseWidget
 
     public static function canView(): bool
     {
+        $user = auth()->user();
+
+        if (! $user || ! ($user->hasRole('super-admin') || $user->hasRole('admin'))) {
+            return false;
+        }
+
         return AiMessage::where('role', 'assistant')
             ->where('validation_status', 'pending')
             ->exists();

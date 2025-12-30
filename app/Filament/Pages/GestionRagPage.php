@@ -78,6 +78,13 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     protected static ?int $navigationSort = 2;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     #[Url]
     public string $activeTab = 'documents';
 
@@ -88,9 +95,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
     public ?array $toolsData = [];
 
     public array $queueStats = [];
-
-    // Vision settings properties
-    public ?array $visionData = [];
 
     public array $visionDiagnostics = [];
 
@@ -116,7 +120,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
     public function mount(): void
     {
         $this->loadAllSettings();
-        $this->loadLlmSettings();
         $this->loadVisionSettings();
         $this->refreshQueueStats();
     }
@@ -201,20 +204,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
             $defaults = PipelineToolsSetting::getDefaults();
             $this->toolsForm->fill($defaults);
         }
-        $settings = LlmChunkingSetting::getInstance();
-
-        $this->llmForm->fill([
-            'model' => $settings->model,
-            'ollama_host' => $settings->ollama_host,
-            'ollama_port' => $settings->ollama_port,
-            'temperature' => $settings->temperature,
-            'window_size' => $settings->window_size,
-            'overlap_percent' => $settings->overlap_percent,
-            'max_retries' => $settings->max_retries,
-            'timeout_seconds' => $settings->timeout_seconds,
-            'system_prompt' => $settings->system_prompt,
-            'enrichment_prompt' => $settings->enrichment_prompt,
-        ]);
     }
 
     protected function loadVisionSettings(): void
@@ -307,16 +296,19 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
                         'completed' => 'success',
-                        'processing' => 'warning',
-                        'failed' => 'danger',
+                        'processing', 'chunking', 'indexing' => 'warning',
+                        'failed', 'chunk_error' => 'danger',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
-                        default => '-',
+                        'chunk_error' => 'Erreur chunking',
+                        default => $state ?? '-',
                     }),
 
                 IconColumn::make('is_indexed')
@@ -341,9 +333,12 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     ->label('Statut extraction')
                     ->options([
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
+                        'chunk_error' => 'Erreur chunking',
                     ]),
 
                 TernaryFilter::make('is_indexed')
@@ -455,6 +450,34 @@ class GestionRagPage extends Page implements HasForms, HasTable
                 TernaryFilter::make('is_ai_generated')
                     ->label('Générée par IA'),
             ])
+            ->headerActions([
+                Action::make('normalize_all')
+                    ->label('Normaliser tout')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('warning')
+                    ->action(function () {
+                        $count = 0;
+                        foreach (DocumentCategory::all() as $category) {
+                            $normalized = mb_convert_case(
+                                mb_strtolower($category->name, 'UTF-8'),
+                                MB_CASE_TITLE,
+                                'UTF-8'
+                            );
+                            if ($category->name !== $normalized) {
+                                $category->update(['name' => $normalized]);
+                                $count++;
+                            }
+                        }
+
+                        Notification::make()
+                            ->title("{$count} catégorie(s) normalisée(s)")
+                            ->success()
+                            ->send();
+                    })
+                    ->requiresConfirmation()
+                    ->modalHeading('Normaliser toutes les catégories')
+                    ->modalDescription('Tous les noms seront convertis en "Title Case" (ex: "RÉNOVATION" → "Rénovation", "ELECTRICITé" → "Électricité")'),
+            ])
             ->actions([
                 Action::make('edit')
                     ->label('Modifier')
@@ -471,6 +494,31 @@ class GestionRagPage extends Page implements HasForms, HasTable
             ->bulkActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
+
+                    BulkAction::make('normalize_selected')
+                        ->label('Normaliser le formatage')
+                        ->icon('heroicon-o-pencil-square')
+                        ->action(function ($records) {
+                            foreach ($records as $category) {
+                                $normalized = mb_convert_case(
+                                    mb_strtolower($category->name, 'UTF-8'),
+                                    MB_CASE_TITLE,
+                                    'UTF-8'
+                                );
+                                if ($category->name !== $normalized) {
+                                    $category->update(['name' => $normalized]);
+                                }
+                            }
+
+                            Notification::make()
+                                ->title('Catégories normalisées')
+                                ->success()
+                                ->send();
+                        })
+                        ->deselectRecordsAfterCompletion()
+                        ->requiresConfirmation()
+                        ->modalHeading('Normaliser le formatage')
+                        ->modalDescription('Les noms seront convertis en "Title Case" (ex: "RÉNOVATION" → "Rénovation")'),
                 ]),
             ])
             ->defaultSort('usage_count', 'desc')
@@ -587,53 +635,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
     protected function getForms(): array
     {
         return [
-            'visionForm' => $this->makeForm()
-                ->schema([
-                    Section::make('Connexion Ollama')
-                        ->schema([
-                            Select::make('model')
-                                ->label('Modèle Vision')
-                                ->options(fn () => $this->getVisionModels())
-                                ->placeholder('Utiliser le modèle de l\'agent'),
-
-                            TextInput::make('ollama_host')
-                                ->label('Host')
-                                ->required()
-                                ->default('ollama'),
-
-                            TextInput::make('ollama_port')
-                                ->label('Port')
-                                ->numeric()
-                                ->required()
-                                ->default(11434),
-
-                            TextInput::make('temperature')
-                                ->label('Température')
-                                ->numeric()
-                                ->minValue(0)
-                                ->maxValue(1)
-                                ->step(0.1)
-                                ->default(0.3),
-
-                            TextInput::make('timeout_seconds')
-                                ->label('Timeout')
-                                ->numeric()
-                                ->default(300)
-                                ->suffix('s'),
-                        ])
-                        ->columns(5),
-
-                    Section::make('Prompt système')
-                        ->schema([
-                            Textarea::make('system_prompt')
-                                ->label('')
-                                ->rows(8)
-                                ->required()
-                                ->columnSpanFull(),
-                        ]),
-                ])
-                ->statePath('visionData'),
-
             'chunkingForm' => $this->makeForm()
                 ->schema([
                     Section::make('Connexion Ollama')
@@ -719,7 +720,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ])
                         ->collapsed(),
                 ])
-                ->statePath('llmData'),
+                ->statePath('chunkingData'),
 
             'visionForm' => $this->makeForm()
                 ->schema([
@@ -819,7 +820,7 @@ class GestionRagPage extends Page implements HasForms, HasTable
                                 ->columnSpanFull(),
                         ]),
                 ])
-                ->statePath('chunkingData'),
+                ->statePath('visionData'),
 
             'qrForm' => $this->makeForm()
                 ->schema([
@@ -940,7 +941,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
                         ->columns(1),
                 ])
                 ->statePath('toolsData'),
-                ->statePath('visionData'),
         ];
     }
 
@@ -1142,8 +1142,8 @@ class GestionRagPage extends Page implements HasForms, HasTable
     {
         $defaultPrompt = LlmChunkingSetting::getDefaultEnrichmentPrompt();
 
-        $this->llmForm->fill([
-            ...$this->llmForm->getState(),
+        $this->chunkingForm->fill([
+            ...$this->chunkingForm->getState(),
             'enrichment_prompt' => $defaultPrompt,
         ]);
 
@@ -1196,34 +1196,6 @@ class GestionRagPage extends Page implements HasForms, HasTable
                 'error' => $e->getMessage(),
             ];
         }
-    }
-
-    public function saveVisionSettings(): void
-    {
-        $data = $this->visionForm->getState();
-
-        $settings = VisionSetting::getInstance();
-        $settings->update($data);
-
-        Notification::make()
-            ->title('Configuration Vision sauvegardée')
-            ->success()
-            ->send();
-    }
-
-    public function resetVisionPrompt(): void
-    {
-        $defaultPrompt = VisionSetting::getDefaultPrompt();
-
-        $this->visionForm->fill([
-            ...$this->visionForm->getState(),
-            'system_prompt' => $defaultPrompt,
-        ]);
-
-        Notification::make()
-            ->title('Prompt réinitialisé')
-            ->info()
-            ->send();
     }
 
     public function testVisionConnection(): void

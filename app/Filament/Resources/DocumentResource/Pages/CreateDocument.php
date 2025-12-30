@@ -32,8 +32,6 @@ class CreateDocument extends CreateRecord
 
         // Handle file source
         if ($data['source_type'] === 'file' && isset($data['storage_path'])) {
-        // Extraire le nom original et le type du fichier uploadé
-        if (isset($data['storage_path'])) {
             $storagePath = $data['storage_path'];
             $data['original_name'] = basename($storagePath);
             $extension = pathinfo($data['original_name'], PATHINFO_EXTENSION);
@@ -47,14 +45,6 @@ class CreateDocument extends CreateRecord
                 $data['mime_type'] = $this->getMimeTypeFromExtension($extension);
                 $data['file_size'] = 0;
             }
-        }
-
-        // Déterminer la stratégie de chunking optimale (après avoir déterminé le type)
-        if (empty($data['chunk_strategy'])) {
-            $data['chunk_strategy'] = $this->getOptimalChunkStrategy(
-                $data['document_type'] ?? '',
-                $data['agent_id'] ?? null
-            );
         }
 
         return $data;
@@ -112,8 +102,9 @@ class CreateDocument extends CreateRecord
             \Log::warning("Failed to fetch URL: {$url}", ['error' => $e->getMessage()]);
         }
 
-        // Return minimal data if fetch failed
+        // Return minimal data if fetch failed - storage_path is nullable for URL sources
         return [
+            'storage_path' => null,
             'original_name' => basename($path) ?: $parsed['host'] ?? $url,
             'document_type' => $extension,
             'mime_type' => $this->getMimeTypeFromExtension($extension),
@@ -158,28 +149,6 @@ class CreateDocument extends CreateRecord
             'webp' => 'image/webp',
             default => 'application/octet-stream',
         };
-    }
-
-    /**
-     * Détermine la stratégie de chunking optimale selon le type de document
-     *
-     * - md, html, htm : utilise 'markdown' (découpage par headers)
-     * - Autres : utilise la stratégie par défaut de l'agent
-     */
-    private function getOptimalChunkStrategy(string $documentType, ?int $agentId): string
-    {
-        // Pour Markdown et HTML, la stratégie 'markdown' est optimale
-        if (in_array(strtolower($documentType), ['md', 'html', 'htm'])) {
-            return 'markdown';
-        }
-
-        // Pour les autres types, utiliser la stratégie de l'agent
-        if ($agentId) {
-            $agent = \App\Models\Agent::find($agentId);
-            return $agent?->getDefaultChunkStrategy() ?? 'sentence';
-        }
-
-        return 'sentence';
     }
 
     protected function getRedirectUrl(): string

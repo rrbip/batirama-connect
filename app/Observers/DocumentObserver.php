@@ -100,13 +100,24 @@ class DocumentObserver
         }
 
         try {
-            // Recuperer les IDs des chunks indexes
-            $chunkPointIds = $document->chunks()
-                ->whereNotNull('qdrant_point_id')
-                ->pluck('qdrant_point_id')
-                ->toArray();
+            // Recuperer les IDs des chunks indexes (format ancien et nouveau)
+            $allPointIds = [];
 
-            if (empty($chunkPointIds)) {
+            foreach ($document->chunks()->get() as $chunk) {
+                // Nouveau format: array de point IDs (Q/R Atomique)
+                if (!empty($chunk->qdrant_point_ids) && is_array($chunk->qdrant_point_ids)) {
+                    $allPointIds = array_merge($allPointIds, $chunk->qdrant_point_ids);
+                }
+
+                // Ancien format: single point ID
+                if (!empty($chunk->qdrant_point_id)) {
+                    $allPointIds[] = $chunk->qdrant_point_id;
+                }
+            }
+
+            $allPointIds = array_unique($allPointIds);
+
+            if (empty($allPointIds)) {
                 Log::info('Document has no indexed chunks to remove', [
                     'document_id' => $document->id,
                     'collection' => $collection,
@@ -115,19 +126,19 @@ class DocumentObserver
             }
 
             // Supprimer les points de Qdrant
-            $success = $this->qdrantService->delete($collection, $chunkPointIds);
+            $success = $this->qdrantService->delete($collection, $allPointIds);
 
             if ($success) {
                 Log::info('Document chunks removed from Qdrant', [
                     'document_id' => $document->id,
                     'collection' => $collection,
-                    'points_removed' => count($chunkPointIds),
+                    'points_removed' => count($allPointIds),
                 ]);
             } else {
                 Log::error('Failed to remove document chunks from Qdrant', [
                     'document_id' => $document->id,
                     'collection' => $collection,
-                    'point_ids' => $chunkPointIds,
+                    'point_count' => count($allPointIds),
                 ]);
             }
 

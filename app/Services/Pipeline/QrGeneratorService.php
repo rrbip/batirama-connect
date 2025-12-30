@@ -7,6 +7,7 @@ namespace App\Services\Pipeline;
 use App\Models\Document;
 use App\Models\DocumentCategory;
 use App\Models\DocumentChunk;
+use App\Models\QrAtomiqueSetting;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\QdrantService;
 use Illuminate\Support\Facades\Http;
@@ -36,20 +37,19 @@ class QrGeneratorService
         Document $document,
         array $config = []
     ): array {
-        $model = $config['model'] ?? $document->agent?->model ?? config('ai.ollama.default_model');
-        $temperature = $config['temperature'] ?? 0.3;
+        // Get Q/R settings from database configuration
+        $qrSettings = QrAtomiqueSetting::getInstance();
 
-        // Get existing categories for the prompt
-        $existingCategories = DocumentCategory::orderBy('name')->pluck('name')->toArray();
+        $model = $config['model'] ?? $qrSettings->getModelFor($document->agent);
+        $temperature = $config['temperature'] ?? $qrSettings->temperature ?? 0.3;
 
-        // Generate Q/R via LLM
+        // Generate Q/R via LLM using configured prompt
         $llmResponse = $this->callLlm(
             $chunk->content,
             $chunk->parent_context,
-            $existingCategories,
             $model,
             $temperature,
-            $document
+            $qrSettings
         );
 
         // Parse response
@@ -59,12 +59,18 @@ class QrGeneratorService
         $categoryName = $result['category'] ?? 'DIVERS';
         $category = $this->findOrCreateCategory($categoryName);
 
-        // Update chunk with Q/R data
+        // Update chunk with Q/R data and raw LLM response
         $chunk->update([
             'useful' => $result['useful'],
             'knowledge_units' => $result['knowledge_units'] ?? [],
             'summary' => $result['summary'] ?? null,
             'category_id' => $category->id,
+            'metadata' => array_merge($chunk->metadata ?? [], [
+                'llm_raw_response' => $llmResponse,
+                'llm_model' => $model,
+                'llm_temperature' => $temperature,
+                'llm_processed_at' => now()->toIso8601String(),
+            ]),
         ]);
 
         // Index to Qdrant if useful
@@ -101,54 +107,24 @@ class QrGeneratorService
     protected function callLlm(
         string $content,
         ?string $parentContext,
-        array $existingCategories,
         string $model,
         float $temperature,
-        Document $document
+        QrAtomiqueSetting $qrSettings
     ): string {
-        $agent = $document->agent;
-        $ollamaHost = $agent?->ollama_host ?? config('ai.ollama.host');
-        $ollamaPort = $agent?->ollama_port ?? config('ai.ollama.port');
+        // Use settings for Ollama connection
+        $ollamaHost = $qrSettings->ollama_host ?? config('ai.ollama.host', 'ollama');
+        $ollamaPort = $qrSettings->ollama_port ?? config('ai.ollama.port', 11434);
         $ollamaUrl = "http://{$ollamaHost}:{$ollamaPort}";
 
-        $categoriesList = !empty($existingCategories)
-            ? implode(', ', $existingCategories)
-            : 'Aucune catégorie existante';
+        // Timeout 0 = illimité (les appels LLM peuvent prendre plusieurs minutes)
+        $timeout = $qrSettings->timeout_seconds ?? 0;
 
-        $contextInfo = $parentContext
-            ? "Contexte du document: {$parentContext}\n\n"
-            : '';
+        // Build prompt from configurable settings
+        $prompt = $qrSettings->buildPrompt($content, $parentContext);
 
-        $prompt = <<<PROMPT
-{$contextInfo}Analyse le texte suivant et génère des paires Question/Réponse.
-
-RÈGLES IMPORTANTES:
-1. La réponse doit être AUTONOME et ne JAMAIS faire référence au texte source (ne pas dire "Comme indiqué dans le document", "Le texte mentionne", etc.)
-2. La réponse doit être directe et complète, comme si tu répondais à un utilisateur
-3. Si le texte n'a aucune valeur informative (copyright, navigation, etc.), réponds avec "useful": false
-4. Choisis une catégorie parmi les existantes ou proposes-en une nouvelle si nécessaire
-
-Catégories existantes: {$categoriesList}
-
-TEXTE À ANALYSER:
-{$content}
-
-RÉPONDS UNIQUEMENT avec un JSON valide au format suivant:
-{
-  "useful": true,
-  "category": "NOM_CATEGORIE",
-  "knowledge_units": [
-    {
-      "question": "Question claire et précise ?",
-      "answer": "Réponse autonome et complète."
-    }
-  ],
-  "summary": "Résumé en une phrase du contenu.",
-  "raw_content_clean": "Texte nettoyé..."
-}
-PROMPT;
-
-        $response = Http::timeout(120)
+        // Timeout illimité pour les appels LLM
+        $response = Http::timeout($timeout)
+            ->connectTimeout(30)
             ->post("{$ollamaUrl}/api/generate", [
                 'model' => $model,
                 'prompt' => $prompt,
@@ -217,24 +193,80 @@ PROMPT;
      */
     protected function findOrCreateCategory(string $name): DocumentCategory
     {
-        $slug = Str::slug($name);
+        // Normalize name: Title Case with proper UTF-8 support
+        $normalizedName = $this->normalizeCategory($name);
+        $slug = Str::slug($normalizedName);
 
+        // First try exact slug match
         $category = DocumentCategory::where('slug', $slug)->first();
+
+        // If not found, try fuzzy match on existing categories
+        if (!$category) {
+            $category = $this->findSimilarCategory($normalizedName, $slug);
+        }
 
         if (!$category) {
             $category = DocumentCategory::create([
-                'name' => strtoupper($name),
+                'name' => $normalizedName,
                 'slug' => $slug,
                 'description' => "Catégorie générée automatiquement",
                 'is_ai_generated' => true,
             ]);
 
-            Log::info("Created new category", ['name' => $name, 'slug' => $slug]);
+            Log::info("Created new category", ['name' => $normalizedName, 'slug' => $slug]);
         }
 
         $category->incrementUsage();
 
         return $category;
+    }
+
+    /**
+     * Normalize category name to Title Case with proper UTF-8 support
+     */
+    protected function normalizeCategory(string $name): string
+    {
+        // Trim and handle empty
+        $name = trim($name);
+        if (empty($name)) {
+            return 'Divers';
+        }
+
+        // Convert to Title Case (first letter uppercase, rest lowercase) with UTF-8 support
+        return mb_convert_case(mb_strtolower($name, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+    }
+
+    /**
+     * Try to find a similar existing category
+     */
+    protected function findSimilarCategory(string $name, string $slug): ?DocumentCategory
+    {
+        // Get all categories for comparison
+        $categories = DocumentCategory::all();
+
+        foreach ($categories as $category) {
+            // Check if slugs are similar (handles plurals, minor typos)
+            $existingSlug = $category->slug;
+
+            // Exact slug match (already checked, but double-check)
+            if ($existingSlug === $slug) {
+                return $category;
+            }
+
+            // One is prefix of the other (e.g., "renovation" vs "renovations")
+            if (str_starts_with($existingSlug, $slug) || str_starts_with($slug, $existingSlug)) {
+                $lengthDiff = abs(strlen($existingSlug) - strlen($slug));
+                if ($lengthDiff <= 2) {
+                    Log::info("Category fuzzy match", [
+                        'input' => $name,
+                        'matched' => $category->name,
+                    ]);
+                    return $category;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

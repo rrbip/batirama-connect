@@ -17,6 +17,13 @@ class RecentActivity extends BaseWidget
 
     protected static ?string $heading = 'Activité récente';
 
+    public static function canView(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public function table(Table $table): Table
     {
         return $table

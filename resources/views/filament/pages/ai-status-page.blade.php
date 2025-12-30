@@ -102,8 +102,9 @@
                         @foreach($queueStats['by_queue'] as $queue => $count)
                             <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full {{
                                 $queue === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                ($queue === 'pipeline' ? 'bg-orange-100 text-orange-700 dark:bg-orange-800 dark:text-orange-300' :
                                 ($queue === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'))
                             }}">
                                 {{ $queue }}: {{ $count }}
                             </span>
@@ -116,12 +117,12 @@
                         <div class="flex items-start gap-2">
                             <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
                             <div class="text-sm text-warning-700 dark:text-warning-300">
-                                <strong>Driver database actif.</strong> Assurez-vous qu'un worker est en cours d'exécution:
+                                <strong>Driver database actif.</strong> Le worker Docker (aim_queue) traite automatiquement les jobs.
                                 <code class="block mt-1 p-2 bg-gray-800 text-gray-100 rounded text-xs">
-php artisan queue:work --queue=default,llm-chunking
+php artisan queue:work --queue=ai-messages,default,pipeline,llm-chunking
                                 </code>
                                 <div class="mt-2 text-xs text-gray-500">
-                                    💡 L'ordre des queues définit la priorité : les messages IA (default) passent avant le chunking LLM.
+                                    💡 <strong>Priorité des queues :</strong> ai-messages → default → pipeline (traitement documents) → llm-chunking (découpage sémantique)
                                 </div>
                             </div>
                         </div>
@@ -237,8 +238,9 @@ php artisan queue:work --queue=default,llm-chunking
                                 <div class="flex items-center gap-3">
                                     <span class="px-2.5 py-1 text-sm font-semibold rounded-full {{
                                         $queue['name'] === 'llm-chunking' ? 'bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300' :
+                                        ($queue['name'] === 'pipeline' ? 'bg-orange-100 text-orange-700 dark:bg-orange-800 dark:text-orange-300' :
                                         ($queue['name'] === 'default' ? 'bg-primary-100 text-primary-700 dark:bg-primary-800 dark:text-primary-300' :
-                                        'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300')
+                                        'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'))
                                     }}">
                                         {{ $queue['name'] }}
                                     </span>
@@ -259,9 +261,22 @@ php artisan queue:work --queue=default,llm-chunking
                                     </span>
                                 </div>
 
-                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                    {{ $queue['total'] }} job(s) en file
-                                </span>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {{ $queue['total'] }} job(s) en file
+                                    </span>
+                                    <button
+                                        wire:click="clearQueueJobs('{{ $queue['name'] }}')"
+                                        wire:loading.attr="disabled"
+                                        wire:target="clearQueueJobs('{{ $queue['name'] }}')"
+                                        wire:confirm="Supprimer tous les jobs de la queue '{{ $queue['name'] }}' ? Les documents seront remis en attente."
+                                        class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-danger-600 rounded hover:bg-danger-700 disabled:opacity-50 transition"
+                                        title="Vider la queue"
+                                    >
+                                        <x-heroicon-o-trash class="w-3.5 h-3.5" />
+                                        Vider
+                                    </button>
+                                </div>
                             </div>
 
                             {{-- Queue Content --}}
@@ -337,14 +352,26 @@ php artisan queue:work --queue=default,llm-chunking
                                     </div>
                                     <div class="space-y-1">
                                         @foreach($queue['waiting'] as $job)
-                                            <div class="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-800 rounded text-sm">
+                                            <div class="flex items-center justify-between py-1.5 px-2 bg-gray-50 dark:bg-gray-800 rounded text-sm group">
                                                 <div class="flex items-center gap-2">
                                                     <span class="text-gray-900 dark:text-gray-100">{{ $job['name'] }}</span>
                                                     @if($job['document'])
                                                         <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['document'] }}</span>
                                                     @endif
                                                 </div>
-                                                <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['wait_time_human'] }}</span>
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-gray-500 dark:text-gray-400 text-xs">{{ $job['wait_time_human'] }}</span>
+                                                    <button
+                                                        wire:click="cancelJob({{ $job['id'] }})"
+                                                        wire:loading.attr="disabled"
+                                                        wire:target="cancelJob({{ $job['id'] }})"
+                                                        wire:confirm="Supprimer ce job ?"
+                                                        class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-danger-500 hover:bg-danger-50 dark:hover:bg-danger-900/20 rounded transition"
+                                                        title="Supprimer ce job"
+                                                    >
+                                                        <x-heroicon-o-x-mark class="w-4 h-4" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         @endforeach
                                         @if($queue['total'] > count($queue['waiting']) + ($queue['processing'] ? 1 : 0))
