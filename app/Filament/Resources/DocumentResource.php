@@ -42,7 +42,8 @@ class DocumentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Informations')
                             ->icon('heroicon-o-information-circle')
                             ->schema([
-                                Forms\Components\Section::make('Fichier')
+                                // Section Agent (obligatoire)
+                                Forms\Components\Section::make('Agent')
                                     ->schema([
                                         Forms\Components\Select::make('agent_id')
                                             ->label('Agent')
@@ -51,40 +52,84 @@ class DocumentResource extends Resource
                                             ->searchable()
                                             ->preload()
                                             ->live()
-                                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
-                                                if ($state) {
-                                                    $agent = \App\Models\Agent::find($state);
-                                                    if ($agent) {
-                                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
-                                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
-                                                    }
-                                                }
-                                            }),
+                                            ->helperText('L\'agent détermine la collection Qdrant où sera indexé le document'),
+                                    ])
+                                    ->columns(1),
 
-                                        // Upload pour nouveau document
+                                // Section Source (fichier OU URL)
+                                Forms\Components\Section::make('Source du document')
+                                    ->schema([
+                                        Forms\Components\ToggleButtons::make('source_type')
+                                            ->label('Type de source')
+                                            ->options([
+                                                'file' => 'Fichier',
+                                                'url' => 'URL',
+                                            ])
+                                            ->default('file')
+                                            ->inline()
+                                            ->live()
+                                            ->visible(fn ($record) => !$record),
+
+                                        // Upload pour fichier
                                         Forms\Components\FileUpload::make('storage_path')
                                             ->label('Document')
-                                            ->required()
+                                            ->required(fn (Forms\Get $get) => $get('source_type') === 'file')
                                             ->disk('local')
                                             ->directory('documents')
                                             ->acceptedFileTypes([
                                                 'application/pdf',
                                                 'text/plain',
                                                 'text/markdown',
-                                                'application/msword',
-                                                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                                // Images (OCR)
+                                                'text/html',
                                                 'image/png',
                                                 'image/jpeg',
                                                 'image/gif',
-                                                'image/bmp',
-                                                'image/tiff',
                                                 'image/webp',
                                             ])
-                                            ->maxSize(50 * 1024) // 50MB
+                                            ->maxSize(100 * 1024) // 100MB
                                             ->columnSpanFull()
-                                            ->visible(fn ($record) => !$record),
+                                            ->visible(fn (Forms\Get $get, $record) => !$record && $get('source_type') === 'file')
+                                            ->live()
+                                            ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                                if ($state) {
+                                                    // Auto-fill title from filename
+                                                    $filename = is_string($state) ? basename($state) : '';
+                                                    if ($filename) {
+                                                        $title = pathinfo($filename, PATHINFO_FILENAME);
+                                                        $title = str_replace(['_', '-'], ' ', $title);
+                                                        $title = ucfirst($title);
+                                                        $set('title', $title);
+                                                    }
+                                                }
+                                            }),
 
+                                        // Input URL
+                                        Forms\Components\TextInput::make('source_url')
+                                            ->label('URL')
+                                            ->url()
+                                            ->required(fn (Forms\Get $get) => $get('source_type') === 'url')
+                                            ->maxLength(2000)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get, $record) => !$record && $get('source_type') === 'url')
+                                            ->live()
+                                            ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                                if ($state) {
+                                                    // Auto-extract title from URL
+                                                    $parsed = parse_url($state);
+                                                    $path = $parsed['path'] ?? '';
+                                                    $title = basename($path) ?: ($parsed['host'] ?? '');
+                                                    $title = pathinfo($title, PATHINFO_FILENAME) ?: $title;
+                                                    $title = str_replace(['_', '-'], ' ', $title);
+                                                    $title = ucfirst($title);
+                                                    $set('title', $title);
+                                                }
+                                            }),
+                                    ])
+                                    ->visible(fn ($record) => !$record),
+
+                                // Section Métadonnées
+                                Forms\Components\Section::make('Métadonnées')
+                                    ->schema([
                                         Forms\Components\TextInput::make('title')
                                             ->label('Titre')
                                             ->maxLength(255)
@@ -94,12 +139,76 @@ class DocumentResource extends Resource
                                             ->label('Description')
                                             ->rows(3)
                                             ->columnSpanFull(),
+                                    ]),
 
-                                        Forms\Components\TextInput::make('source_url')
-                                            ->label('URL source')
-                                            ->url()
-                                            ->maxLength(500),
+                                // Section Pipeline (aperçu)
+                                Forms\Components\Section::make('Pipeline de traitement')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('pipeline_preview')
+                                            ->label('')
+                                            ->content(function (Forms\Get $get) {
+                                                $sourceType = $get('source_type') ?? 'file';
+                                                $storagePath = $get('storage_path');
+                                                $sourceUrl = $get('source_url');
 
+                                                $extension = null;
+                                                if ($sourceType === 'file' && $storagePath) {
+                                                    $extension = strtolower(pathinfo($storagePath, PATHINFO_EXTENSION));
+                                                } elseif ($sourceType === 'url' && $sourceUrl) {
+                                                    $parsed = parse_url($sourceUrl);
+                                                    $path = $parsed['path'] ?? '';
+                                                    $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+                                                    if (empty($extension) || !in_array($extension, ['pdf', 'html', 'htm', 'md', 'png', 'jpg', 'jpeg', 'gif', 'webp'])) {
+                                                        $extension = 'html'; // Default for URLs
+                                                    }
+                                                }
+
+                                                if (!$extension) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="text-gray-500 italic">Sélectionnez un fichier ou une URL pour voir le pipeline</div>'
+                                                    );
+                                                }
+
+                                                $pipeline = match ($extension) {
+                                                    'pdf' => [
+                                                        ['name' => 'PDF vers Images', 'tool' => 'pdftoppm', 'icon' => 'document'],
+                                                        ['name' => 'Images vers Markdown', 'tool' => 'Vision LLM', 'icon' => 'eye'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'png', 'jpg', 'jpeg', 'gif', 'webp' => [
+                                                        ['name' => 'Image vers Markdown', 'tool' => 'Vision LLM', 'icon' => 'eye'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'html', 'htm' => [
+                                                        ['name' => 'HTML vers Markdown', 'tool' => 'Turndown', 'icon' => 'code-bracket'],
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    'md' => [
+                                                        ['name' => 'Markdown vers Q/R', 'tool' => 'Q/R Atomique (direct)', 'icon' => 'chat-bubble-left-right'],
+                                                    ],
+                                                    default => [
+                                                        ['name' => 'Type non supporté', 'tool' => '-', 'icon' => 'exclamation-triangle'],
+                                                    ],
+                                                };
+
+                                                $html = '<div class="flex items-center gap-2 flex-wrap">';
+                                                foreach ($pipeline as $index => $step) {
+                                                    if ($index > 0) {
+                                                        $html .= '<svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>';
+                                                    }
+                                                    $html .= sprintf(
+                                                        '<div class="flex items-center gap-1 px-3 py-1.5 bg-primary-50 dark:bg-primary-900/20 rounded-lg border border-primary-200 dark:border-primary-800">
+                                                            <span class="text-sm font-medium text-primary-700 dark:text-primary-300">%s</span>
+                                                            <span class="text-xs text-primary-500 dark:text-primary-400">(%s)</span>
+                                                        </div>',
+                                                        e($step['name']),
+                                                        e($step['tool'])
+                                                    );
+                                                }
+                                                $html .= '</div>';
+
+                                                return new \Illuminate\Support\HtmlString($html);
+                                            })
                                         Forms\Components\Select::make('category')
                                             ->label('Catégorie')
                                             ->options([
@@ -123,7 +232,7 @@ class DocumentResource extends Resource
                                             ->helperText('Vision: préserve la structure des tableaux. OCR: pour les PDF scannés.')
                                             ->columnSpanFull(),
                                     ])
-                                    ->columns(2),
+                                    ->visible(fn ($record) => !$record),
 
                                 // Section fichier actuel (uniquement en édition)
                                 Forms\Components\Section::make('Fichier actuel')
@@ -197,43 +306,40 @@ class DocumentResource extends Resource
                                                 'application/pdf',
                                                 'text/plain',
                                                 'text/markdown',
-                                                'application/msword',
-                                                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                                // Images (OCR)
+                                                'text/html',
                                                 'image/png',
                                                 'image/jpeg',
                                                 'image/gif',
-                                                'image/bmp',
-                                                'image/tiff',
                                                 'image/webp',
                                             ])
-                                            ->maxSize(50 * 1024) // 50MB
+                                            ->maxSize(100 * 1024) // 100MB
                                             ->helperText('Uploadez un nouveau fichier pour remplacer l\'actuel. Le document sera automatiquement retraité.')
                                             ->columnSpanFull()
-                                            ->live()
-                                            ->afterStateUpdated(function ($state, $record, Forms\Set $set) {
-                                                // Le fichier sera traité lors de la sauvegarde
-                                            }),
+                                            ->live(),
                                     ])
                                     ->visible(fn ($record) => $record !== null)
                                     ->collapsed(),
                             ]),
 
-                        Forms\Components\Tabs\Tab::make('Extraction')
-                            ->icon('heroicon-o-document-magnifying-glass')
+                        Forms\Components\Tabs\Tab::make('Pipeline')
+                            ->icon('heroicon-o-adjustments-horizontal')
                             ->schema([
-                                Forms\Components\Section::make('Statut extraction')
+                                // Pipeline Status Overview
+                                Forms\Components\Section::make('Statut du pipeline')
                                     ->schema([
-                                        Forms\Components\Placeholder::make('extraction_status_display')
-                                            ->label('Statut')
-                                            ->content(fn ($record) => match ($record?->extraction_status) {
-                                                'pending' => 'En attente',
-                                                'processing' => 'En cours',
-                                                'completed' => 'Terminé',
-                                                'failed' => 'Échoué',
-                                                default => '-',
-                                            }),
+                                        Forms\Components\Placeholder::make('pipeline_status_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $pipelineData = $record?->pipeline_steps ?? [];
+                                                $status = $pipelineData['status'] ?? 'not_started';
 
+                                                $statusInfo = match ($status) {
+                                                    'not_started' => ['label' => 'Non démarré', 'color' => 'gray', 'icon' => 'clock'],
+                                                    'running' => ['label' => 'En cours', 'color' => 'warning', 'icon' => 'arrow-path'],
+                                                    'completed' => ['label' => 'Terminé', 'color' => 'success', 'icon' => 'check-circle'],
+                                                    'failed' => ['label' => 'Échoué', 'color' => 'danger', 'icon' => 'x-circle'],
+                                                    default => ['label' => $status, 'color' => 'gray', 'icon' => 'question-mark-circle'],
+                                                };
                                         Forms\Components\Placeholder::make('extraction_method_display')
                                             ->label('Méthode utilisée')
                                             ->content(fn ($record) => match ($record?->extraction_method) {
@@ -245,20 +351,107 @@ class DocumentResource extends Resource
                                                 default => $record?->extraction_method,
                                             }),
 
-                                        Forms\Components\Placeholder::make('extracted_at_display')
-                                            ->label('Extrait le')
-                                            ->content(fn ($record) => $record?->extracted_at?->format('d/m/Y H:i') ?? '-'),
+                                                $startedAt = isset($pipelineData['started_at']) ? \Carbon\Carbon::parse($pipelineData['started_at'])->format('d/m/Y H:i') : '-';
+                                                $completedAt = isset($pipelineData['completed_at']) ? \Carbon\Carbon::parse($pipelineData['completed_at'])->format('d/m/Y H:i') : '-';
 
-                                        Forms\Components\Placeholder::make('chunk_count_display')
-                                            ->label('Nombre de chunks')
-                                            ->content(fn ($record) => $record?->chunk_count ?? 0),
+                                                return new \Illuminate\Support\HtmlString(sprintf(
+                                                    '<div class="flex items-center gap-4">
+                                                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-%s-100 text-%s-800 dark:bg-%s-900/30 dark:text-%s-300">
+                                                            %s
+                                                        </span>
+                                                        <span class="text-sm text-gray-500">Démarré: %s</span>
+                                                        <span class="text-sm text-gray-500">Terminé: %s</span>
+                                                    </div>',
+                                                    $statusInfo['color'], $statusInfo['color'], $statusInfo['color'], $statusInfo['color'],
+                                                    $statusInfo['label'],
+                                                    $startedAt,
+                                                    $completedAt
+                                                ));
+                                            })
+                                            ->columnSpanFull(),
+                                    ]),
 
-                                        Forms\Components\Placeholder::make('file_size_display')
-                                            ->label('Taille')
-                                            ->content(fn ($record) => $record?->getFileSizeForHumans() ?? '-'),
-                                    ])
-                                    ->columns(5),
+                                // Pipeline Steps
+                                Forms\Components\Section::make('Étapes du pipeline')
+                                    ->schema([
+                                        Forms\Components\Placeholder::make('pipeline_steps_display')
+                                            ->label('')
+                                            ->content(function ($record) {
+                                                $pipelineData = $record?->pipeline_steps ?? [];
+                                                $steps = $pipelineData['steps'] ?? [];
 
+                                                if (empty($steps)) {
+                                                    return new \Illuminate\Support\HtmlString(
+                                                        '<div class="text-gray-500 italic">Aucune étape de pipeline configurée</div>'
+                                                    );
+                                                }
+
+                                                $html = '<div class="space-y-4">';
+                                                foreach ($steps as $index => $step) {
+                                                    $status = $step['status'] ?? 'pending';
+                                                    $statusInfo = match ($status) {
+                                                        'pending' => ['label' => 'En attente', 'color' => 'gray', 'bg' => 'bg-gray-100 dark:bg-gray-800'],
+                                                        'running' => ['label' => 'En cours', 'color' => 'warning', 'bg' => 'bg-warning-50 dark:bg-warning-900/20'],
+                                                        'completed' => ['label' => 'Terminé', 'color' => 'success', 'bg' => 'bg-success-50 dark:bg-success-900/20'],
+                                                        'failed' => ['label' => 'Échoué', 'color' => 'danger', 'bg' => 'bg-danger-50 dark:bg-danger-900/20'],
+                                                        default => ['label' => $status, 'color' => 'gray', 'bg' => 'bg-gray-100 dark:bg-gray-800'],
+                                                    };
+
+                                                    $stepName = $step['name'] ?? "Étape {$index}";
+                                                    $tool = $step['tool'] ?? '-';
+                                                    $startedAt = isset($step['started_at']) ? \Carbon\Carbon::parse($step['started_at'])->format('H:i:s') : '-';
+                                                    $completedAt = isset($step['completed_at']) ? \Carbon\Carbon::parse($step['completed_at'])->format('H:i:s') : '-';
+                                                    $duration = isset($step['duration_seconds']) ? round($step['duration_seconds'], 2) . 's' : '-';
+                                                    $inputSummary = $step['input_summary'] ?? '-';
+                                                    $outputSummary = $step['output_summary'] ?? '-';
+                                                    $error = $step['error'] ?? null;
+
+                                                    $html .= sprintf(
+                                                        '<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                                            <div class="px-4 py-3 %s flex justify-between items-center">
+                                                                <div class="flex items-center gap-3">
+                                                                    <span class="font-semibold">Étape %d: %s</span>
+                                                                    <span class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700">%s</span>
+                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-%s-100 text-%s-800 dark:bg-%s-900/50 dark:text-%s-300">%s</span>
+                                                                </div>
+                                                                <span class="text-sm text-gray-500">Durée: %s</span>
+                                                            </div>
+                                                            <div class="px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+                                                                <div class="grid grid-cols-2 gap-4 text-sm">
+                                                                    <div>
+                                                                        <span class="text-gray-500">Entrée:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Sortie:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Début:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                    <div>
+                                                                        <span class="text-gray-500">Fin:</span>
+                                                                        <span class="ml-2">%s</span>
+                                                                    </div>
+                                                                </div>
+                                                                %s
+                                                            </div>
+                                                        </div>',
+                                                        $statusInfo['bg'],
+                                                        $index + 1,
+                                                        e($stepName),
+                                                        e($tool),
+                                                        $statusInfo['color'], $statusInfo['color'], $statusInfo['color'], $statusInfo['color'],
+                                                        $statusInfo['label'],
+                                                        $duration,
+                                                        e($inputSummary),
+                                                        e($outputSummary),
+                                                        $startedAt,
+                                                        $completedAt,
+                                                        $error ? sprintf('<div class="mt-3 p-2 bg-danger-50 dark:bg-danger-900/20 rounded text-sm text-danger-700 dark:text-danger-300"><strong>Erreur:</strong> %s</div>', e($error)) : ''
+                                                    );
+                                                }
                                 // Section Pipeline Vision (uniquement pour extraction vision)
                                 Forms\Components\Section::make('Pipeline d\'extraction Vision')
                                     ->description('Détails du traitement PDF → Images → Markdown')
@@ -694,6 +887,47 @@ class DocumentResource extends Resource
                                                 return new \Illuminate\Support\HtmlString($html);
                                             })
                                             ->columnSpanFull(),
+
+                                        // Actions
+                                        Forms\Components\Actions::make([
+                                            Forms\Components\Actions\Action::make('restart_pipeline')
+                                                ->label('Relancer tout le pipeline')
+                                                ->icon('heroicon-o-arrow-path')
+                                                ->color('warning')
+                                                ->requiresConfirmation()
+                                                ->modalHeading('Relancer le pipeline')
+                                                ->modalDescription('Cette action va supprimer les chunks existants et relancer tout le pipeline. Continuer ?')
+                                                ->action(function ($record) {
+                                                    $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+                                                    $orchestrator->startPipeline($record);
+                                                    Notification::make()->title('Pipeline relancé')->success()->send();
+                                                }),
+
+                                            Forms\Components\Actions\Action::make('continue_pipeline')
+                                                ->label('Continuer depuis l\'échec')
+                                                ->icon('heroicon-o-play')
+                                                ->color('success')
+                                                ->visible(fn ($record) => ($record?->pipeline_steps['status'] ?? '') === 'failed')
+                                                ->action(function ($record) {
+                                                    $pipelineData = $record->pipeline_steps ?? [];
+                                                    $failedIndex = null;
+                                                    foreach (($pipelineData['steps'] ?? []) as $index => $step) {
+                                                        if (($step['status'] ?? '') === 'failed') {
+                                                            $failedIndex = $index;
+                                                            break;
+                                                        }
+                                                    }
+                                                    if ($failedIndex !== null) {
+                                                        $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+                                                        $orchestrator->relaunchStep($record, $failedIndex);
+                                                        Notification::make()->title('Étape relancée')->success()->send();
+                                                    }
+                                                }),
+                                        ])->columnSpanFull(),
+                                    ]),
+
+                                // Extracted Text (collapsible)
+                                Forms\Components\Section::make('Texte extrait (Markdown)')
                                     ])
                                     ->collapsible()
                                     ->visible(fn ($record) => in_array($record?->document_type, ['html', 'htm']) || !empty($record?->extraction_metadata['html_extraction'] ?? null)),
@@ -931,12 +1165,13 @@ class DocumentResource extends Resource
                                             ->label('')
                                             ->rows(15)
                                             ->columnSpanFull()
-                                            ->hint('Après modification, utilisez "Re-chunker" pour régénérer les chunks'),
+                                            ->hint('Contenu Markdown généré par le pipeline'),
                                     ])
                                     ->collapsed()
                                     ->visible(fn ($record) => $record?->extracted_text),
 
-                                Forms\Components\Section::make('Erreur')
+                                // Error Section
+                                Forms\Components\Section::make('Erreur extraction')
                                     ->schema([
                                         Forms\Components\Textarea::make('extraction_error')
                                             ->label('')
@@ -1203,15 +1438,15 @@ class DocumentResource extends Resource
                 Tables\Filters\TernaryFilter::make('is_indexed')
                     ->label('Indexé'),
 
-                Tables\Filters\SelectFilter::make('category')
-                    ->label('Catégorie')
+                Tables\Filters\SelectFilter::make('document_type')
+                    ->label('Type')
                     ->options([
-                        'documentation' => 'Documentation',
-                        'faq' => 'FAQ',
-                        'product' => 'Produit',
-                        'support' => 'Support',
-                        'legal' => 'Légal',
-                        'other' => 'Autre',
+                        'pdf' => 'PDF',
+                        'html' => 'HTML',
+                        'md' => 'Markdown',
+                        'png' => 'PNG',
+                        'jpg' => 'JPG',
+                        'jpeg' => 'JPEG',
                     ]),
             ])
             ->actions([

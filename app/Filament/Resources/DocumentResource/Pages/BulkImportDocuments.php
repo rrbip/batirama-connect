@@ -43,22 +43,7 @@ class BulkImportDocuments extends Page
                             ->options(Agent::pluck('name', 'id'))
                             ->required()
                             ->searchable()
-                            ->live()
-                            ->afterStateUpdated(function (Forms\Set $set, ?string $state) {
-                                if ($state) {
-                                    $agent = Agent::find($state);
-                                    if ($agent) {
-                                        $set('chunk_strategy', $agent->getDefaultChunkStrategy());
-                                        $set('extraction_method', $agent->getDefaultExtractionMethod());
-                                    }
-                                }
-                            })
-                            ->helperText('Tous les documents importés seront associés à cet agent.'),
-
-                        Forms\Components\TextInput::make('category_prefix')
-                            ->label('Préfixe de catégorie (optionnel)')
-                            ->placeholder('Ex: Import 2024')
-                            ->helperText('Sera ajouté devant la catégorie dérivée du chemin du dossier.'),
+                            ->helperText('Tous les documents importés seront associés à cet agent et indexés dans sa collection Qdrant.'),
 
                         Forms\Components\Select::make('max_depth')
                             ->label('Profondeur max des dossiers')
@@ -70,6 +55,7 @@ class BulkImportDocuments extends Page
                                 99 => 'Illimité',
                             ])
                             ->default(2)
+                            ->helperText('Pour les ZIP : nombre de niveaux de sous-dossiers à utiliser comme contexte parent.'),
                             ->helperText('Pour les ZIP : nombre de niveaux de sous-dossiers à utiliser comme catégorie.'),
 
                         Forms\Components\Select::make('extraction_method')
@@ -96,7 +82,25 @@ class BulkImportDocuments extends Page
                             ->default('sentence')
                             ->helperText('Markdown: optimal pour HTML/MD. Automatiquement défini selon l\'agent.'),
                     ])
-                    ->columns(3),
+                    ->columns(2),
+
+                Forms\Components\Section::make('Pipeline automatique')
+                    ->schema([
+                        Forms\Components\Placeholder::make('pipeline_info')
+                            ->label('')
+                            ->content(new \Illuminate\Support\HtmlString(
+                                '<div class="text-sm text-gray-600 dark:text-gray-400">
+                                    <p class="mb-2">Chaque document sera traité automatiquement selon son type :</p>
+                                    <ul class="list-disc pl-4 space-y-1">
+                                        <li><strong>PDF</strong> : PDF → Images → Markdown (Vision LLM) → Q/R Atomique → Qdrant</li>
+                                        <li><strong>Images</strong> : Image → Markdown (Vision LLM) → Q/R Atomique → Qdrant</li>
+                                        <li><strong>HTML</strong> : HTML → Markdown (Turndown) → Q/R Atomique → Qdrant</li>
+                                        <li><strong>Markdown</strong> : Markdown → Q/R Atomique → Qdrant</li>
+                                    </ul>
+                                </div>'
+                            ))
+                            ->columnSpanFull(),
+                    ]),
 
                 Forms\Components\Tabs::make('Import')
                     ->tabs([
@@ -166,11 +170,8 @@ class BulkImportDocuments extends Page
         }
 
         $agentId = $data['agent_id'];
-        $categoryPrefix = $data['category_prefix'] ?? '';
         $maxDepth = (int) ($data['max_depth'] ?? 2);
         $skipRootFolder = $data['skip_root_folder'] ?? true;
-        $extractionMethod = $data['extraction_method'] ?? 'auto';
-        $chunkStrategy = $data['chunk_strategy'] ?? 'sentence';
 
         $filesToProcess = [];
 
@@ -184,7 +185,7 @@ class BulkImportDocuments extends Page
                 $filesToProcess[] = [
                     'path' => $fullPath,
                     'original_name' => $originalName,
-                    'category' => $categoryPrefix ?: null,
+                    'parent_context' => null,
                 ];
             }
         }
@@ -193,7 +194,7 @@ class BulkImportDocuments extends Page
         if (!empty($data['zip_file'])) {
             $zipPath = Storage::disk('local')->path($data['zip_file']);
 
-            $extractedFiles = $this->extractZipFile($zipPath, $categoryPrefix, $maxDepth, $skipRootFolder);
+            $extractedFiles = $this->extractZipFile($zipPath, $maxDepth, $skipRootFolder);
             $filesToProcess = array_merge($filesToProcess, $extractedFiles);
 
             // Supprimer le fichier ZIP temporaire après extraction
@@ -213,11 +214,9 @@ class BulkImportDocuments extends Page
         \Illuminate\Support\Facades\Log::info('Dispatching ProcessBulkImportJob', [
             'agent_id' => $agentId,
             'file_count' => count($filesToProcess),
-            'extraction_method' => $extractionMethod,
-            'chunk_strategy' => $chunkStrategy,
         ]);
 
-        ProcessBulkImportJob::dispatch($agentId, $filesToProcess, $extractionMethod, $chunkStrategy);
+        ProcessBulkImportJob::dispatch($agentId, $filesToProcess);
 
         \Illuminate\Support\Facades\Log::info('ProcessBulkImportJob dispatched successfully');
 
@@ -234,7 +233,7 @@ class BulkImportDocuments extends Page
     /**
      * Extrait les fichiers d'une archive ZIP
      */
-    private function extractZipFile(string $zipPath, string $categoryPrefix, int $maxDepth, bool $skipRootFolder): array
+    private function extractZipFile(string $zipPath, int $maxDepth, bool $skipRootFolder): array
     {
         $files = [];
         $zip = new ZipArchive();
@@ -293,8 +292,8 @@ class BulkImportDocuments extends Page
                 $relativePath = substr($relativePath, strlen($rootFolder));
             }
 
-            // Extraire la catégorie du chemin
-            $category = $this->pathToCategory($relativePath, $maxDepth, $categoryPrefix);
+            // Extraire le contexte parent du chemin (utilisé pour le chunking)
+            $parentContext = $this->pathToParentContext($relativePath, $maxDepth);
 
             // Copier le fichier vers un emplacement permanent temporaire
             $newPath = storage_path('app/temp-imports/' . Str::uuid() . '.' . $extension);
@@ -303,7 +302,7 @@ class BulkImportDocuments extends Page
             $files[] = [
                 'path' => $newPath,
                 'original_name' => $file->getFilename(),
-                'category' => $category,
+                'parent_context' => $parentContext,
             ];
         }
 
@@ -314,15 +313,15 @@ class BulkImportDocuments extends Page
     }
 
     /**
-     * Convertit un chemin de fichier en catégorie
+     * Convertit un chemin de fichier en contexte parent (breadcrumb)
      */
-    private function pathToCategory(string $relativePath, int $maxDepth, string $prefix): ?string
+    private function pathToParentContext(string $relativePath, int $maxDepth): ?string
     {
         $parts = explode('/', dirname($relativePath));
         $parts = array_filter($parts, fn($p) => $p !== '.' && $p !== '');
 
         if (empty($parts)) {
-            return $prefix ?: null;
+            return null;
         }
 
         // Limiter la profondeur
@@ -330,13 +329,7 @@ class BulkImportDocuments extends Page
             $parts = array_slice($parts, 0, $maxDepth);
         }
 
-        $category = implode(' > ', $parts);
-
-        if ($prefix) {
-            $category = $prefix . ' > ' . $category;
-        }
-
-        return $category;
+        return implode(' > ', $parts);
     }
 
     /**

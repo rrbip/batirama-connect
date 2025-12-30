@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Models\Document;
+use App\Services\Pipeline\PipelineOrchestratorService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -30,21 +31,17 @@ class ProcessBulkImportJob implements ShouldQueue
 
     /**
      * @param int $agentId
-     * @param array<array{path: string, original_name: string, category: ?string}> $files
-     * @param string $extractionMethod Méthode d'extraction: 'auto', 'text', ou 'ocr'
-     * @param string $chunkStrategy Stratégie de chunking: 'sentence', 'paragraph', 'fixed_size', 'recursive'
+     * @param array<array{path: string, original_name: string, parent_context: ?string}> $files
      */
     public function __construct(
         public int $agentId,
-        public array $files,
-        public string $extractionMethod = 'auto',
-        public string $chunkStrategy = 'sentence'
+        public array $files
     ) {
         // Forcer l'utilisation de la queue 'default'
         $this->onQueue('default');
     }
 
-    public function handle(): void
+    public function handle(PipelineOrchestratorService $orchestrator): void
     {
         Log::info('Starting bulk import', [
             'agent_id' => $this->agentId,
@@ -57,7 +54,11 @@ class ProcessBulkImportJob implements ShouldQueue
 
         foreach ($this->files as $fileData) {
             try {
-                $this->importFile($fileData);
+                $document = $this->importFile($fileData);
+
+                // Start the pipeline for this document
+                $orchestrator->startPipeline($document);
+
                 $imported++;
             } catch (\Exception $e) {
                 $failed++;
@@ -78,19 +79,16 @@ class ProcessBulkImportJob implements ShouldQueue
             'failed' => $failed,
             'errors' => $errors,
         ]);
-
-        // Notification (si système de notification disponible)
-        // On pourrait envoyer un email ou une notification Filament ici
     }
 
     /**
-     * Importe un fichier individuel
+     * Importe un fichier individuel et retourne le Document créé
      */
-    private function importFile(array $fileData): void
+    private function importFile(array $fileData): Document
     {
         $sourcePath = $fileData['path'];
         $originalName = $fileData['original_name'];
-        $category = $fileData['category'];
+        $parentContext = $fileData['parent_context'] ?? null;
 
         if (!file_exists($sourcePath)) {
             throw new \RuntimeException("Le fichier source n'existe pas: {$sourcePath}");
@@ -120,14 +118,13 @@ class ProcessBulkImportJob implements ShouldQueue
         $document = Document::create([
             'uuid' => (string) Str::uuid(),
             'agent_id' => $this->agentId,
+            'source_type' => 'file',
             'storage_path' => $storagePath,
             'original_name' => $originalName,
             'title' => $title,
+            'description' => $parentContext ? "Importé depuis: {$parentContext}" : null,
             'document_type' => $extension,
             'mime_type' => $mimeType,
-            'category' => $category,
-            'extraction_method' => $this->extractionMethod,
-            'chunk_strategy' => $this->chunkStrategy,
             'file_size' => strlen($content),
             'extraction_status' => 'pending',
             'is_indexed' => false,
@@ -136,11 +133,10 @@ class ProcessBulkImportJob implements ShouldQueue
         Log::info('Document created from bulk import', [
             'document_id' => $document->id,
             'title' => $title,
-            'category' => $category,
+            'parent_context' => $parentContext,
         ]);
 
-        // Dispatcher le job de traitement du document
-        ProcessDocumentJob::dispatch($document);
+        return $document;
     }
 
     /**
@@ -177,11 +173,10 @@ class ProcessBulkImportJob implements ShouldQueue
             'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'txt' => 'text/plain',
             'md' => 'text/markdown',
+            'html', 'htm' => 'text/html',
             'jpg', 'jpeg' => 'image/jpeg',
             'png' => 'image/png',
             'gif' => 'image/gif',
-            'bmp' => 'image/bmp',
-            'tiff', 'tif' => 'image/tiff',
             'webp' => 'image/webp',
             default => 'application/octet-stream',
         };

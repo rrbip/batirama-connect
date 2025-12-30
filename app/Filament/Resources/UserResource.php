@@ -14,7 +14,6 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use Illuminate\Support\Facades\Hash;
 
 class UserResource extends Resource
 {
@@ -34,6 +33,47 @@ class UserResource extends Resource
     {
         return $form
             ->schema([
+                Forms\Components\Section::make('Informations personnelles')
+                    ->schema([
+                        Forms\Components\TextInput::make('name')
+                            ->label('Nom')
+                            ->required()
+                            ->maxLength(255),
+
+                        Forms\Components\TextInput::make('email')
+                            ->label('Email')
+                            ->email()
+                            ->required()
+                            ->unique(ignoreRecord: true)
+                            ->maxLength(255),
+
+                        Forms\Components\TextInput::make('password')
+                            ->label('Mot de passe')
+                            ->password()
+                            ->dehydrated(fn ($state) => filled($state))
+                            ->required(fn (string $operation): bool => $operation === 'create')
+                            ->minLength(8)
+                            ->revealable(),
+                    ])
+                    ->columns(2),
+
+                Forms\Components\Section::make('Rôles et permissions')
+                    ->schema([
+                        Forms\Components\Select::make('roles')
+                            ->label('Rôles')
+                            ->relationship('roles', 'name')
+                            ->multiple()
+                            ->preload()
+                            ->searchable(),
+
+                        Forms\Components\Select::make('tenant_id')
+                            ->label('Tenant')
+                            ->relationship('tenant', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->nullable(),
+                    ])
+                    ->columns(2),
                 Forms\Components\Tabs::make('User')
                     ->tabs([
                         Forms\Components\Tabs\Tab::make('Informations')
