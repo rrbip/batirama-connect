@@ -21,6 +21,31 @@ class EditDocument extends EditRecord
     protected static string $resource = DocumentResource::class;
 
     /**
+     * Met à jour l'outil sélectionné pour une étape du pipeline
+     */
+    public function updateStepTool(int $stepIndex, string $tool): void
+    {
+        $pipelineData = $this->record->pipeline_steps ?? [];
+        $steps = $pipelineData['steps'] ?? [];
+
+        if (!isset($steps[$stepIndex])) {
+            return;
+        }
+
+        $steps[$stepIndex]['tool_used'] = $tool;
+        $pipelineData['steps'] = $steps;
+
+        $this->record->update(['pipeline_steps' => $pipelineData]);
+        $this->record->refresh();
+
+        Notification::make()
+            ->title('Outil mis à jour')
+            ->body("L'outil a été changé. Cliquez sur 'Relancer' pour réexécuter l'étape.")
+            ->info()
+            ->send();
+    }
+
+    /**
      * Relance le pipeline à partir d'une étape spécifique
      */
     public function relaunchFromStep(int $stepIndex): void
