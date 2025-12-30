@@ -102,8 +102,9 @@ class CreateDocument extends CreateRecord
             \Log::warning("Failed to fetch URL: {$url}", ['error' => $e->getMessage()]);
         }
 
-        // Return minimal data if fetch failed
+        // Return minimal data if fetch failed - storage_path is nullable for URL sources
         return [
+            'storage_path' => null,
             'original_name' => basename($path) ?: $parsed['host'] ?? $url,
             'document_type' => $extension,
             'mime_type' => $this->getMimeTypeFromExtension($extension),

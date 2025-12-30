@@ -11,6 +11,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use League\HTMLToMarkdown\HtmlConverter;
@@ -108,7 +109,7 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
     }
 
     /**
-     * Get HTML content from document or crawl
+     * Get HTML content from document, storage, or URL
      */
     protected function getHtmlContent(Document $document): string
     {
@@ -117,12 +118,36 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
             return $document->extracted_text;
         }
 
-        // Otherwise read from storage
+        // Try reading from local storage
         if ($document->storage_path) {
             $path = Storage::disk('local')->path($document->storage_path);
             if (file_exists($path)) {
                 return file_get_contents($path);
             }
+        }
+
+        // Try fetching from source_url (for URL-based documents)
+        if (!empty($document->source_url)) {
+            Log::info("Fetching HTML from source_url", ['url' => $document->source_url]);
+
+            $response = Http::timeout(60)->get($document->source_url);
+
+            if ($response->successful()) {
+                $content = $response->body();
+
+                // Store for future use
+                $storagePath = "documents/" . $document->uuid . '.html';
+                Storage::disk('local')->put($storagePath, $content);
+
+                $document->update([
+                    'storage_path' => $storagePath,
+                    'file_size' => strlen($content),
+                ]);
+
+                return $content;
+            }
+
+            throw new \RuntimeException("Failed to fetch URL: " . $response->status());
         }
 
         throw new \RuntimeException("No HTML content found for document");
