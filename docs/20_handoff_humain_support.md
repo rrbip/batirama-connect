@@ -21,7 +21,8 @@
 | Tables support (conversations, messages, etc.) | ⏳ | À créer |
 | EscalationService | ⏳ | À créer |
 | Page Filament "Support Live" | ⏳ | À créer |
-| Interface temps réel (WebSocket) | ⏳ | À créer |
+| Widget chat utilisateur | ✅ | `public/whitelabel/widget.html` (existant, à étendre) |
+| Interface temps réel (Ajax Polling Phase 1) | ⏳ | À créer (WebSocket Phase 2) |
 | Email bidirectionnel (IMAP) | ⏳ | À créer |
 | Gestion pièces jointes + ClamAV | ⏳ | À créer |
 | Système d'apprentissage IA | ⏳ | À créer |
@@ -2618,6 +2619,11 @@ Phase 2 (Interface Admin)
 | **Intégration modules** | Support humain dans "Agents IA", email config dans "Déploiement Agent IA" |
 | **Collecte email utilisateur** | Formulaire dans le widget de chat lors de l'escalade asynchrone |
 | **Pièces jointes** | Oui, avec sécurité : extensions limitées, 10 Mo max, scan ClamAV |
+| **Widget chat** | Réutiliser le widget whitelabel existant (`public/whitelabel/widget.html`) - ajouter états "en attente agent" et "agent connecté" |
+| **Temps réel (WebSocket vs Ajax)** | **Phase 1** : Ajax Polling (3s) simple et natif Laravel. **Phase 2** : Migration vers Soketi/WebSocket si volume > 50 conversations simultanées |
+| **Multi-tenancy** | Conversations scopées par `tenant_id`. Apprentissages remontés sur l'agent parent avec anonymisation des données utilisateur |
+| **File d'attente** | Driver `database` par défaut. Redis en option pour production haute charge (configurable via `.env`) |
+| **ClamAV indisponible** | Fallback autorisé mais message d'avertissement affiché : "Le fichier n'a pas pu être scanné. Téléchargez à vos risques." |
 
 ---
 
