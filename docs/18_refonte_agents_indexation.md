@@ -1,4 +1,4 @@
-# 18 - Refonte Agents IA : Alignement avec la Nouvelle Structure d'Indexation
+# 18 - Refonte Agents IA : Alignement avec la Structure Q/R Atomique
 
 > **Statut** : Cahier des charges - Prêt pour développement
 > **Branche** : `claude/fix-rag-indexing-structure-PkG6g`
@@ -7,19 +7,36 @@
 
 ---
 
-## 1. Contexte du Problème
+## 1. Contexte et Objectifs
 
 ### 1.1 Situation actuelle
 
-La refonte RAG (document `refonte_rag_document_travail.md`) a introduit une **nouvelle structure d'indexation "Q/R Atomique"** dans Qdrant via `RebuildAgentIndexJob` et `QrGeneratorService`, mais :
+La refonte RAG a introduit la structure d'indexation **Q/R Atomique** dans `RebuildAgentIndexJob` et `QrGeneratorService`, mais :
 
-1. Les **services de recherche** (`RagService`, `PromptBuilder`, `CategoryDetectionService`) utilisent encore l'ancienne structure
-2. Le **job d'indexation classique** (`IndexDocumentChunksJob`) n'utilise pas le format Q/R Atomique
-3. La **FAQ** (`LearningService`) n'est pas synchronisée avec l'index de l'agent
+1. Les **services de recherche** (`RagService`, `PromptBuilder`, `CategoryDetectionService`) utilisent encore les anciens champs
+2. Le **job d'indexation** (`IndexDocumentChunksJob`) utilise l'ancien format
+3. La **FAQ** n'est pas synchronisée avec l'index de l'agent
 
-### 1.2 Nouvelle structure d'indexation (Q/R Atomique)
+### 1.2 Objectifs
 
-Implémentée dans `RebuildAgentIndexJob.php` et `QrGeneratorService.php` :
+1. **Aligner tous les composants** sur la structure Q/R Atomique
+2. **Supprimer le code legacy** - pas de rétrocompatibilité, on migre tout
+3. **Architecture extensible** - prévoir l'ajout de nouvelles méthodes d'indexation (ex: pour Expert BTP/devis)
+4. **FAQ synchronisée** avec l'index agent (type=qa_pair)
+5. **Réponse directe** pour les Q/R avec score > 0.95
+
+### 1.3 Approche
+
+**Pas de rétrocompatibilité** : On supprime l'ancien format et on force la reconstruction des index après déploiement.
+
+```bash
+# Post-déploiement obligatoire
+php artisan agent:reindex --all
+```
+
+---
+
+## 2. Structure Q/R Atomique (Rappel)
 
 ```
 Pour chaque chunk "useful" :
@@ -32,88 +49,27 @@ Pour chaque chunk "useful" :
     └── Payload : type, display_text, summary, category, source_doc, parent_context, chunk_id, document_id, agent_id
 ```
 
-### 1.3 Ancienne structure (utilisée par certains jobs)
+### Champs utilisés
 
-Utilisée par `IndexDocumentChunksJob.php` :
-
-```
-1 point par chunk :
-├── Vecteur : embedding(category + content)
-└── Payload : content, document_id, document_uuid, document_title, chunk_index, category, source_type, indexed_at, summary, keywords, chunk_category, chunk_category_id
-```
-
-### 1.4 Matrice des incohérences
-
-| Composant | Champ attendu | Nouveau champ Q/R | Statut |
-|-----------|---------------|-------------------|--------|
-| `RagService` | `content` | `display_text` | ❌ À corriger |
-| `RagService` (logs) | `chunk_category` | `category` | ❌ À corriger |
-| `CategoryDetectionService` | `chunk_category` | `category` | ❌ À corriger |
-| `PromptBuilder` | `content` | `display_text` | ❌ À corriger |
-| `IndexDocumentChunksJob` | Ancien format | Q/R Atomique | ❌ À adapter |
-| `LearningService` | Collection séparée | Aussi dans agent | ❌ À synchroniser |
+| Champ | Description |
+|-------|-------------|
+| `type` | `qa_pair` ou `source_material` |
+| `display_text` | Contenu à afficher (réponse pour Q/R, contenu pour source) |
+| `question` | Question associée (Q/R uniquement) |
+| `category` | Catégorie du chunk |
+| `source_doc` | Titre du document source |
+| `parent_context` | Contexte hiérarchique (breadcrumbs) |
+| `chunk_id` | ID du chunk en base |
+| `document_id` | ID du document en base |
+| `agent_id` | ID de l'agent |
 
 ---
 
-## 2. Analyse Complète des Fichiers Impactés
+## 3. Architecture Extensible
 
-### 2.1 Fichiers utilisant Qdrant - Actions requises
+### 3.1 Enum IndexingMethod
 
-| Fichier | Utilisation | Action |
-|---------|-------------|--------|
-| `app/Services/AI/RagService.php` | Recherche vectorielle | **MODIFIER** - Supporter les deux formats + réponse directe Q/R |
-| `app/Services/AI/CategoryDetectionService.php` | Filtrage catégorie | **MODIFIER** - `chunk_category` → `category` |
-| `app/Services/AI/PromptBuilder.php` | Formatage contexte | **MODIFIER** - Utiliser `display_text`, `question`, `source_doc` |
-| `app/Jobs/IndexDocumentChunksJob.php` | Indexation documents | **MODIFIER** - Utiliser Q/R Atomique selon méthode agent |
-| `app/Services/AI/LearningService.php` | FAQ learned_responses | **MODIFIER** - Synchroniser avec index agent (type=qa_pair) |
-| `app/Filament/Pages/FaqsPage.php` | Gestion FAQ | **MODIFIER** - Double indexation (learned_responses + agent) |
-
-### 2.2 Fichiers déjà compatibles Q/R Atomique
-
-| Fichier | Statut |
-|---------|--------|
-| `app/Jobs/RebuildAgentIndexJob.php` | ✅ Correct |
-| `app/Services/Pipeline/QrGeneratorService.php` | ✅ Correct |
-| `app/Jobs/Pipeline/ProcessMarkdownToQrJob.php` | ✅ Délègue à QrGeneratorService |
-| `app/Observers/DocumentChunkObserver.php` | ✅ Gère les deux formats |
-| `app/Observers/DocumentObserver.php` | ✅ Gère les deux formats |
-
-### 2.3 Fichiers non impactés
-
-| Fichier | Raison |
-|---------|--------|
-| `app/Console/Commands/QdrantInitCommand.php` | Initialisation one-shot |
-| `app/Console/Commands/QdrantCleanupCommand.php` | Nettoyage générique |
-| `app/Console/Commands/QdrantStatsCommand.php` | Lecture seule |
-| `app/Console/Commands/IndexOuvragesCommand.php` | Collection produits séparée |
-
----
-
-## 3. Objectifs de la Refonte
-
-### 3.1 Objectif principal
-
-Aligner tous les composants sur la structure d'indexation Q/R Atomique avec :
-1. **Méthode d'indexation configurable** sur Agent/Déploiement
-2. **Réponse directe** pour les Q/R avec score > 0.95
-3. **FAQ synchronisée** avec l'index agent (type=qa_pair)
-4. **Rétrocompatibilité** avec les anciens index
-
-### 3.2 Décisions validées
-
-| Sujet | Décision |
-|-------|----------|
-| Méthode d'indexation | Paramètre `indexing_method` sur Agent avec override possible sur Déploiement |
-| Réponse directe Q/R | Si score > 0.95 sur un `qa_pair`, retourner directement sans LLM |
-| FAQ | Double indexation : `learned_responses` + collection agent avec `type=qa_pair` |
-| Rétrocompatibilité | Normalisation des payloads pour supporter les deux formats |
-| Over-engineering | Accepté - Implémenter tout maintenant pour ne pas oublier |
-
----
-
-## 4. Spécifications Techniques
-
-### 4.1 Enum IndexingMethod
+Pour l'instant un seul mode, mais prévu pour en ajouter d'autres :
 
 ```php
 // app/Enums/IndexingMethod.php
@@ -126,48 +82,28 @@ namespace App\Enums;
 enum IndexingMethod: string
 {
     case QR_ATOMIQUE = 'qr_atomique';
-    case LEGACY = 'legacy';
+    // Futures méthodes possibles :
+    // case DEVIS_STRUCTURE = 'devis_structure';  // Pour Expert BTP
+    // case HIERARCHICAL = 'hierarchical';
+    // case SUMMARY_TREE = 'summary_tree';
 
     public function label(): string
     {
         return match($this) {
             self::QR_ATOMIQUE => 'Q/R Atomique',
-            self::LEGACY => 'Classique (legacy)',
         };
     }
 
     public function description(): string
     {
         return match($this) {
-            self::QR_ATOMIQUE => 'Génère des paires Question/Réponse pour chaque chunk + un point source. Optimal pour les FAQ et documentation.',
-            self::LEGACY => 'Indexation simple du contenu brut. Pour la rétrocompatibilité.',
-        };
-    }
-
-    public function getPayloadMapping(): array
-    {
-        return match($this) {
-            self::QR_ATOMIQUE => [
-                'content_field' => 'display_text',
-                'category_field' => 'category',
-                'has_types' => true,
-                'types' => ['qa_pair', 'source_material'],
-                'question_field' => 'question',
-                'source_field' => 'source_doc',
-                'context_field' => 'parent_context',
-            ],
-            self::LEGACY => [
-                'content_field' => 'content',
-                'category_field' => 'chunk_category',
-                'has_types' => false,
-                'source_field' => 'document_title',
-            ],
+            self::QR_ATOMIQUE => 'Génère des paires Question/Réponse autonomes pour chaque chunk. Optimal pour FAQ et documentation.',
         };
     }
 }
 ```
 
-### 4.2 Migration Agent
+### 3.2 Migration Agent
 
 ```php
 // database/migrations/xxxx_add_indexing_method_to_agents.php
@@ -176,7 +112,7 @@ Schema::table('agents', function (Blueprint $table) {
 });
 ```
 
-### 4.3 Modèle Agent - Méthodes à ajouter
+### 3.3 Modèle Agent
 
 ```php
 // app/Models/Agent.php
@@ -192,21 +128,15 @@ public function getIndexingMethod(): IndexingMethod
 {
     return $this->indexing_method ?? IndexingMethod::QR_ATOMIQUE;
 }
-
-public function getPayloadMapping(): array
-{
-    return $this->getIndexingMethod()->getPayloadMapping();
-}
 ```
 
-### 4.4 Modèle AgentDeployment - Override
+### 3.4 Modèle AgentDeployment - Override possible
 
 ```php
 // app/Models/AgentDeployment.php
 
 public function getEffectiveIndexingMethod(): IndexingMethod
 {
-    // Priorité : config_overlay > agent
     $overlay = $this->config_overlay['indexing_method'] ?? null;
 
     if ($overlay) {
@@ -217,7 +147,36 @@ public function getEffectiveIndexingMethod(): IndexingMethod
 }
 ```
 
-### 4.5 Service IndexingStrategyService
+---
+
+## 4. Fichiers à Modifier
+
+### 4.1 Vue d'ensemble
+
+| Fichier | Action | Description |
+|---------|--------|-------------|
+| `RagService.php` | **Modifier** | Lire les champs Q/R + réponse directe si score > 0.95 |
+| `CategoryDetectionService.php` | **Modifier** | Utiliser `category` au lieu de `chunk_category` |
+| `PromptBuilder.php` | **Modifier** | Utiliser `display_text`, `question`, `source_doc` |
+| `LearningService.php` | **Modifier** | Double indexation FAQ |
+| `FaqsPage.php` | **Modifier** | Appeler double indexation |
+| `IndexDocumentChunksJob.php` | **Supprimer/Refactorer** | Déléguer au pipeline Q/R Atomique |
+
+### 4.2 Fichiers déjà corrects
+
+- `RebuildAgentIndexJob.php` ✅
+- `QrGeneratorService.php` ✅
+- `ProcessMarkdownToQrJob.php` ✅
+- `DocumentChunkObserver.php` ✅ (gère `qdrant_point_ids`)
+- `DocumentObserver.php` ✅
+
+---
+
+## 5. Spécifications Techniques
+
+### 5.1 IndexingStrategyService
+
+Service pour gérer les stratégies d'indexation et la détection de réponse directe :
 
 ```php
 // app/Services/AI/IndexingStrategyService.php
@@ -228,131 +187,96 @@ declare(strict_types=1);
 namespace App\Services\AI;
 
 use App\Enums\IndexingMethod;
-use App\Models\Agent;
 
 class IndexingStrategyService
 {
     /**
-     * Normalise un payload Qdrant pour être compatible avec les deux formats.
-     * Permet au code de toujours utiliser les mêmes champs.
+     * Seuil de score pour réponse directe Q/R (sans appel LLM).
      */
-    public function normalizePayload(array $payload): array
-    {
-        // Normaliser content (nouveau format utilise display_text)
-        if (isset($payload['display_text']) && !isset($payload['content'])) {
-            $payload['content'] = $payload['display_text'];
-        }
-
-        // Normaliser category (nouveau format utilise category au lieu de chunk_category)
-        if (isset($payload['category']) && !isset($payload['chunk_category'])) {
-            $payload['chunk_category'] = $payload['category'];
-        }
-
-        // Normaliser source (nouveau format utilise source_doc)
-        if (isset($payload['source_doc']) && !isset($payload['document_title'])) {
-            $payload['document_title'] = $payload['source_doc'];
-        }
-
-        return $payload;
-    }
-
-    /**
-     * Construit le filtre Qdrant selon la méthode d'indexation.
-     */
-    public function buildCategoryFilter(IndexingMethod $method, array $categoryNames): array
-    {
-        if (empty($categoryNames)) {
-            return [];
-        }
-
-        $mapping = $method->getPayloadMapping();
-        $categoryField = $mapping['category_field'];
-
-        $conditions = array_map(fn ($name) => [
-            'key' => $categoryField,
-            'match' => ['value' => $name],
-        ], $categoryNames);
-
-        return ['should' => $conditions];
-    }
+    public const DIRECT_QR_THRESHOLD = 0.95;
 
     /**
      * Détermine si un résultat est une Q/R directe utilisable.
      */
-    public function isDirectQrResult(array $result, float $minScore = 0.95): bool
+    public function isDirectQrResult(array $result): bool
     {
         $payload = $result['payload'] ?? [];
         $score = $result['score'] ?? 0;
 
         return ($payload['type'] ?? '') === 'qa_pair'
-            && $score >= $minScore
+            && $score >= self::DIRECT_QR_THRESHOLD
             && !empty($payload['display_text']);
     }
 
     /**
      * Extrait la réponse directe d'un résultat Q/R.
      */
-    public function extractDirectAnswer(array $result): ?array
+    public function extractDirectAnswer(array $result): array
     {
         $payload = $result['payload'] ?? [];
-
-        if (($payload['type'] ?? '') !== 'qa_pair') {
-            return null;
-        }
 
         return [
             'question' => $payload['question'] ?? '',
             'answer' => $payload['display_text'] ?? '',
             'source' => $payload['source_doc'] ?? '',
             'context' => $payload['parent_context'] ?? '',
+            'category' => $payload['category'] ?? '',
             'score' => $result['score'] ?? 0,
         ];
+    }
+
+    /**
+     * Construit le filtre Qdrant pour les catégories.
+     */
+    public function buildCategoryFilter(array $categoryNames): array
+    {
+        if (empty($categoryNames)) {
+            return [];
+        }
+
+        $conditions = array_map(fn ($name) => [
+            'key' => 'category',
+            'match' => ['value' => $name],
+        ], $categoryNames);
+
+        return ['should' => $conditions];
     }
 }
 ```
 
----
-
-## 5. Modifications des Services Existants
-
-### 5.1 RagService - Modifications
-
-**Fichier** : `app/Services/AI/RagService.php`
-
-#### 5.1.1 Injection de dépendance
+### 5.2 RagService - Modifications
 
 ```php
+// app/Services/AI/RagService.php
+
 public function __construct(
-    private EmbeddingService $embeddingService,
-    private QdrantService $qdrantService,
-    private OllamaService $ollamaService,
-    private HydrationService $hydrationService,
-    private PromptBuilder $promptBuilder,
-    private LearningService $learningService,
-    private CategoryDetectionService $categoryDetectionService,
-    private IndexingStrategyService $indexingStrategyService  // NOUVEAU
+    // ... existing deps
+    private IndexingStrategyService $indexingStrategyService
 ) {}
-```
 
-#### 5.1.2 Méthode query() - Réponse directe Q/R
-
-```php
 public function query(Agent $agent, string $userMessage, ?AiSession $session = null): LLMResponse
 {
     // 1. Recherche des réponses apprises (priorité haute)
-    $learnedResponses = $this->learningService->findSimilarLearnedResponses(...);
+    $learnedResponses = $this->learningService->findSimilarLearnedResponses(
+        question: $userMessage,
+        agentSlug: $agent->slug,
+        limit: $agent->getMaxLearnedResponses(),
+        minScore: $agent->getLearnedMinScore()
+    );
 
     // 2. Recherche dans la base vectorielle
     $retrieval = $this->retrieveContextWithDetection($agent, $userMessage);
     $ragResults = $retrieval['results'];
+    $categoryDetection = $retrieval['category_detection'];
 
-    // NOUVEAU: Vérifier si on a une réponse Q/R directe (score > 0.95)
+    // 3. NOUVEAU: Vérifier si on a une réponse Q/R directe (score > 0.95)
     $directQr = $this->findDirectQrResponse($ragResults);
     if ($directQr !== null) {
-        return $this->buildDirectQrResponse($directQr, $agent);
+        return $this->buildDirectQrResponse($directQr, $agent, $categoryDetection);
     }
 
-    // Suite du traitement normal...
+    // 4. Suite du traitement normal (hydratation, LLM, etc.)
+    // ... code existant ...
 }
 
 /**
@@ -361,7 +285,7 @@ public function query(Agent $agent, string $userMessage, ?AiSession $session = n
 private function findDirectQrResponse(array $ragResults): ?array
 {
     foreach ($ragResults as $result) {
-        if ($this->indexingStrategyService->isDirectQrResult($result, 0.95)) {
+        if ($this->indexingStrategyService->isDirectQrResult($result)) {
             return $this->indexingStrategyService->extractDirectAnswer($result);
         }
     }
@@ -371,19 +295,15 @@ private function findDirectQrResponse(array $ragResults): ?array
 /**
  * Construit une réponse directe depuis un Q/R match.
  */
-private function buildDirectQrResponse(array $qr, Agent $agent): LLMResponse
+private function buildDirectQrResponse(array $qr, Agent $agent, ?array $categoryDetection): LLMResponse
 {
     $answer = $qr['answer'];
-
-    // Optionnel: ajouter une mention de source
-    if (!empty($qr['source'])) {
-        $answer .= "\n\n*Source: {$qr['source']}*";
-    }
 
     Log::info('RagService: Direct Q/R response used', [
         'agent' => $agent->slug,
         'question_matched' => $qr['question'],
         'score' => $qr['score'],
+        'source' => $qr['source'],
     ]);
 
     return new LLMResponse(
@@ -397,40 +317,22 @@ private function buildDirectQrResponse(array $qr, Agent $agent): LLMResponse
             'matched_question' => $qr['question'],
             'score' => $qr['score'],
             'source' => $qr['source'],
+            'category' => $qr['category'],
+            'context' => [
+                'category_detection' => $categoryDetection,
+            ],
         ]
     );
 }
 ```
 
-#### 5.1.3 Méthode retrieveContextWithDetection() - Normalisation
+### 5.3 CategoryDetectionService - Modifications
 
 ```php
-public function retrieveContextWithDetection(Agent $agent, string $query): array
-{
-    // ... code existant jusqu'à la recherche Qdrant ...
+// app/Services/AI/CategoryDetectionService.php
 
-    $results = $this->qdrantService->search(...);
-
-    // NOUVEAU: Normaliser les payloads pour compatibilité
-    $results = array_map(function ($result) {
-        $result['payload'] = $this->indexingStrategyService->normalizePayload(
-            $result['payload'] ?? []
-        );
-        return $result;
-    }, $results);
-
-    // ... suite du code ...
-}
-```
-
-### 5.2 CategoryDetectionService - Modifications
-
-**Fichier** : `app/Services/AI/CategoryDetectionService.php`
-
-```php
 /**
  * Construit le filtre Qdrant pour les catégories détectées.
- * Supporte les deux formats (legacy et Q/R Atomique).
  */
 public function buildQdrantFilter(Collection $categories): array
 {
@@ -438,51 +340,37 @@ public function buildQdrantFilter(Collection $categories): array
         return [];
     }
 
-    // Utiliser les deux champs pour compatibilité
-    $conditions = [];
-
-    foreach ($categories as $category) {
-        // Nouveau format (Q/R Atomique)
-        $conditions[] = [
-            'key' => 'category',
-            'match' => ['value' => $category->name],
-        ];
-        // Ancien format (legacy) - pour rétrocompatibilité
-        $conditions[] = [
-            'key' => 'chunk_category',
-            'match' => ['value' => $category->name],
-        ];
-    }
+    $conditions = $categories->map(fn ($category) => [
+        'key' => 'category',  // Utilise le champ Q/R Atomique
+        'match' => ['value' => $category->name],
+    ])->toArray();
 
     return ['should' => $conditions];
 }
 ```
 
-### 5.3 PromptBuilder - Modifications
-
-**Fichier** : `app/Services/AI/PromptBuilder.php`
+### 5.4 PromptBuilder - Modifications
 
 ```php
+// app/Services/AI/PromptBuilder.php
+
 /**
  * Formate un résultat RAG pour inclusion dans le contexte.
- * Supporte les deux formats de payload.
  */
 private function formatRagResult(array $result, int $index): string
 {
     $payload = $result['payload'] ?? [];
-    $score = $result['score'] ?? 0;
 
-    // Contenu principal (supporte les deux formats)
-    $content = $payload['display_text'] ?? $payload['content'] ?? '';
-
-    // Source et contexte
-    $source = $payload['source_doc'] ?? $payload['document_title'] ?? 'Document';
+    // Champs Q/R Atomique
+    $content = $payload['display_text'] ?? '';
+    $source = $payload['source_doc'] ?? 'Document';
     $parentContext = $payload['parent_context'] ?? '';
-    $category = $payload['category'] ?? $payload['chunk_category'] ?? '';
+    $category = $payload['category'] ?? '';
+    $type = $payload['type'] ?? '';
 
     // Pour les Q/R pairs, afficher la question associée
     $questionInfo = '';
-    if (($payload['type'] ?? '') === 'qa_pair' && !empty($payload['question'])) {
+    if ($type === 'qa_pair' && !empty($payload['question'])) {
         $questionInfo = "Question: {$payload['question']}\nRéponse: ";
     }
 
@@ -500,60 +388,28 @@ private function formatRagResult(array $result, int $index): string
 }
 ```
 
-### 5.4 LearningService - Double indexation FAQ
-
-**Fichier** : `app/Services/AI/LearningService.php`
+### 5.5 LearningService - Double indexation FAQ
 
 ```php
-/**
- * Valide et apprend une réponse IA.
- * Indexe dans learned_responses ET dans la collection de l'agent.
- */
-public function validateAndLearn(
-    AiMessage $message,
-    int $validatorId,
-    ?string $correctedAnswer = null
-): bool {
-    // ... code existant pour learned_responses ...
-
-    // NOUVEAU: Indexer aussi dans la collection de l'agent comme qa_pair
-    $this->indexInAgentCollection($message, $question, $answer);
-
-    return true;
-}
-
-/**
- * Ajoute une FAQ manuelle.
- * Indexe dans learned_responses ET dans la collection de l'agent.
- */
-public function addManualFaq(
-    Agent $agent,
-    string $question,
-    string $answer,
-    int $userId
-): bool {
-    // ... code existant pour learned_responses ...
-
-    // NOUVEAU: Indexer aussi dans la collection de l'agent comme qa_pair
-    $this->indexFaqInAgentCollection($agent, $question, $answer);
-
-    return true;
-}
+// app/Services/AI/LearningService.php
 
 /**
  * Indexe une FAQ dans la collection de l'agent avec type=qa_pair.
  */
-private function indexFaqInAgentCollection(
+public function indexFaqInAgentCollection(
     Agent $agent,
     string $question,
-    string $answer
-): void {
+    string $answer,
+    ?int $messageId = null
+): ?string {
     if (empty($agent->qdrant_collection)) {
-        return;
+        Log::warning('LearningService: Agent has no Qdrant collection', [
+            'agent' => $agent->slug,
+        ]);
+        return null;
     }
 
     $embedding = $this->embeddingService->embed($question);
-
     $pointId = Str::uuid()->toString();
 
     $this->qdrantService->upsert($agent->qdrant_collection, [[
@@ -569,7 +425,8 @@ private function indexFaqInAgentCollection(
             'chunk_id' => null,
             'document_id' => null,
             'agent_id' => $agent->id,
-            'is_faq' => true,  // Marqueur pour distinguer des Q/R documentaires
+            'is_faq' => true,
+            'message_id' => $messageId,
             'indexed_at' => now()->toIso8601String(),
         ],
     ]]);
@@ -579,50 +436,65 @@ private function indexFaqInAgentCollection(
         'collection' => $agent->qdrant_collection,
         'point_id' => $pointId,
     ]);
+
+    return $pointId;
+}
+
+/**
+ * Valide et apprend une réponse IA.
+ */
+public function validateAndLearn(
+    AiMessage $message,
+    int $validatorId,
+    ?string $correctedAnswer = null
+): bool {
+    // ... code existant pour learned_responses ...
+
+    // Double indexation : aussi dans la collection de l'agent
+    $agent = $message->session->agent;
+    $this->indexFaqInAgentCollection($agent, $question, $answer, $message->id);
+
+    return true;
 }
 ```
 
-### 5.5 IndexDocumentChunksJob - Utilisation de la méthode d'indexation
+### 5.6 IndexDocumentChunksJob - Refactoring
 
-**Fichier** : `app/Jobs/IndexDocumentChunksJob.php`
+Ce job doit maintenant utiliser le format Q/R Atomique. Deux options :
 
+**Option A** : Déléguer au pipeline existant
+```php
+// Le job dispatch ProcessMarkdownToQrJob qui gère déjà Q/R Atomique
+```
+
+**Option B** : Utiliser la même logique que RebuildAgentIndexJob
 ```php
 public function handle(QdrantService $qdrantService, EmbeddingService $embeddingService): void
 {
     $agent = $this->document->agent;
-    $indexingMethod = $agent->getIndexingMethod();
 
-    if ($indexingMethod === IndexingMethod::QR_ATOMIQUE) {
-        // Déléguer au QrGeneratorService ou RebuildAgentIndexJob
-        // Les chunks doivent avoir knowledge_units
-        $this->indexQrAtomique($qdrantService, $embeddingService, $agent);
-    } else {
-        // Format legacy
-        $this->indexLegacy($qdrantService, $embeddingService, $agent);
-    }
-}
-
-private function indexQrAtomique(...): void
-{
-    // Si les chunks ont des knowledge_units, créer les points Q/R
-    // Sinon, marquer comme non indexés (le pipeline Q/R n'a pas été exécuté)
-    foreach ($this->document->chunks as $chunk) {
+    foreach ($this->document->chunks()->where('useful', true)->get() as $chunk) {
         if (empty($chunk->knowledge_units)) {
-            Log::warning('IndexDocumentChunksJob: Chunk has no knowledge_units, skipping Q/R indexation', [
+            Log::warning('IndexDocumentChunksJob: Chunk without knowledge_units, skipping', [
                 'chunk_id' => $chunk->id,
             ]);
             continue;
         }
 
-        // Utiliser la même logique que RebuildAgentIndexJob
-        // ...
-    }
-}
+        // Utiliser la même logique que RebuildAgentIndexJob::buildPointsForChunk()
+        $points = $this->buildQrAtomiquePoints($chunk, $embeddingService, $agent);
 
-private function indexLegacy(...): void
-{
-    // Code existant (ancien format)
-    // ...
+        if (!empty($points['points'])) {
+            $qdrantService->upsert($agent->qdrant_collection, $points['points']);
+
+            $chunk->update([
+                'qdrant_point_ids' => $points['point_ids'],
+                'qdrant_points_count' => count($points['point_ids']),
+                'is_indexed' => true,
+                'indexed_at' => now(),
+            ]);
+        }
+    }
 }
 ```
 
@@ -630,11 +502,9 @@ private function indexLegacy(...): void
 
 ## 6. Interface Utilisateur
 
-### 6.1 Formulaire Agent - Champ méthode d'indexation
+### 6.1 Formulaire Agent
 
-**Fichier** : `app/Filament/Resources/AgentResource.php`
-
-Ajouter dans la section RAG :
+Ajouter dans la section RAG (pour le futur, quand on aura plusieurs méthodes) :
 
 ```php
 Forms\Components\Select::make('indexing_method')
@@ -644,102 +514,105 @@ Forms\Components\Select::make('indexing_method')
     ]))
     ->default('qr_atomique')
     ->helperText(fn ($state) => IndexingMethod::tryFrom($state)?->description() ?? '')
-    ->reactive(),
+    ->disabled()  // Désactivé tant qu'on n'a qu'une méthode
+    ->dehydrated(),
 ```
 
-### 6.2 Formulaire Déploiement - Override
+---
 
-Ajouter dans `config_overlay` la possibilité de surcharger la méthode :
+## 7. Commande de Migration
+
+### 7.1 Améliorer AgentReindexCommand
+
+Ajouter l'option `--all` :
 
 ```php
-Forms\Components\Select::make('config_overlay.indexing_method')
-    ->label('Méthode d\'indexation (override)')
-    ->options([
-        '' => 'Hériter de l\'agent',
-        ...collect(IndexingMethod::cases())->mapWithKeys(fn ($m) => [
-            $m->value => $m->label(),
-        ]),
-    ])
-    ->helperText('Laissez vide pour utiliser la configuration de l\'agent'),
+// app/Console/Commands/AgentReindexCommand.php
+
+protected $signature = 'agent:reindex
+    {agent? : Slug de l\'agent (optionnel si --all)}
+    {--all : Réindexer tous les agents}
+    {--force : Supprimer et recréer la collection}';
+
+public function handle(): int
+{
+    if ($this->option('all')) {
+        $agents = Agent::whereNotNull('qdrant_collection')->get();
+
+        $this->info("Réindexation de {$agents->count()} agents...");
+
+        foreach ($agents as $agent) {
+            $this->info("  → {$agent->name}");
+            RebuildAgentIndexJob::dispatch($agent);
+        }
+
+        $this->info('Jobs de réindexation lancés.');
+        return Command::SUCCESS;
+    }
+
+    // ... code existant pour un agent spécifique ...
+}
 ```
 
 ---
 
-## 7. Plan d'Implémentation
+## 8. Plan d'Implémentation
 
-### 7.1 Ordre de développement
+### 8.1 Ordre de développement
 
-| # | Tâche | Fichiers | Priorité |
-|---|-------|----------|----------|
-| 1 | Créer enum `IndexingMethod` | `app/Enums/IndexingMethod.php` | Haute |
-| 2 | Migration `indexing_method` sur agents | `database/migrations/` | Haute |
-| 3 | Créer `IndexingStrategyService` | `app/Services/AI/IndexingStrategyService.php` | Haute |
-| 4 | Modifier `Agent` et `AgentDeployment` | `app/Models/` | Haute |
-| 5 | Modifier `CategoryDetectionService` | `app/Services/AI/CategoryDetectionService.php` | Haute |
-| 6 | Modifier `RagService` (normalisation + réponse directe) | `app/Services/AI/RagService.php` | Haute |
-| 7 | Modifier `PromptBuilder` | `app/Services/AI/PromptBuilder.php` | Haute |
-| 8 | Modifier `LearningService` (double indexation FAQ) | `app/Services/AI/LearningService.php` | Moyenne |
-| 9 | Modifier `FaqsPage` | `app/Filament/Pages/FaqsPage.php` | Moyenne |
-| 10 | Modifier `IndexDocumentChunksJob` | `app/Jobs/IndexDocumentChunksJob.php` | Moyenne |
-| 11 | Modifier UI Agent/Déploiement | `app/Filament/Resources/` | Basse |
-| 12 | Tests | `tests/` | Haute |
+| # | Tâche | Fichiers |
+|---|-------|----------|
+| 1 | Créer enum `IndexingMethod` | `app/Enums/IndexingMethod.php` |
+| 2 | Créer migration | `database/migrations/` |
+| 3 | Modifier modèle `Agent` | `app/Models/Agent.php` |
+| 4 | Modifier modèle `AgentDeployment` | `app/Models/AgentDeployment.php` |
+| 5 | Créer `IndexingStrategyService` | `app/Services/AI/IndexingStrategyService.php` |
+| 6 | Modifier `CategoryDetectionService` | `app/Services/AI/CategoryDetectionService.php` |
+| 7 | Modifier `RagService` | `app/Services/AI/RagService.php` |
+| 8 | Modifier `PromptBuilder` | `app/Services/AI/PromptBuilder.php` |
+| 9 | Modifier `LearningService` | `app/Services/AI/LearningService.php` |
+| 10 | Modifier `FaqsPage` | `app/Filament/Pages/FaqsPage.php` |
+| 11 | Refactorer `IndexDocumentChunksJob` | `app/Jobs/IndexDocumentChunksJob.php` |
+| 12 | Améliorer `AgentReindexCommand` | `app/Console/Commands/AgentReindexCommand.php` |
+| 13 | Modifier UI Agent | `app/Filament/Resources/AgentResource.php` |
 
-### 7.2 Estimations
+### 8.2 Post-déploiement
 
-- **Développement** : 4-6 heures
-- **Tests** : 2 heures
-- **Documentation** : 1 heure
+```bash
+# 1. Lancer les migrations
+php artisan migrate
 
----
+# 2. Réindexer tous les agents
+php artisan agent:reindex --all --force
 
-## 8. Tests à Effectuer
-
-### 8.1 Tests unitaires
-
-- [ ] `IndexingMethod` enum - labels, descriptions, payload mapping
-- [ ] `IndexingStrategyService` - normalisation payloads
-- [ ] `IndexingStrategyService` - détection Q/R directe
-- [ ] `CategoryDetectionService` - filtre compatible deux formats
-- [ ] `RagService` - réponse directe si score > 0.95
-
-### 8.2 Tests d'intégration
-
-- [ ] Chat avec agent Q/R Atomique - résultats corrects
-- [ ] Chat avec agent Legacy - rétrocompatibilité
-- [ ] FAQ ajoutée manuellement - indexée dans agent collection
-- [ ] FAQ validée depuis message - indexée dans agent collection
-- [ ] Question FAQ avec score > 0.95 - réponse directe
-
-### 8.3 Tests manuels
-
-- [ ] Créer un agent avec méthode Q/R Atomique
-- [ ] Importer un document, vérifier l'indexation
-- [ ] Poser une question correspondant exactement à une Q/R
-- [ ] Vérifier la réponse directe (sans appel LLM)
-- [ ] Créer un déploiement avec override de méthode
-- [ ] Ajouter une FAQ, vérifier la double indexation
+# 3. Vérifier les stats
+php artisan qdrant:stats
+```
 
 ---
 
-## 9. Points d'attention
+## 9. Tests
 
-### 9.1 Rétrocompatibilité
+### 9.1 Tests unitaires
 
-- Les agents existants gardent leurs index legacy fonctionnels
-- La normalisation des payloads permet de lire les deux formats
-- Le filtre catégorie cherche dans `category` ET `chunk_category`
+- [ ] `IndexingMethod` enum
+- [ ] `IndexingStrategyService::isDirectQrResult()`
+- [ ] `IndexingStrategyService::extractDirectAnswer()`
+- [ ] `CategoryDetectionService::buildQdrantFilter()` avec champ `category`
 
-### 9.2 Performance
+### 9.2 Tests d'intégration
 
-- La réponse directe Q/R évite un appel LLM (gain significatif)
-- La double indexation FAQ ajoute une opération Qdrant par FAQ
-- Le score 0.95 pour réponse directe est conservateur (évite faux positifs)
+- [ ] Chat avec agent - résultats Q/R Atomique
+- [ ] Question exacte d'une Q/R → réponse directe (pas de LLM)
+- [ ] FAQ ajoutée → indexée dans agent collection
+- [ ] FAQ validée → indexée dans agent collection
 
-### 9.3 Cohérence des données
+### 9.3 Tests manuels
 
-- Reconstruire l'index (`RebuildAgentIndexJob`) après migration pour uniformiser
-- Les nouveaux documents utilisent automatiquement Q/R Atomique
-- Les anciens documents restent en legacy jusqu'à reindexation
+- [ ] Importer document, vérifier indexation Q/R
+- [ ] Poser question correspondant à Q/R, vérifier réponse directe
+- [ ] Vérifier logs "Direct Q/R response used"
+- [ ] `agent:reindex --all` fonctionne
 
 ---
 
@@ -747,13 +620,14 @@ Forms\Components\Select::make('config_overlay.indexing_method')
 
 | Sujet | Décision |
 |-------|----------|
-| Enum méthodes | `IndexingMethod` avec `QR_ATOMIQUE` et `LEGACY` |
-| Niveau configuration | Agent avec override possible sur Déploiement |
+| Rétrocompatibilité legacy | **Non** - On supprime l'ancien format |
+| Architecture | Extensible avec enum `IndexingMethod` |
+| Méthode actuelle | `QR_ATOMIQUE` uniquement |
 | Seuil réponse directe | Score > 0.95 sur `qa_pair` |
-| FAQ | Double indexation : `learned_responses` + collection agent |
-| Rétrocompatibilité | Normalisation payloads + filtre dual |
-| Champ catégorie | `category` (nouveau) + `chunk_category` (fallback) |
-| Champ contenu | `display_text` (nouveau) + `content` (fallback) |
+| FAQ | Double indexation : `learned_responses` + agent collection |
+| Migration | `agent:reindex --all --force` post-déploiement |
+| Champ catégorie | `category` uniquement |
+| Champ contenu | `display_text` uniquement |
 
 ---
 
