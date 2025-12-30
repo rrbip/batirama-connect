@@ -29,16 +29,6 @@
             <x-filament::tabs.item
                 :active="$activeTab === 'configuration'"
                 wire:click="setActiveTab('configuration')"
-                :active="$activeTab === 'vision'"
-                wire:click="setActiveTab('vision')"
-                icon="heroicon-o-eye"
-            >
-                Extraction Vision
-            </x-filament::tabs.item>
-
-            <x-filament::tabs.item
-                :active="$activeTab === 'chunking'"
-                wire:click="setActiveTab('chunking')"
                 icon="heroicon-o-cog-6-tooth"
             >
                 Configuration
@@ -163,105 +153,149 @@
             {{ $this->table }}
 
         @elseif($activeTab === 'configuration')
-            {{-- Configuration Tab with Collapsible Sections --}}
-            <div class="space-y-4">
-        @elseif($activeTab === 'vision')
-            {{-- Vision Extraction Settings Tab --}}
+            {{-- Configuration Tab - All settings unified --}}
             <div class="space-y-6">
-                {{-- Diagnostic du système --}}
-                <x-filament::section collapsible>
+                {{-- Queue Stats --}}
+                <x-filament::section>
                     <x-slot name="heading">
-                        Diagnostic du système
+                        File d'attente Pipeline
                     </x-slot>
 
-                    @if(!empty($visionDiagnostics))
-                        <div class="space-y-4">
-                            {{-- Statut Ollama --}}
-                            <div class="flex items-center gap-3 p-3 rounded-lg {{ ($visionDiagnostics['ollama']['connected'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-danger-50 dark:bg-danger-900/20' }}">
-                                @if($visionDiagnostics['ollama']['connected'] ?? false)
-                                    <x-heroicon-o-check-circle class="w-6 h-6 text-success-600" />
-                                    <div>
-                                        <div class="font-medium text-success-700 dark:text-success-400">Ollama connecté</div>
-                                        @if($visionDiagnostics['ollama']['configured_model_installed'] ?? false)
-                                            <div class="text-sm text-success-600">Modèle {{ $visionDiagnostics['model'] ?? 'inconnu' }} installé</div>
-                                        @else
-                                            <div class="text-sm text-warning-600">⚠️ Modèle {{ $visionDiagnostics['model'] ?? 'inconnu' }} non installé</div>
-                                            <code class="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">ollama pull {{ $visionDiagnostics['model'] ?? '' }}</code>
-                                        @endif
-                                    </div>
-                                @else
-                                    <x-heroicon-o-x-circle class="w-6 h-6 text-danger-600" />
-                                    <div>
-                                        <div class="font-medium text-danger-700 dark:text-danger-400">Ollama non connecté</div>
-                                        <div class="text-sm text-danger-600">{{ $visionDiagnostics['ollama']['error'] ?? 'Erreur inconnue' }}</div>
-                                    </div>
-                                @endif
-                            </div>
-
-                            {{-- Convertisseurs PDF --}}
-                            <div class="grid grid-cols-2 gap-3">
-                                <div class="flex items-center gap-2 p-3 rounded-lg {{ ($visionDiagnostics['pdf_converter']['pdftoppm'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800' }}">
-                                    @if($visionDiagnostics['pdf_converter']['pdftoppm'] ?? false)
-                                        <x-heroicon-o-check-circle class="w-5 h-5 text-success-600" />
-                                        <span class="text-success-700 dark:text-success-400">pdftoppm installé</span>
-                                    @else
-                                        <x-heroicon-o-x-circle class="w-5 h-5 text-gray-400" />
-                                        <span class="text-gray-500">pdftoppm non trouvé</span>
-                                    @endif
-                                </div>
-                                <div class="flex items-center gap-2 p-3 rounded-lg {{ ($visionDiagnostics['pdf_converter']['imagemagick'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-50 dark:bg-gray-800' }}">
-                                    @if($visionDiagnostics['pdf_converter']['imagemagick'] ?? false)
-                                        <x-heroicon-o-check-circle class="w-5 h-5 text-success-600" />
-                                        <span class="text-success-700 dark:text-success-400">ImageMagick installé</span>
-                                    @else
-                                        <x-heroicon-o-x-circle class="w-5 h-5 text-gray-400" />
-                                        <span class="text-gray-500">ImageMagick non trouvé</span>
-                                    @endif
-                                </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <div class="text-sm text-gray-500 dark:text-gray-400">Jobs en attente</div>
+                            <div class="text-2xl font-bold {{ ($queueStats['pending'] ?? 0) > 0 ? 'text-warning-600' : 'text-gray-900 dark:text-white' }}">
+                                {{ $queueStats['pending'] ?? 0 }}
                             </div>
                         </div>
-                    @else
-                        <div class="text-gray-500">Cliquez sur "Tester la connexion" pour rafraîchir</div>
-                    @endif
+                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <div class="text-sm text-gray-500 dark:text-gray-400">Jobs en erreur</div>
+                            <div class="text-2xl font-bold {{ ($queueStats['failed'] ?? 0) > 0 ? 'text-danger-600' : 'text-gray-900 dark:text-white' }}">
+                                {{ $queueStats['failed'] ?? 0 }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 text-sm text-gray-500 dark:text-gray-400">
+                        <strong>Commande worker :</strong>
+                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=default,pipeline,llm-chunking</code>
+                    </div>
                 </x-filament::section>
 
-                {{-- Action Buttons --}}
+                {{-- Test Connection Button --}}
                 <div class="flex items-center gap-3">
                     <x-filament::button
-                        wire:click="testVisionConnection"
+                        wire:click="testOllamaConnection"
                         color="info"
                         icon="heroicon-o-signal"
                     >
-                        Tester la connexion
-                    </x-filament::button>
-
-                    <x-filament::button
-                        wire:click="resetVisionPrompt"
-                        wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
-                        color="warning"
-                        icon="heroicon-o-arrow-path"
-                    >
-                        Réinitialiser le prompt
-                    </x-filament::button>
-
-                    <x-filament::button
-                        wire:click="saveVisionSettings"
-                        color="success"
-                        icon="heroicon-o-check"
-                    >
-                        Sauvegarder
+                        Tester la connexion Ollama
                     </x-filament::button>
                 </div>
 
-                {{-- Settings Form --}}
-                <form wire:submit="saveVisionSettings">
-                    {{ $this->visionForm }}
-                </form>
+                {{-- Configuration Vision (Collapsible) --}}
+                <x-filament::section
+                    :collapsed="true"
+                    collapsible
+                >
+                    <x-slot name="heading">
+                        Configuration Vision
+                    </x-slot>
+                    <x-slot name="description">
+                        Paramètres pour l'extraction de texte depuis les images via Vision LLM
+                    </x-slot>
 
-                {{-- Zone de calibration --}}
+                    <div class="space-y-4">
+                        {{-- Diagnostic du système --}}
+                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Diagnostic du système</h4>
+                            @if(!empty($visionDiagnostics))
+                                <div class="space-y-3">
+                                    {{-- Statut Ollama --}}
+                                    <div class="flex items-center gap-3 p-3 rounded-lg {{ ($visionDiagnostics['ollama']['connected'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-danger-50 dark:bg-danger-900/20' }}">
+                                        @if($visionDiagnostics['ollama']['connected'] ?? false)
+                                            <x-heroicon-o-check-circle class="w-6 h-6 text-success-600" />
+                                            <div>
+                                                <div class="font-medium text-success-700 dark:text-success-400">Ollama connecté</div>
+                                                @if($visionDiagnostics['ollama']['configured_model_installed'] ?? false)
+                                                    <div class="text-sm text-success-600">Modèle {{ $visionDiagnostics['model'] ?? 'inconnu' }} installé</div>
+                                                @else
+                                                    <div class="text-sm text-warning-600">Modèle {{ $visionDiagnostics['model'] ?? 'inconnu' }} non installé</div>
+                                                    <code class="text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">ollama pull {{ $visionDiagnostics['model'] ?? '' }}</code>
+                                                @endif
+                                            </div>
+                                        @else
+                                            <x-heroicon-o-x-circle class="w-6 h-6 text-danger-600" />
+                                            <div>
+                                                <div class="font-medium text-danger-700 dark:text-danger-400">Ollama non connecté</div>
+                                                <div class="text-sm text-danger-600">{{ $visionDiagnostics['ollama']['error'] ?? 'Erreur inconnue' }}</div>
+                                            </div>
+                                        @endif
+                                    </div>
+
+                                    {{-- Convertisseurs PDF --}}
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div class="flex items-center gap-2 p-2 rounded {{ ($visionDiagnostics['pdf_converter']['pdftoppm'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-100 dark:bg-gray-700' }}">
+                                            @if($visionDiagnostics['pdf_converter']['pdftoppm'] ?? false)
+                                                <x-heroicon-o-check-circle class="w-4 h-4 text-success-600" />
+                                                <span class="text-sm text-success-700 dark:text-success-400">pdftoppm</span>
+                                            @else
+                                                <x-heroicon-o-x-circle class="w-4 h-4 text-gray-400" />
+                                                <span class="text-sm text-gray-500">pdftoppm</span>
+                                            @endif
+                                        </div>
+                                        <div class="flex items-center gap-2 p-2 rounded {{ ($visionDiagnostics['pdf_converter']['imagemagick'] ?? false) ? 'bg-success-50 dark:bg-success-900/20' : 'bg-gray-100 dark:bg-gray-700' }}">
+                                            @if($visionDiagnostics['pdf_converter']['imagemagick'] ?? false)
+                                                <x-heroicon-o-check-circle class="w-4 h-4 text-success-600" />
+                                                <span class="text-sm text-success-700 dark:text-success-400">ImageMagick</span>
+                                            @else
+                                                <x-heroicon-o-x-circle class="w-4 h-4 text-gray-400" />
+                                                <span class="text-sm text-gray-500">ImageMagick</span>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+                            @else
+                                <div class="text-gray-500 text-sm">Cliquez sur "Tester la connexion" pour actualiser</div>
+                            @endif
+                        </div>
+
+                        {{-- Vision Form --}}
+                        {{ $this->visionForm }}
+
+                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
+                            <x-filament::button
+                                wire:click="saveVisionSettings"
+                                color="success"
+                                icon="heroicon-o-check"
+                            >
+                                Sauvegarder
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="testVisionConnection"
+                                color="info"
+                                icon="heroicon-o-signal"
+                            >
+                                Tester la connexion
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="resetVisionPrompt"
+                                wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
+                                color="warning"
+                                icon="heroicon-o-arrow-path"
+                            >
+                                Réinitialiser le prompt
+                            </x-filament::button>
+                        </div>
+                    </div>
+                </x-filament::section>
+
+                {{-- Zone de calibration Vision (Collapsible) --}}
                 <x-filament::section collapsible collapsed>
                     <x-slot name="heading">
-                        Zone de calibration
+                        Zone de calibration Vision
                     </x-slot>
                     <x-slot name="description">
                         Testez différents prompts sur une image pour calibrer l'extraction.
@@ -441,101 +475,6 @@
                         @endif
                     </div>
                 </x-filament::section>
-            </div>
-
-        @elseif($activeTab === 'chunking')
-            {{-- LLM Chunking Settings Tab --}}
-            <div class="space-y-6">
-                {{-- Queue Stats --}}
-                <x-filament::section>
-                    <x-slot name="heading">
-                        File d'attente Pipeline
-                    </x-slot>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <div class="text-sm text-gray-500 dark:text-gray-400">Jobs en attente</div>
-                            <div class="text-2xl font-bold {{ ($queueStats['pending'] ?? 0) > 0 ? 'text-warning-600' : 'text-gray-900 dark:text-white' }}">
-                                {{ $queueStats['pending'] ?? 0 }}
-                            </div>
-                        </div>
-                        <div class="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <div class="text-sm text-gray-500 dark:text-gray-400">Jobs en erreur</div>
-                            <div class="text-2xl font-bold {{ ($queueStats['failed'] ?? 0) > 0 ? 'text-danger-600' : 'text-gray-900 dark:text-white' }}">
-                                {{ $queueStats['failed'] ?? 0 }}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-4 text-sm text-gray-500 dark:text-gray-400">
-                        <strong>Commande worker :</strong>
-                        <code class="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">php artisan queue:work --queue=default,pipeline,llm-chunking</code>
-                    </div>
-                </x-filament::section>
-
-                {{-- Test Connection Button --}}
-                <div class="flex items-center gap-3">
-                    <x-filament::button
-                        wire:click="testOllamaConnection"
-                        color="info"
-                        icon="heroicon-o-signal"
-                    >
-                        Tester la connexion Ollama
-                    </x-filament::button>
-                </div>
-
-                {{-- Configuration Vision (Collapsible) --}}
-                <x-filament::section
-                    :collapsed="true"
-                    collapsible
-                >
-                    <x-slot name="heading">
-                        Configuration Vision
-                    </x-slot>
-                    <x-slot name="description">
-                        Paramètres pour l'extraction de texte depuis les images via Vision LLM
-                    </x-slot>
-                    <x-filament::button
-                        wire:click="resetLlmPrompt"
-                        wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
-                        color="warning"
-                        icon="heroicon-o-arrow-path"
-                    >
-                        Reset prompt chunking
-                    </x-filament::button>
-
-                    <x-filament::button
-                        wire:click="resetEnrichmentPrompt"
-                        wire:confirm="Le prompt d'enrichissement sera remplacé par la version par défaut. Continuer ?"
-                        color="warning"
-                        icon="heroicon-o-arrow-path"
-                    >
-                        Reset prompt enrichissement
-                    </x-filament::button>
-
-                    <div class="space-y-4">
-                        {{ $this->visionForm }}
-
-                        <div class="flex items-center gap-3 pt-4 border-t dark:border-gray-700">
-                            <x-filament::button
-                                wire:click="saveVisionSettings"
-                                color="success"
-                                icon="heroicon-o-check"
-                            >
-                                Sauvegarder
-                            </x-filament::button>
-
-                            <x-filament::button
-                                wire:click="resetVisionPrompt"
-                                wire:confirm="Le prompt sera remplacé par la version par défaut. Continuer ?"
-                                color="warning"
-                                icon="heroicon-o-arrow-path"
-                            >
-                                Réinitialiser le prompt
-                            </x-filament::button>
-                        </div>
-                    </div>
-                </x-filament::section>
 
                 {{-- Configuration Chunking LLM (Collapsible) --}}
                 <x-filament::section
@@ -568,6 +507,15 @@
                                 icon="heroicon-o-arrow-path"
                             >
                                 Réinitialiser le prompt
+                            </x-filament::button>
+
+                            <x-filament::button
+                                wire:click="resetEnrichmentPrompt"
+                                wire:confirm="Le prompt d'enrichissement sera remplacé par la version par défaut. Continuer ?"
+                                color="warning"
+                                icon="heroicon-o-arrow-path"
+                            >
+                                Reset enrichissement
                             </x-filament::button>
                         </div>
                     </div>
