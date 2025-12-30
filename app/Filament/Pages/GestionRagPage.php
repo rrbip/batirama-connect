@@ -296,16 +296,19 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
                         'completed' => 'success',
-                        'processing' => 'warning',
-                        'failed' => 'danger',
+                        'processing', 'chunking', 'indexing' => 'warning',
+                        'failed', 'chunk_error' => 'danger',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
-                        default => '-',
+                        'chunk_error' => 'Erreur chunking',
+                        default => $state ?? '-',
                     }),
 
                 IconColumn::make('is_indexed')
@@ -330,9 +333,12 @@ class GestionRagPage extends Page implements HasForms, HasTable
                     ->label('Statut extraction')
                     ->options([
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
+                        'chunk_error' => 'Erreur chunking',
                     ]),
 
                 TernaryFilter::make('is_indexed')

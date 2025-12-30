@@ -568,63 +568,8 @@ class DocumentResource extends Resource
                                             ->url(fn ($record) => $record ? static::getUrl('chunks', ['record' => $record]) : null),
                                     ])
                                     ->schema([
-                                        Forms\Components\Placeholder::make('chunks_list')
-                                            ->label('')
-                                            ->content(function ($record) {
-                                                if (!$record || $record->chunks->isEmpty()) {
-                                                    return 'Aucun chunk disponible';
-                                                }
-
-                                                // Charger les chunks avec leur catégorie
-                                                $chunks = $record->chunks()->with('category')->orderBy('chunk_index')->get();
-
-                                                $html = '<div class="space-y-4">';
-                                                foreach ($chunks as $chunk) {
-                                                    $status = $chunk->is_indexed ? '✓ Indexé' : '✗ Non indexé';
-                                                    $statusColor = $chunk->is_indexed ? 'text-success-600' : 'text-danger-600';
-                                                    $tokens = $chunk->token_count ?? 0;
-
-                                                    // Badge de catégorie
-                                                    $categoryBadge = '';
-                                                    if ($chunk->category) {
-                                                        $color = $chunk->category->color ?? '#6B7280';
-                                                        $categoryBadge = sprintf(
-                                                            '<span class="text-xs px-2 py-0.5 rounded" style="background-color: %s20; color: %s;">%s</span>',
-                                                            $color,
-                                                            $color,
-                                                            e($chunk->category->name)
-                                                        );
-                                                    } else {
-                                                        $categoryBadge = '<span class="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500">Sans catégorie</span>';
-                                                    }
-
-                                                    $html .= sprintf(
-                                                        '<div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                                                            <div class="flex justify-between items-center mb-2">
-                                                                <div class="flex items-center gap-2">
-                                                                    <span class="font-semibold">Chunk #%d</span>
-                                                                    %s
-                                                                </div>
-                                                                <div class="flex items-center gap-3">
-                                                                    <span class="text-xs text-gray-500">%d tokens</span>
-                                                                    <span class="text-xs %s">%s</span>
-                                                                </div>
-                                                            </div>
-                                                            <div class="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">%s</div>
-                                                        </div>',
-                                                        $chunk->chunk_index,
-                                                        $categoryBadge,
-                                                        $tokens,
-                                                        $statusColor,
-                                                        $status,
-                                                        e(\Illuminate\Support\Str::limit($chunk->content, 500))
-                                                    );
-                                                }
-                                                $html .= '</div>';
-
-                                                return new \Illuminate\Support\HtmlString($html);
-                                            })
-                                            ->columnSpanFull(),
+                                        Forms\Components\View::make('filament.resources.document-resource.chunks-tab')
+                                            ->viewData(['record' => fn ($record) => $record]),
                                     ]),
                             ])
                             ->visible(fn ($record) => $record !== null && $record->chunk_count > 0),
@@ -666,16 +611,19 @@ class DocumentResource extends Resource
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
                         'completed' => 'success',
-                        'processing' => 'warning',
-                        'failed' => 'danger',
+                        'processing', 'chunking', 'indexing' => 'warning',
+                        'failed', 'chunk_error' => 'danger',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
-                        default => '-',
+                        'chunk_error' => 'Erreur chunking',
+                        default => $state ?? '-',
                     }),
 
                 Tables\Columns\IconColumn::make('is_indexed')
@@ -706,9 +654,12 @@ class DocumentResource extends Resource
                     ->label('Statut extraction')
                     ->options([
                         'pending' => 'En attente',
-                        'processing' => 'En cours',
+                        'processing' => 'Extraction...',
+                        'chunking' => 'Chunking...',
+                        'indexing' => 'Indexation...',
                         'completed' => 'Terminé',
                         'failed' => 'Échoué',
+                        'chunk_error' => 'Erreur chunking',
                     ]),
 
                 Tables\Filters\TernaryFilter::make('is_indexed')
