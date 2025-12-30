@@ -319,10 +319,38 @@ class DocumentResource extends Resource
                                                 ->requiresConfirmation()
                                                 ->modalHeading('Relancer le pipeline')
                                                 ->modalDescription('Cette action va supprimer les chunks existants et relancer tout le pipeline. Continuer ?')
-                                                ->action(function ($record) {
-                                                    $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
-                                                    $orchestrator->startPipeline($record);
-                                                    Notification::make()->title('Pipeline relancé')->success()->send();
+                                                ->action(function ($record, $livewire) {
+                                                    try {
+                                                        $orchestrator = app(\App\Services\Pipeline\PipelineOrchestratorService::class);
+                                                        $orchestrator->startPipeline($record);
+
+                                                        // Refresh to show updated pipeline_steps
+                                                        $record->refresh();
+
+                                                        $queueDriver = config('queue.default');
+                                                        $jobCount = \DB::table('jobs')->where('queue', 'pipeline')->count();
+
+                                                        Notification::make()
+                                                            ->title('Pipeline relancé')
+                                                            ->body("Queue: {$queueDriver}, Jobs en attente: {$jobCount}")
+                                                            ->success()
+                                                            ->send();
+
+                                                        // Force page refresh
+                                                        $livewire->redirect(request()->header('Referer'));
+                                                    } catch (\Throwable $e) {
+                                                        \Log::error('Pipeline start failed', [
+                                                            'document_id' => $record->id,
+                                                            'error' => $e->getMessage(),
+                                                            'trace' => $e->getTraceAsString(),
+                                                        ]);
+
+                                                        Notification::make()
+                                                            ->title('Erreur lors du lancement')
+                                                            ->body($e->getMessage())
+                                                            ->danger()
+                                                            ->send();
+                                                    }
                                                 }),
 
                                             Forms\Components\Actions\Action::make('continue_pipeline')
