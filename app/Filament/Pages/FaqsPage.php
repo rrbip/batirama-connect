@@ -36,6 +36,13 @@ class FaqsPage extends Page implements HasForms
 
     protected static ?int $navigationSort = 4;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     private const LEARNED_RESPONSES_COLLECTION = 'learned_responses';
 
     #[Url]

@@ -38,6 +38,13 @@ class VisionSettingsPage extends Page implements HasForms
 
     protected static string $view = 'filament.pages.vision-settings-page';
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     protected static ?string $navigationGroup = 'Intelligence Artificielle';
 
     protected static ?string $navigationLabel = 'Extraction Vision';

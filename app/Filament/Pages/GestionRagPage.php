@@ -78,6 +78,13 @@ class GestionRagPage extends Page implements HasForms, HasTable
 
     protected static ?int $navigationSort = 2;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     #[Url]
     public string $activeTab = 'documents';
 

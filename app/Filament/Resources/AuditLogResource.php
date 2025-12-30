@@ -26,6 +26,13 @@ class AuditLogResource extends Resource
 
     protected static ?int $navigationSort = 10;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public static function canCreate(): bool
     {
         return false;

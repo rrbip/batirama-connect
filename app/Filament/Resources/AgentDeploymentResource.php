@@ -29,6 +29,13 @@ class AgentDeploymentResource extends Resource
 
     protected static ?int $navigationSort = 10;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public static function form(Form $form): Form
     {
         return $form

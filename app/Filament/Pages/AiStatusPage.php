@@ -33,6 +33,13 @@ class AiStatusPage extends Page
 
     protected static ?int $navigationSort = 10;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public array $services = [];
     public array $queueStats = [];
     public array $pendingJobs = [];

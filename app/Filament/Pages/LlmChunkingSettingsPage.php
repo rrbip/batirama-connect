@@ -38,6 +38,13 @@ class LlmChunkingSettingsPage extends Page implements HasForms
     // Masqué - accessible via Gestion RAG
     protected static bool $shouldRegisterNavigation = false;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && ($user->hasRole('super-admin') || $user->hasRole('admin'));
+    }
+
     public ?array $data = [];
 
     public array $queueStats = [];

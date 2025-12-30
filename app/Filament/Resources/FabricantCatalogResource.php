@@ -30,6 +30,30 @@ class FabricantCatalogResource extends Resource
 
     protected static ?int $navigationSort = 15;
 
+    public static function canAccess(): bool
+    {
+        $user = auth()->user();
+
+        return $user && (
+            $user->hasRole('super-admin') ||
+            $user->hasRole('admin') ||
+            $user->hasRole('fabricant')
+        );
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        $query = parent::getEloquentQuery();
+        $user = auth()->user();
+
+        // Les fabricants ne voient que leurs propres catalogues
+        if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+            $query->where('fabricant_id', $user->id);
+        }
+
+        return $query;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -59,7 +83,20 @@ class FabricantCatalogResource extends Resource
                                             ->required()
                                             ->searchable()
                                             ->preload()
-                                            ->helperText('Utilisateur avec le rôle Fabricant'),
+                                            ->helperText('Utilisateur avec le rôle Fabricant')
+                                            // Pour les fabricants: auto-assigner et masquer
+                                            ->default(function () {
+                                                $user = auth()->user();
+                                                if ($user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin')) {
+                                                    return $user->id;
+                                                }
+                                                return null;
+                                            })
+                                            ->disabled(function () {
+                                                $user = auth()->user();
+                                                return $user && $user->hasRole('fabricant') && !$user->hasRole('admin') && !$user->hasRole('super-admin');
+                                            })
+                                            ->dehydrated(true),
 
                                         Forms\Components\TextInput::make('website_url')
                                             ->label('URL du site web')

@@ -19,6 +19,10 @@ tests/
 │   ├── Auth/
 │   │   ├── UserAuthenticationTest.php
 │   │   └── UserRegistrationTest.php
+│   ├── Permissions/
+│   │   ├── RoleAccessTest.php
+│   │   ├── ResourceAccessTest.php
+│   │   └── DataFilteringTest.php
 │   └── Pipeline/
 │       └── PipelineIntegrationTest.php
 └── TestCase.php
@@ -108,6 +112,49 @@ tests/
 | `test_registration_requires_password_confirmation` | Vérifie la confirmation du mot de passe |
 | `test_duplicate_email_rejected` | Vérifie le rejet des emails dupliqués |
 | `test_weak_password_rejected` | Vérifie les règles de complexité du mot de passe |
+
+### 7. Tests Permissions par Rôle
+
+**Fichier:** `tests/Feature/Permissions/RoleAccessTest.php`
+
+Ces tests vérifient les restrictions d'accès au panel admin Filament selon les rôles.
+
+| Test | Description |
+|------|-------------|
+| `test_super_admin_can_access_panel` | Super-admin a accès au panel |
+| `test_admin_can_access_panel` | Admin a accès au panel |
+| `test_fabricant_can_access_panel` | Fabricant a accès au panel |
+| `test_artisan_cannot_access_panel` | Artisan n'a pas accès au panel |
+| `test_super_admin_can_access_all_resources` | Super-admin voit toutes les ressources |
+| `test_fabricant_cannot_access_admin_resources` | Fabricant ne voit pas Users, Roles, etc. |
+| `test_fabricant_can_only_see_own_catalogs` | Fabricant voit uniquement ses catalogues |
+| `test_fabricant_can_only_see_own_products` | Fabricant voit uniquement ses produits |
+| `test_fabricant_cannot_access_other_catalog` | Fabricant ne peut pas accéder au catalogue d'un autre |
+
+**Fichier:** `tests/Feature/Permissions/ResourceAccessTest.php`
+
+Tests de la méthode `canAccess()` sur chaque ressource.
+
+| Test | Description |
+|------|-------------|
+| `test_user_resource_requires_admin` | UserResource requiert admin ou super-admin |
+| `test_role_resource_requires_admin` | RoleResource requiert admin ou super-admin |
+| `test_document_resource_requires_admin` | DocumentResource requiert admin ou super-admin |
+| `test_agent_resource_requires_admin` | AgentResource requiert admin ou super-admin |
+| `test_fabricant_catalog_allows_fabricant` | FabricantCatalogResource autorise fabricant |
+| `test_fabricant_product_allows_fabricant` | FabricantProductResource autorise fabricant |
+
+**Fichier:** `tests/Feature/Permissions/DataFilteringTest.php`
+
+Tests du filtrage des données via `getEloquentQuery()`.
+
+| Test | Description |
+|------|-------------|
+| `test_admin_sees_all_catalogs` | Admin voit tous les catalogues |
+| `test_fabricant_sees_only_own_catalogs` | Fabricant voit uniquement ses catalogues |
+| `test_admin_sees_all_products` | Admin voit tous les produits |
+| `test_fabricant_sees_only_own_products` | Fabricant voit uniquement les produits de ses catalogues |
+| `test_catalog_dropdown_filtered_for_fabricant` | Le dropdown catalogue est filtré pour fabricant |
 
 **Exemple de test:**
 ```php
