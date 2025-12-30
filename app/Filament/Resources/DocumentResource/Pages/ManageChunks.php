@@ -37,6 +37,13 @@ class ManageChunks extends Page
 
     public ?int $editingCategoryId = null;
 
+    // Filters
+    public ?int $filterCategoryId = null;
+
+    public ?string $filterUseful = null; // null = all, 'yes' = true, 'no' = false
+
+    public string $filterSearch = '';
+
     #[Computed]
     public function categories(): Collection
     {
@@ -65,7 +72,70 @@ class ManageChunks extends Page
     #[Computed]
     public function chunks(): Collection
     {
-        return $this->record->chunks()->with('category')->orderBy('chunk_index')->get();
+        $query = $this->record->chunks()->with('category')->orderBy('chunk_index');
+
+        // Apply category filter
+        if ($this->filterCategoryId !== null) {
+            $query->where('category_id', $this->filterCategoryId);
+        }
+
+        // Apply useful filter
+        if ($this->filterUseful === 'yes') {
+            $query->where('useful', true);
+        } elseif ($this->filterUseful === 'no') {
+            $query->where(function ($q) {
+                $q->where('useful', false)->orWhereNull('useful');
+            });
+        }
+
+        // Apply search filter
+        if (!empty($this->filterSearch)) {
+            $search = $this->filterSearch;
+            $query->where(function ($q) use ($search) {
+                $q->where('content', 'ilike', "%{$search}%")
+                    ->orWhere('summary', 'ilike', "%{$search}%");
+            });
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * Get all chunks (unfiltered) for stats
+     */
+    #[Computed]
+    public function allChunks(): Collection
+    {
+        return $this->record->chunks()->with('category')->get();
+    }
+
+    /**
+     * Reset all filters
+     */
+    public function resetFilters(): void
+    {
+        $this->filterCategoryId = null;
+        $this->filterUseful = null;
+        $this->filterSearch = '';
+        unset($this->chunks);
+    }
+
+    /**
+     * Handle filter changes
+     */
+    public function updatedFilterCategoryId(): void
+    {
+        unset($this->chunks);
+    }
+
+    public function updatedFilterUseful(): void
+    {
+        unset($this->chunks);
+    }
+
+    public function updatedFilterSearch(): void
+    {
+        unset($this->chunks);
     }
 
     protected function getHeaderActions(): array
