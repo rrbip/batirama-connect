@@ -79,14 +79,13 @@ class ProcessPdfToImagesJob implements ShouldQueue
                 'page_count' => $result['page_count'],
             ]);
 
-            // Chain to next step if auto mode
-            if ($this->autoChain) {
-                $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
-                if ($nextStepIndex !== null) {
-                    $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
-                } else {
-                    $orchestrator->markPipelineCompleted($document->fresh());
-                }
+            // Chain to next step or complete pipeline
+            $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
+
+            if ($nextStepIndex !== null && $this->autoChain) {
+                $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
+            } elseif ($nextStepIndex === null) {
+                $orchestrator->markPipelineCompleted($document->fresh());
             }
 
         } catch (Throwable $e) {

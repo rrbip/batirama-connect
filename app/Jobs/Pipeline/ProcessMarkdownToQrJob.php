@@ -161,14 +161,17 @@ class ProcessMarkdownToQrJob implements ShouldQueue
             ]);
 
             // Chain to next step or complete pipeline
-            if ($this->autoChain) {
-                $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
-                if ($nextStepIndex !== null) {
-                    $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
-                } else {
-                    $orchestrator->markPipelineCompleted($document->fresh());
-                }
+            $nextStepIndex = $orchestrator->getNextStepIndex($document, $this->stepIndex);
+
+            if ($nextStepIndex !== null && $this->autoChain) {
+                // There are more steps and auto-chain is enabled
+                $orchestrator->dispatchStep($document->fresh(), $nextStepIndex, true);
+            } elseif ($nextStepIndex === null) {
+                // This was the last step - mark pipeline as completed
+                // (even in manual mode, we should complete the pipeline)
+                $orchestrator->markPipelineCompleted($document->fresh());
             }
+            // If nextStepIndex !== null && !autoChain: manual mode, wait for user to continue
 
         } catch (Throwable $e) {
             Log::error("Markdown to Q/R failed", [
