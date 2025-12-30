@@ -25,8 +25,17 @@
         'pdftoppm' => 'Pdftoppm',
         'imagemagick' => 'ImageMagick',
         'vision_llm' => 'Vision LLM',
-        'turndown' => 'Convertisseur HTML',
+        'html_converter' => 'Convertisseur HTML',
         'qr_atomique' => 'Q/R Atomique',
+    ];
+
+    // Outils disponibles par étape
+    $availableTools = [
+        'pdf_to_images' => ['pdftoppm', 'imagemagick'],
+        'images_to_markdown' => ['vision_llm'],
+        'image_to_markdown' => ['vision_llm'],
+        'html_to_markdown' => ['html_converter'],
+        'markdown_to_qr' => ['qr_atomique'],
     ];
 @endphp
 
@@ -74,18 +83,29 @@
         <div class="space-y-4">
             @foreach($steps as $index => $step)
                 @php
+                    // Utiliser les bonnes clés du PipelineOrchestratorService
                     $stepStatus = $step['status'] ?? 'pending';
-                    $stepName = $step['name'] ?? "step_{$index}";
+                    $stepName = $step['step_name'] ?? "step_{$index}";
                     $stepLabel = $stepLabels[$stepName] ?? ucfirst(str_replace('_', ' ', $stepName));
-                    $tool = $step['tool'] ?? '-';
+                    $tool = $step['tool_used'] ?? '-';
                     $toolLabel = $toolLabels[$tool] ?? ucfirst(str_replace('_', ' ', $tool));
-                    $config = $step['config'] ?? [];
-                    $duration = isset($step['duration_seconds']) ? round($step['duration_seconds'], 1) . 's' : '-';
+                    $config = $step['tool_config'] ?? [];
+                    $durationMs = $step['duration_ms'] ?? null;
+                    $duration = $durationMs ? round($durationMs / 1000, 1) . 's' : '-';
                     $inputSummary = $step['input_summary'] ?? '-';
                     $outputSummary = $step['output_summary'] ?? '-';
-                    $error = $step['error'] ?? null;
+                    $error = $step['error_message'] ?? null;
+                    $outputPath = $step['output_path'] ?? null;
+                    $tools = $availableTools[$stepName] ?? [];
 
-                    $stepStatusConfig = match ($stepStatus) {
+                    // Mapping status: service uses 'success'/'error', UI uses 'completed'/'failed'
+                    $displayStatus = match($stepStatus) {
+                        'success' => 'completed',
+                        'error' => 'failed',
+                        default => $stepStatus,
+                    };
+
+                    $stepStatusConfig = match ($displayStatus) {
                         'pending' => ['label' => 'En attente', 'bg' => 'bg-gray-100 dark:bg-gray-800', 'badge' => 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'],
                         'running' => ['label' => 'En cours', 'bg' => 'bg-warning-50 dark:bg-warning-900/20', 'badge' => 'bg-warning-100 text-warning-800 dark:bg-warning-900/50 dark:text-warning-300'],
                         'completed' => ['label' => 'Terminé', 'bg' => 'bg-success-50 dark:bg-success-900/20', 'badge' => 'bg-success-100 text-success-800 dark:bg-success-900/50 dark:text-success-300'],
@@ -102,11 +122,11 @@
                                 ÉTAPE {{ $index + 1 }} : {{ $stepLabel }}
                             </span>
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium {{ $stepStatusConfig['badge'] }}">
-                                @if($stepStatus === 'completed')
+                                @if($displayStatus === 'completed')
                                     <x-heroicon-s-check class="w-3 h-3" />
-                                @elseif($stepStatus === 'running')
+                                @elseif($displayStatus === 'running')
                                     <x-heroicon-s-arrow-path class="w-3 h-3 animate-spin" />
-                                @elseif($stepStatus === 'failed')
+                                @elseif($displayStatus === 'failed')
                                     <x-heroicon-s-x-mark class="w-3 h-3" />
                                 @endif
                                 {{ $stepStatusConfig['label'] }}
@@ -155,54 +175,89 @@
                             </div>
                         @endif
 
+                        {{-- Sélection d'outil (si plusieurs disponibles) --}}
+                        @if(count($tools) > 1)
+                            <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">Changer l'outil :</span>
+                                <div class="flex flex-wrap gap-3">
+                                    @foreach($tools as $availableTool)
+                                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="radio"
+                                                name="tool_step_{{ $index }}"
+                                                value="{{ $availableTool }}"
+                                                {{ $tool === $availableTool ? 'checked' : '' }}
+                                                class="text-primary-600 focus:ring-primary-500"
+                                                data-step-index="{{ $index }}"
+                                            >
+                                            <span class="text-sm text-gray-700 dark:text-gray-300">
+                                                {{ $toolLabels[$availableTool] ?? $availableTool }}
+                                                @if($tool === $availableTool)
+                                                    <span class="text-xs text-gray-500">(actuel)</span>
+                                                @endif
+                                            </span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
                         {{-- Boutons d'action --}}
-                        @if($stepStatus === 'completed')
-                            <div class="flex items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-                                @if($stepName === 'pdf_to_images' && isset($step['output_path']))
-                                    <button
-                                        type="button"
-                                        x-data
-                                        x-on:click="$dispatch('open-modal', { id: 'view-images-{{ $index }}' })"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
-                                    >
-                                        <x-heroicon-o-eye class="w-4 h-4" />
-                                        Voir les images
-                                    </button>
-                                @elseif(in_array($stepName, ['images_to_markdown', 'image_to_markdown', 'html_to_markdown']))
-                                    <button
-                                        type="button"
-                                        x-data
-                                        x-on:click="$dispatch('open-modal', { id: 'view-markdown-{{ $index }}' })"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
-                                    >
-                                        <x-heroicon-o-eye class="w-4 h-4" />
-                                        Voir le Markdown
-                                    </button>
-                                @elseif($stepName === 'markdown_to_qr')
-                                    <button
-                                        type="button"
-                                        x-data
-                                        x-on:click="$dispatch('open-modal', { id: 'view-qr-{{ $index }}' })"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
-                                    >
-                                        <x-heroicon-o-eye class="w-4 h-4" />
-                                        Voir les Q/R
-                                    </button>
+                        @if($displayStatus === 'completed' || $displayStatus === 'failed')
+                            <div class="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                {{-- Bouton Voir le résultat --}}
+                                @if($displayStatus === 'completed')
+                                    @if($stepName === 'pdf_to_images' && $outputPath)
+                                        <a
+                                            href="{{ route('filament.admin.resources.documents.view-pipeline-images', ['record' => $record->id, 'step' => $index]) }}"
+                                            target="_blank"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
+                                        >
+                                            <x-heroicon-o-eye class="w-4 h-4" />
+                                            Voir les images
+                                        </a>
+                                    @elseif(in_array($stepName, ['images_to_markdown', 'image_to_markdown', 'html_to_markdown']))
+                                        <button
+                                            type="button"
+                                            onclick="document.getElementById('markdown-modal-{{ $index }}').showModal()"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
+                                        >
+                                            <x-heroicon-o-eye class="w-4 h-4" />
+                                            Voir le Markdown
+                                        </button>
+                                    @elseif($stepName === 'markdown_to_qr')
+                                        <a
+                                            href="{{ route('filament.admin.resources.documents.edit', ['record' => $record->id]) }}?activeRelationManager=chunks"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
+                                        >
+                                            <x-heroicon-o-eye class="w-4 h-4" />
+                                            Voir les Q/R (onglet Chunks)
+                                        </a>
+                                    @endif
                                 @endif
 
-                                <button
-                                    type="button"
-                                    wire:click="relaunchStep({{ $index }})"
-                                    wire:confirm="Relancer cette étape ? Les résultats actuels seront remplacés."
-                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-warning-600 dark:text-warning-400 bg-warning-50 dark:bg-warning-900/20 rounded-lg hover:bg-warning-100 dark:hover:bg-warning-900/40 transition"
-                                >
-                                    <x-heroicon-o-arrow-path class="w-4 h-4" />
-                                    Relancer cette étape
-                                </button>
+                                {{-- Note: Les actions de relance sont gérées par les boutons Filament Actions en dessous --}}
                             </div>
                         @endif
                     </div>
                 </div>
+
+                {{-- Modal pour voir le Markdown --}}
+                @if(in_array($stepName, ['images_to_markdown', 'image_to_markdown', 'html_to_markdown']) && $displayStatus === 'completed')
+                    <dialog id="markdown-modal-{{ $index }}" class="rounded-lg shadow-xl max-w-4xl w-full p-0 backdrop:bg-gray-900/50">
+                        <div class="bg-white dark:bg-gray-900">
+                            <div class="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700">
+                                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Markdown extrait - Étape {{ $index + 1 }}</h3>
+                                <button onclick="document.getElementById('markdown-modal-{{ $index }}').close()" class="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                                    <x-heroicon-o-x-mark class="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div class="p-4 max-h-[70vh] overflow-auto">
+                                <pre class="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap font-mono bg-gray-50 dark:bg-gray-800 p-4 rounded">{{ $record->extracted_text ?? 'Aucun texte extrait' }}</pre>
+                            </div>
+                        </div>
+                    </dialog>
+                @endif
 
                 {{-- Flèche entre les étapes --}}
                 @if(!$loop->last)

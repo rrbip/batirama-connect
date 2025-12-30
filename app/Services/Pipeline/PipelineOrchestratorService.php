@@ -84,7 +84,12 @@ class PipelineOrchestratorService
         }
 
         $document->update([
-            'pipeline_steps' => ['steps' => $steps],
+            'pipeline_steps' => [
+                'status' => 'running',
+                'started_at' => now()->toIso8601String(),
+                'completed_at' => null,
+                'steps' => $steps,
+            ],
             'extraction_status' => 'processing',
         ]);
 
@@ -165,8 +170,15 @@ class PipelineOrchestratorService
         $steps[$stepIndex]['error_message'] = null;
         $steps[$stepIndex]['error_trace'] = null;
 
+        // Update global pipeline status back to running
+        $pipelineData['status'] = 'running';
+        $pipelineData['completed_at'] = null;
         $pipelineData['steps'] = $steps;
-        $document->update(['pipeline_steps' => $pipelineData]);
+
+        $document->update([
+            'pipeline_steps' => $pipelineData,
+            'extraction_status' => 'processing',
+        ]);
 
         // Dispatch without auto chain (manual mode)
         $this->dispatchStep($document, $stepIndex, false);
@@ -259,7 +271,15 @@ class PipelineOrchestratorService
             'error_trace' => $errorTrace,
         ]);
 
-        $document->update(['extraction_status' => 'failed']);
+        // Update global pipeline status to failed
+        $pipelineData = $document->fresh()->pipeline_steps ?? ['steps' => []];
+        $pipelineData['status'] = 'failed';
+        $pipelineData['completed_at'] = now()->toIso8601String();
+
+        $document->update([
+            'pipeline_steps' => $pipelineData,
+            'extraction_status' => 'failed',
+        ]);
     }
 
     /**
@@ -267,7 +287,13 @@ class PipelineOrchestratorService
      */
     public function markPipelineCompleted(Document $document): void
     {
+        // Update global pipeline status
+        $pipelineData = $document->pipeline_steps ?? ['steps' => []];
+        $pipelineData['status'] = 'completed';
+        $pipelineData['completed_at'] = now()->toIso8601String();
+
         $document->update([
+            'pipeline_steps' => $pipelineData,
             'extraction_status' => 'completed',
             'extracted_at' => now(),
         ]);
