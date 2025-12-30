@@ -10,16 +10,13 @@
     $chunksUrl = $document ? \App\Filament\Resources\DocumentResource::getUrl('chunks', ['record' => $document]) : '#';
     $chunkCount = $document?->chunk_count ?? 0;
     $currentPage = $currentPage ?? 'edit';
-    $activeTab = $activeTab ?? request()->query('activeTab', 'informations');
+    $activeTab = $activeTab ?? request()->query('activeTab', '-informations-tab');
 @endphp
 
 @if($currentPage === 'edit')
 <style>
     /* Hide the Filament tabs header since we use custom navigation */
-    .hidden-tabs-header .fi-tabs-header,
-    .hidden-tabs-header > div > .fi-tabs-header,
-    .fi-fo-tabs.hidden-tabs-header .fi-tabs-header,
-    [class*="hidden-tabs-header"] .fi-tabs-header {
+    .fi-fo-tabs > div:first-child {
         display: none !important;
     }
 </style>
@@ -30,26 +27,26 @@
     @if($currentPage === 'edit')
         <button
             type="button"
-            onclick="document.querySelector('[data-id=informations]')?.click()"
+            onclick="document.querySelector('[data-id=\"-informations-tab\"]')?.click()"
             @class([
                 'fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75',
-                'bg-gray-50 dark:bg-white/5' => $activeTab === 'informations',
-                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== 'informations',
+                'bg-gray-50 dark:bg-white/5' => $activeTab === '-informations-tab',
+                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== '-informations-tab',
             ])
         >
             <x-heroicon-o-information-circle @class([
                 'h-5 w-5 shrink-0',
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'informations',
-                'text-gray-400 dark:text-gray-500' => $activeTab !== 'informations',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-informations-tab',
+                'text-gray-400 dark:text-gray-500' => $activeTab !== '-informations-tab',
             ]) />
             <span @class([
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'informations',
-                'text-gray-500 dark:text-gray-400' => $activeTab !== 'informations',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-informations-tab',
+                'text-gray-500 dark:text-gray-400' => $activeTab !== '-informations-tab',
             ])>Informations</span>
         </button>
     @else
         <a
-            href="{{ $editUrl }}?activeTab=informations"
+            href="{{ $editUrl }}?activeTab=-informations-tab"
             class="fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75 hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5"
         >
             <x-heroicon-o-information-circle class="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
@@ -61,26 +58,26 @@
     @if($currentPage === 'edit')
         <button
             type="button"
-            onclick="document.querySelector('[data-id=pipeline]')?.click()"
+            onclick="document.querySelector('[data-id=\"-pipeline-tab\"]')?.click()"
             @class([
                 'fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75',
-                'bg-gray-50 dark:bg-white/5' => $activeTab === 'pipeline',
-                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== 'pipeline',
+                'bg-gray-50 dark:bg-white/5' => $activeTab === '-pipeline-tab',
+                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== '-pipeline-tab',
             ])
         >
             <x-heroicon-o-adjustments-horizontal @class([
                 'h-5 w-5 shrink-0',
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'pipeline',
-                'text-gray-400 dark:text-gray-500' => $activeTab !== 'pipeline',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-pipeline-tab',
+                'text-gray-400 dark:text-gray-500' => $activeTab !== '-pipeline-tab',
             ]) />
             <span @class([
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'pipeline',
-                'text-gray-500 dark:text-gray-400' => $activeTab !== 'pipeline',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-pipeline-tab',
+                'text-gray-500 dark:text-gray-400' => $activeTab !== '-pipeline-tab',
             ])>Pipeline</span>
         </button>
     @else
         <a
-            href="{{ $editUrl }}?activeTab=pipeline"
+            href="{{ $editUrl }}?activeTab=-pipeline-tab"
             class="fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75 hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5"
         >
             <x-heroicon-o-adjustments-horizontal class="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
@@ -92,26 +89,26 @@
     @if($currentPage === 'edit')
         <button
             type="button"
-            onclick="document.querySelector('[data-id=indexation]')?.click()"
+            onclick="document.querySelector('[data-id=\"-indexation-tab\"]')?.click()"
             @class([
                 'fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75',
-                'bg-gray-50 dark:bg-white/5' => $activeTab === 'indexation',
-                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== 'indexation',
+                'bg-gray-50 dark:bg-white/5' => $activeTab === '-indexation-tab',
+                'hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5' => $activeTab !== '-indexation-tab',
             ])
         >
             <x-heroicon-o-magnifying-glass @class([
                 'h-5 w-5 shrink-0',
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'indexation',
-                'text-gray-400 dark:text-gray-500' => $activeTab !== 'indexation',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-indexation-tab',
+                'text-gray-400 dark:text-gray-500' => $activeTab !== '-indexation-tab',
             ]) />
             <span @class([
-                'text-primary-600 dark:text-primary-400' => $activeTab === 'indexation',
-                'text-gray-500 dark:text-gray-400' => $activeTab !== 'indexation',
+                'text-primary-600 dark:text-primary-400' => $activeTab === '-indexation-tab',
+                'text-gray-500 dark:text-gray-400' => $activeTab !== '-indexation-tab',
             ])>Indexation</span>
         </button>
     @else
         <a
-            href="{{ $editUrl }}?activeTab=indexation"
+            href="{{ $editUrl }}?activeTab=-indexation-tab"
             class="fi-tabs-item group flex items-center gap-x-2 rounded-lg px-3 py-2 text-sm font-medium outline-none transition duration-75 hover:bg-gray-50 focus-visible:bg-gray-50 dark:hover:bg-white/5 dark:focus-visible:bg-white/5"
         >
             <x-heroicon-o-magnifying-glass class="h-5 w-5 shrink-0 text-gray-400 dark:text-gray-500" />
