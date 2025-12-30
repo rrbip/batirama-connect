@@ -322,7 +322,7 @@
                                     <span>📄</span>
                                     <span>Contenu source :</span>
                                 </div>
-                                <div class="text-sm whitespace-pre-wrap max-h-64 overflow-y-auto rounded-lg p-4 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono leading-relaxed">{!! nl2br(e($chunk->original_content ?? $chunk->content)) !!}</div>
+                                <div class="text-sm whitespace-pre-wrap rounded-lg p-4 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-mono leading-relaxed">{!! nl2br(e($chunk->original_content ?? $chunk->content)) !!}</div>
                             </div>
 
                             {{-- Raw LLM Response (collapsible) --}}
@@ -337,7 +337,7 @@
                                         @endif
                                     </summary>
                                     <div class="mt-2 ml-6">
-                                        <pre class="text-xs whitespace-pre-wrap max-h-96 overflow-y-auto rounded-lg p-4 bg-gray-900 text-green-400 font-mono border border-gray-700">{{ $chunk->metadata['llm_raw_response'] }}</pre>
+                                        <pre class="text-xs whitespace-pre-wrap rounded-lg p-4 bg-gray-900 text-green-400 font-mono border border-gray-700">{{ $chunk->metadata['llm_raw_response'] }}</pre>
                                         @if(isset($chunk->metadata['llm_processed_at']))
                                             <p class="mt-1 text-xs text-gray-400">
                                                 Traité le {{ \Carbon\Carbon::parse($chunk->metadata['llm_processed_at'])->format('d/m/Y H:i') }}
