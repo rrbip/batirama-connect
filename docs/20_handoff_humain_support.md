@@ -420,6 +420,178 @@ CREATE TABLE admin_availability (
 CREATE UNIQUE INDEX idx_admin_avail_admin ON admin_availability(admin_id);
 ```
 
+### 3.5 Rôle "Agent de support" et assignation aux agents IA
+
+#### Nouveau rôle
+
+```sql
+-- Ajouter le rôle "Agent de support" (seed ou migration)
+INSERT INTO roles (name, slug, description, is_system, created_at, updated_at)
+VALUES (
+    'Agent de support',
+    'support-agent',
+    'Peut répondre aux conversations escaladées sur les agents IA assignés',
+    true,
+    NOW(),
+    NOW()
+);
+```
+
+#### Table pivot `agent_support_users`
+
+Permet d'assigner des utilisateurs ayant le rôle "support-agent" à des agents IA spécifiques.
+
+```sql
+CREATE TABLE agent_support_users (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT REFERENCES agents(id) ON DELETE CASCADE,
+    user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+
+    -- Permissions spécifiques (optionnel)
+    can_close_conversations BOOLEAN DEFAULT TRUE,
+    can_train_ai BOOLEAN DEFAULT TRUE,           -- Peut sauver Q/R et indexer
+    can_view_analytics BOOLEAN DEFAULT FALSE,    -- Accès aux stats
+
+    -- Notifications
+    notify_on_escalation BOOLEAN DEFAULT TRUE,   -- Notifier par email/push
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE(agent_id, user_id)
+);
+
+CREATE INDEX idx_agent_support_agent ON agent_support_users(agent_id);
+CREATE INDEX idx_agent_support_user ON agent_support_users(user_id);
+```
+
+#### Logique d'accès
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    HIÉRARCHIE D'ACCÈS AU SUPPORT                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  super-admin / admin                                                        │
+│  └── Accès à TOUS les agents (pas besoin d'assignation)                    │
+│                                                                              │
+│  support-agent                                                              │
+│  └── Accès UNIQUEMENT aux agents où il est assigné                         │
+│      (via agent_support_users)                                             │
+│                                                                              │
+│  Autres rôles (artisan, editeur, fabricant...)                             │
+│  └── Pas d'accès à l'interface Support Live                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Modification du modèle Agent
+
+```php
+// app/Models/Agent.php
+
+/**
+ * Utilisateurs assignés au support de cet agent
+ */
+public function supportUsers(): BelongsToMany
+{
+    return $this->belongsToMany(User::class, 'agent_support_users')
+        ->withPivot(['can_close_conversations', 'can_train_ai', 'can_view_analytics', 'notify_on_escalation'])
+        ->withTimestamps();
+}
+
+/**
+ * Vérifie si un utilisateur peut gérer le support de cet agent
+ */
+public function userCanHandleSupport(User $user): bool
+{
+    // Super-admin et admin ont accès à tout
+    if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+        return true;
+    }
+
+    // Vérifier si l'utilisateur est assigné à cet agent
+    if ($user->hasRole('support-agent')) {
+        return $this->supportUsers()->where('user_id', $user->id)->exists();
+    }
+
+    return false;
+}
+```
+
+#### Modification du modèle User
+
+```php
+// app/Models/User.php
+
+public function isSupportAgent(): bool
+{
+    return $this->hasRole('support-agent');
+}
+
+/**
+ * Agents IA pour lesquels cet utilisateur peut faire du support
+ */
+public function supportAgents(): BelongsToMany
+{
+    return $this->belongsToMany(Agent::class, 'agent_support_users')
+        ->withPivot(['can_close_conversations', 'can_train_ai', 'can_view_analytics', 'notify_on_escalation'])
+        ->withTimestamps();
+}
+
+/**
+ * Retourne les agents accessibles pour le support
+ */
+public function getAccessibleSupportAgents(): Collection
+{
+    if ($this->hasRole('super-admin') || $this->hasRole('admin')) {
+        return Agent::where('human_support_enabled', true)->get();
+    }
+
+    if ($this->hasRole('support-agent')) {
+        return $this->supportAgents()->where('human_support_enabled', true)->get();
+    }
+
+    return collect();
+}
+```
+
+#### Interface Filament - Configuration agent
+
+```
+Agent Settings → Support Humain
+├── [x] Activer le support humain
+├── Seuil de confiance: [0.60]
+├── ...
+│
+└── 👥 Agents de support assignés:
+    ┌────────────────────────────────────────────────────────────────────┐
+    │  Nom                │ Clôturer │ Former IA │ Stats │ Notifier     │
+    ├─────────────────────┼──────────┼───────────┼───────┼──────────────┤
+    │  Marie Dupont       │    ✓     │     ✓     │   ✗   │      ✓       │
+    │  Jean Martin        │    ✓     │     ✓     │   ✓   │      ✓       │
+    │  Sophie Bernard     │    ✓     │     ✗     │   ✗   │      ✓       │
+    └─────────────────────┴──────────┴───────────┴───────┴──────────────┘
+
+    [+ Ajouter un agent de support]
+
+    💡 Seuls les utilisateurs ayant le rôle "Agent de support" apparaissent ici.
+    💡 Les super-admin et admin ont automatiquement accès à tous les agents.
+```
+
+#### Mise à jour de `admin_availability`
+
+La table `admin_availability` reste mais `agent_ids` devient redondant avec `agent_support_users`. On peut soit :
+- **Option A** : Garder `agent_ids` pour la rétro-compatibilité (déprécié)
+- **Option B** : Supprimer `agent_ids` et utiliser uniquement `agent_support_users`
+
+**Recommandation** : Option B - supprimer `agent_ids` de `admin_availability` et utiliser la relation `agent_support_users`.
+
+```sql
+-- Migration pour supprimer agent_ids (optionnel, après migration des données)
+ALTER TABLE admin_availability DROP COLUMN agent_ids;
+```
+
 ---
 
 ## 4. Configuration par agent
@@ -2094,14 +2266,16 @@ class SupportChatController extends Controller
 
 | Tâche | Détail | Durée |
 |-------|--------|-------|
-| Migrations | 5 tables (support_conversations, support_messages, support_attachments, support_email_threads, admin_availability) + alter agents | 2 jours |
+| Migrations | 6 tables (support_*, admin_availability, agent_support_users) + alter agents | 2 jours |
+| Rôle + permissions | Seed rôle "support-agent", modifier canAccessPanel() | 0.5 jour |
 | Models Eloquent | 5 models + relations, casts, scopes | 1 jour |
 | EscalationService | shouldEscalate(), getAvailableAdmin(), isWithinSupportHours(), escalate() | 2 jours |
 | Intégration RagService | Modifier chat() pour détecter et gérer l'escalade | 1 jour |
 | Message utilisateur | Affichage message d'escalade dans le widget | 0.5 jour |
 
-- [ ] Migrations (tables support_conversations, support_messages, support_attachments, admin_availability, support_email_threads)
-- [ ] Models Eloquent + relations
+- [ ] Migrations (tables support_*, admin_availability, agent_support_users)
+- [ ] Seed rôle "support-agent" + modifier User::canAccessPanel()
+- [ ] Models Eloquent + relations (dont Agent::supportUsers(), User::supportAgents())
 - [ ] EscalationService (logique de base)
 - [ ] Intégration RagService (détection escalade)
 - [ ] Message utilisateur lors de l'escalade
@@ -2121,7 +2295,7 @@ class SupportChatController extends Controller
 | AgentAssistanceService | findRelevantSources(), generateSuggestion(), improveForEmail() | 1 jour |
 | Tests assistance IA | Tests unitaires et intégration | 0.5 jour |
 
-- [ ] Page Filament "Support Live"
+- [ ] Page Filament "Support Live" (filtrage par agents accessibles)
 - [ ] Liste des conversations escaladées (avec indicateur canal chat/email)
 - [ ] Vue conversation avec historique
 - [ ] Formulaire de réponse
@@ -2129,6 +2303,7 @@ class SupportChatController extends Controller
 - [ ] Panneau d'assistance IA (sources + suggestions)
 - [ ] Modal de confirmation email avec amélioration IA
 - [ ] AgentAssistanceService
+- [ ] Interface assignation agents de support (dans config agent)
 
 ### Phase 3 : Temps réel (4-5 jours)
 
@@ -2307,13 +2482,16 @@ app/
 ├── Exceptions/
 │   └── InvalidAttachmentException.php       # NOUVEAU
 database/
-└── migrations/
-    ├── xxxx_create_support_conversations_table.php
-    ├── xxxx_create_support_messages_table.php
-    ├── xxxx_create_support_attachments_table.php   # NOUVEAU
-    ├── xxxx_create_support_email_threads_table.php
-    ├── xxxx_create_admin_availability_table.php
-    └── xxxx_add_support_fields_to_agents_table.php
+├── migrations/
+│   ├── xxxx_create_support_conversations_table.php
+│   ├── xxxx_create_support_messages_table.php
+│   ├── xxxx_create_support_attachments_table.php
+│   ├── xxxx_create_support_email_threads_table.php
+│   ├── xxxx_create_admin_availability_table.php
+│   ├── xxxx_create_agent_support_users_table.php   # Pivot agents ↔ support users
+│   └── xxxx_add_support_fields_to_agents_table.php
+└── seeders/
+    └── SupportAgentRoleSeeder.php                  # Rôle "support-agent"
 resources/
 └── views/
     ├── components/
