@@ -54,6 +54,15 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
             // Get HTML content
             $html = $this->getHtmlContent($document);
 
+            // If HTML came from extracted_text (no storage_path), save it to a file
+            // This ensures future relaunches can use the original HTML
+            if (empty($document->storage_path)) {
+                $htmlStoragePath = "documents/" . $document->uuid . '.html';
+                Storage::disk('local')->put($htmlStoragePath, $html);
+                $document->update(['storage_path' => $htmlStoragePath]);
+                Log::info("Saved original HTML to storage", ['path' => $htmlStoragePath]);
+            }
+
             // Convert to Markdown
             $markdown = $this->convertToMarkdown($html);
 
@@ -110,23 +119,25 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
 
     /**
      * Get HTML content from document, storage, or URL
+     *
+     * Priority order:
+     * 1. storage_path - Original HTML file (always preferred for relaunch)
+     * 2. source_url - Fetch from URL and save to storage
+     * 3. extracted_text - Fallback for crawled content without file
      */
     protected function getHtmlContent(Document $document): string
     {
-        // If document has extracted_text, use it (from crawl)
-        if (!empty($document->extracted_text)) {
-            return $document->extracted_text;
-        }
-
-        // Try reading from local storage
+        // Priority 1: Try reading from local storage (original HTML file)
+        // This ensures relaunch uses original HTML, not old markdown from extracted_text
         if ($document->storage_path) {
             $path = Storage::disk('local')->path($document->storage_path);
             if (file_exists($path)) {
+                Log::info("Reading HTML from storage_path", ['path' => $document->storage_path]);
                 return file_get_contents($path);
             }
         }
 
-        // Try fetching from source_url (for URL-based documents)
+        // Priority 2: Try fetching from source_url (for URL-based documents)
         if (!empty($document->source_url)) {
             Log::info("Fetching HTML from source_url", ['url' => $document->source_url]);
 
@@ -148,6 +159,16 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
             }
 
             throw new \RuntimeException("Failed to fetch URL: " . $response->status());
+        }
+
+        // Priority 3: Fallback to extracted_text (for crawled content without stored file)
+        // Note: This may contain old markdown if pipeline was already run, but only used
+        // when no original file is available
+        if (!empty($document->extracted_text)) {
+            Log::warning("Using extracted_text as HTML source (no storage_path or source_url)", [
+                'document_id' => $document->id,
+            ]);
+            return $document->extracted_text;
         }
 
         throw new \RuntimeException("No HTML content found for document");
