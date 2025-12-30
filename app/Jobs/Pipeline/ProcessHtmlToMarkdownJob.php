@@ -229,20 +229,21 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
      */
     protected function cleanMarkdown(string $markdown): string
     {
-        // Remove empty headers (lines that are just #, ##, etc. without text)
-        // These come from empty HTML header tags like <h2></h2>
-        $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
-
-        // Fix headers that are not on their own line
+        // Step 1: Fix headers that are not on their own line FIRST
         // e.g., "Some text# Header" -> "Some text\n\n# Header"
         // This is critical for MarkdownChunkerService to detect headers
         $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
 
-        // Ensure headers have a blank line before them (if preceded by just one newline)
+        // Step 2: Ensure headers have a blank line before them (if preceded by just one newline)
         // e.g., "text\n# Header" -> "text\n\n# Header"
         $markdown = preg_replace('/([^\n])\n(#{1,6}\s)/m', "$1\n\n$2", $markdown);
 
-        // Remove excessive blank lines (more than 2 newlines -> 2 newlines)
+        // Step 3: NOW remove empty headers (lines that are just #, ##, etc. without text)
+        // Must run AFTER header separation so isolated "# " on their own line are caught
+        // Pattern matches: start of line, 1-6 #, optional whitespace, end of line
+        $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
+
+        // Step 4: Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
         // Trim whitespace
