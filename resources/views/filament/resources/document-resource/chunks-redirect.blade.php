@@ -8,8 +8,8 @@
 
 @if($redirectUrl)
 <div
-    x-data="{ redirect() { window.location.href = '{{ $redirectUrl }}'; } }"
-    x-init="redirect()"
+    x-data="{ hasRedirected: false }"
+    x-intersect.once="if (!hasRedirected) { hasRedirected = true; window.location.href = '{{ $redirectUrl }}'; }"
     class="flex items-center justify-center py-12"
 >
     <div class="text-center">
