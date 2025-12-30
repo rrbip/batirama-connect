@@ -34,17 +34,17 @@ Permettre une transition fluide entre l'IA et un agent humain quand l'IA ne peut
 │         │                   │         │                                      │
 │         │               OUI │         │ NON                                  │
 │         │                   ↓         ↓                                      │
-│         │           6a. Chat live   6b. Ticket différé                      │
+│         │           6a. Chat live   6b. Mode email asynchrone               │
 │         │                   │              ↓                                 │
-│         │                   │       7. Email notification                    │
+│         │                   │       7. Email bidirectionnel                  │
 │         │                   │              ↓                                 │
-│         │                   │       8. Admin répond plus tard                │
+│         │                   │       8. Réponses par email parsées            │
 │         │                   ↓              ↓                                 │
-│         │           9. Résolution (live ou différée)                        │
+│         │           9. Résolution (live ou async)                           │
 │         │                      ↓                                             │
 │         │              10. Marquer comme résolu                              │
 │         │                      ↓                                             │
-│         │              11. Proposer création learned_response                │
+│         │              11. Apprentissage IA (2 options)                      │
 │         │                      ↓                                             │
 │         └──────────────► 12. Feedback utilisateur (optionnel)               │
 │                                                                              │
@@ -65,6 +65,7 @@ CREATE TABLE support_conversations (
     agent_id BIGINT REFERENCES agents(id),
     session_id VARCHAR(255) NOT NULL,           -- Session chat utilisateur
     user_id BIGINT REFERENCES users(id) NULL,   -- Si utilisateur connecté
+    user_email VARCHAR(255) NULL,               -- Email pour communication async
 
     -- État
     status VARCHAR(50) NOT NULL DEFAULT 'active',
@@ -103,8 +104,14 @@ CREATE TABLE support_conversations (
     -- 'approved'        : Validé pour learned_response
     -- 'rejected'        : Non pertinent pour entraînement
     -- 'indexed'         : Ajouté aux learned_responses
+    -- 'indexed_full'    : Indexé via pipeline document complet
 
     learned_response_id BIGINT REFERENCES learned_responses(id) NULL,
+    indexed_document_id BIGINT REFERENCES documents(id) NULL,
+
+    -- Token pour accès email
+    access_token VARCHAR(64) NULL,
+    access_token_expires_at TIMESTAMP NULL,
 
     -- Métadonnées
     metadata JSONB DEFAULT '{}',
@@ -125,6 +132,7 @@ CREATE INDEX idx_support_conv_status ON support_conversations(status);
 CREATE INDEX idx_support_conv_agent ON support_conversations(agent_id);
 CREATE INDEX idx_support_conv_training ON support_conversations(training_status);
 CREATE INDEX idx_support_conv_escalated ON support_conversations(escalated_at) WHERE status = 'escalated';
+CREATE INDEX idx_support_conv_token ON support_conversations(access_token) WHERE access_token IS NOT NULL;
 ```
 
 ### 3.2 Table `support_messages`
@@ -143,6 +151,12 @@ CREATE TABLE support_messages (
 
     admin_id BIGINT REFERENCES users(id) NULL,
 
+    -- Canal de communication
+    channel VARCHAR(20) NOT NULL DEFAULT 'chat',
+    -- 'chat'  : Message via widget/interface web
+    -- 'email' : Message reçu/envoyé par email
+    -- 'api'   : Message via API externe
+
     -- Contenu
     content TEXT NOT NULL,
 
@@ -160,6 +174,15 @@ CREATE TABLE support_messages (
     confidence_score FLOAT NULL,           -- Score de confiance (0-1)
     was_escalated BOOLEAN DEFAULT FALSE,   -- Ce message a déclenché l'escalade ?
 
+    -- Métadonnées email (si channel = 'email')
+    email_metadata JSONB NULL,
+    -- {
+    --   "message_id": "<xxx@mail.com>",
+    --   "in_reply_to": "<yyy@mail.com>",
+    --   "from": "user@example.com",
+    --   "subject": "Re: Support #123"
+    -- }
+
     -- Feedback
     feedback_rating INTEGER NULL,          -- 1-5 étoiles ou -1/0/1
     feedback_comment TEXT NULL,
@@ -169,9 +192,38 @@ CREATE TABLE support_messages (
 
 CREATE INDEX idx_support_msg_conv ON support_messages(conversation_id);
 CREATE INDEX idx_support_msg_sender ON support_messages(sender_type);
+CREATE INDEX idx_support_msg_channel ON support_messages(channel);
 ```
 
-### 3.3 Table `admin_availability`
+### 3.3 Table `support_email_threads`
+
+```sql
+CREATE TABLE support_email_threads (
+    id BIGSERIAL PRIMARY KEY,
+    conversation_id BIGINT REFERENCES support_conversations(id) ON DELETE CASCADE,
+
+    -- Adresse email unique pour cette conversation
+    thread_email VARCHAR(255) NOT NULL UNIQUE,
+    -- Format: support+conv_{id}_{token}@domain.com
+
+    -- Email de l'utilisateur
+    user_email VARCHAR(255) NOT NULL,
+
+    -- Threading email
+    last_message_id VARCHAR(255) NULL,     -- Message-ID du dernier email
+
+    -- État
+    is_active BOOLEAN DEFAULT TRUE,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_email_thread_conv ON support_email_threads(conversation_id);
+CREATE INDEX idx_email_thread_email ON support_email_threads(thread_email);
+```
+
+### 3.4 Table `admin_availability`
 
 ```sql
 CREATE TABLE admin_availability (
@@ -382,35 +434,17 @@ class EscalationService
             );
         }
 
-        // Mode différé
-        $this->createDeferredTicket($conversation, $reason);
+        // Mode différé avec email
+        $this->createAsyncEmailThread($conversation, $reason);
 
         return new EscalationResult(
             success: true,
-            mode: 'deferred',
+            mode: 'async_email',
             admin: null,
             message: $agent->no_admin_message ??
                 "Notre équipe n'est pas disponible actuellement. " .
-                "Nous avons enregistré votre demande et vous répondrons dès que possible."
+                "Nous avons enregistré votre demande et vous répondrons par email dès que possible."
         );
-    }
-
-    /**
-     * Crée un ticket différé
-     */
-    private function createDeferredTicket(SupportConversation $conversation, string $reason): void
-    {
-        // Envoyer email de notification
-        if ($email = $conversation->agent->support_email) {
-            Mail::to($email)->queue(new NewEscalatedConversation($conversation));
-        }
-
-        // Log pour monitoring
-        Log::info('Support conversation escalated (deferred)', [
-            'conversation_id' => $conversation->id,
-            'agent_id' => $conversation->agent_id,
-            'reason' => $reason,
-        ]);
     }
 }
 ```
@@ -487,15 +521,15 @@ private function handleEscalation(...): LLMResponse
 │                        │                                                     │
 │  🔴 #4523 (2 min)     │  Agent: Support BTP                                 │
 │     "problème facture" │  Utilisateur: jean@example.com                     │
-│                        │  Escalade: Score RAG 45% (seuil: 60%)              │
-│  🟡 #4522 (5 min)     │                                                     │
-│     "devis bloqué"     │  ─────────────────────────────────────────────────  │
+│     📧 email           │  Escalade: Score RAG 45% (seuil: 60%)              │
 │                        │                                                     │
-│  🟢 #4521 (en cours)  │  [User] Comment annuler une facture validée ?       │
-│     "annuler facture"  │                                                     │
-│                        │  [AI] Je n'ai pas trouvé d'information fiable...    │
-│                        │  Score: 45% | Sources: 2                            │
+│  🟡 #4522 (5 min)     │  ─────────────────────────────────────────────────  │
+│     "devis bloqué"     │                                                     │
+│     💬 chat            │  [User 💬] Comment annuler une facture validée ?    │
 │                        │                                                     │
+│  🟢 #4521 (en cours)  │  [AI] Je n'ai pas trouvé d'information fiable...    │
+│     "annuler facture"  │  Score: 45% | Sources: 2                            │
+│     💬 chat            │                                                     │
 │                        │  [System] Conversation transférée au support        │
 │                        │                                                     │
 │                        │  ─────────────────────────────────────────────────  │
@@ -506,7 +540,7 @@ private function handleEscalation(...): LLMResponse
 │                        │  │ devez créer un avoir...                     │   │
 │                        │  └─────────────────────────────────────────────┘   │
 │                        │                                                     │
-│                        │  [Envoyer] [Suggestions IA ▼] [Clôturer ▼]         │
+│                        │  [Envoyer] [💾 Sauver Q/R ▼] [Clôturer ▼]          │
 │                        │                                                     │
 │                        │  ─────────────────────────────────────────────────  │
 │                        │                                                     │
@@ -522,20 +556,22 @@ private function handleEscalation(...): LLMResponse
 | Fonctionnalité | Description |
 |----------------|-------------|
 | **Liste temps réel** | WebSocket/Pusher pour nouvelles conversations |
-| **Indicateurs visuels** | Temps d'attente, priorité, agent source |
+| **Indicateurs visuels** | Temps d'attente, priorité, agent source, canal (chat/email) |
 | **Prise en charge** | Un clic pour s'assigner la conversation |
 | **Chat live** | Messages instantanés avec l'utilisateur |
 | **Suggestions IA** | L'IA propose des réponses basées sur les sources |
 | **Contexte RAG** | Voir les sources trouvées et les scores |
 | **Historique** | Voir les messages précédents avec l'IA |
 | **Actions rapides** | Templates de réponses, redirection, etc. |
+| **Sauver Q/R** | Bouton pour sauvegarder une Q/R pendant le chat (voir section 7) |
 
 ### 6.3 Actions de clôture
 
 ```
 [Clôturer ▼]
 ├── ✅ Résolu - Question répondue
-│   └── [x] Créer une learned_response avec cette réponse
+│   ├── [ ] Sauver Q/R atomique (learned_response)
+│   └── [ ] Indexer conversation complète (pipeline document)
 ├── ↗️ Redirigé - Vers autre service
 ├── ⛔ Hors périmètre - Question non supportée
 └── 🔄 Doublon - Déjà traité
@@ -543,160 +579,687 @@ private function handleEscalation(...): LLMResponse
 
 ---
 
-## 7. Système de feedback et entraînement
+## 7. Système d'apprentissage IA (double flux)
 
-### 7.1 Flux de feedback
+### 7.1 Vue d'ensemble
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CYCLE D'AMÉLIORATION                                  │
+│                    DOUBLE FLUX D'APPRENTISSAGE                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. Conversation résolue par admin                                          │
-│         ↓                                                                    │
-│  2. Admin marque: "Créer learned_response" ?                                │
-│         │                                                                    │
-│     OUI │                    NON                                             │
-│         ↓                      ↓                                             │
-│  3. training_status = 'approved'    training_status = 'rejected'            │
-│         ↓                                                                    │
-│  4. Job: CreateLearnedResponseJob                                           │
-│         ↓                                                                    │
-│  5. Créer learned_response avec:                                            │
-│     - question = question utilisateur                                        │
-│     - answer = réponse admin                                                 │
-│     - agent_id = agent source                                                │
-│     - source = 'human_support'                                               │
-│     - support_conversation_id = conversation                                 │
-│         ↓                                                                    │
-│  6. training_status = 'indexed'                                             │
-│         ↓                                                                    │
-│  7. Prochaine question similaire → IA répond directement                    │
+│  OPTION 1: Q/R Atomiques (PENDANT le chat)                                  │
+│  ──────────────────────────────────────────                                 │
+│  • Bouton "💾 Sauver Q/R" sur chaque échange                                │
+│  • Popup pour éditer/corriger la question et réponse                        │
+│  • Réutilise le composant de la page Sessions                               │
+│  • Crée directement une learned_response                                    │
+│  • Indexation immédiate dans Qdrant                                         │
+│  → IDÉAL POUR: Réponses précises, FAQ, questions fréquentes                │
+│                                                                              │
+│  OPTION 2: Conversation complète (APRÈS clôture)                            │
+│  ───────────────────────────────────────────────                            │
+│  • Checkbox "📄 Indexer la conversation" à la clôture                       │
+│  • Transforme le chat en document Markdown                                  │
+│  • Envoi vers le pipeline existant (chunking → Q/R → Qdrant)                │
+│  • Réutilise le prompt Q/R de QrAtomiqueSetting                             │
+│  → IDÉAL POUR: Cas complexes, debugging, procédures multi-étapes           │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Dashboard d'entraînement
+### 7.2 Option 1 : Q/R atomique pendant le chat
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  🎓 Entraînement IA - Résolutions humaines                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  📊 Statistiques                                                             │
-│  ├── En attente de validation: 12                                           │
-│  ├── Validées (à indexer): 5                                                │
-│  ├── Indexées ce mois: 45                                                   │
-│  └── Rejetées: 8                                                            │
-│                                                                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  📝 Résolutions en attente                                                   │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │ #4521 | Agent: Support BTP | Admin: Marie | 2024-12-30                  ││
-│  │                                                                          ││
-│  │ Q: Comment annuler une facture validée ?                                 ││
-│  │                                                                          ││
-│  │ R: Pour annuler une facture validée, vous devez créer un avoir.         ││
-│  │    Allez dans Facturation > Avoirs > Nouveau, sélectionnez la facture   ││
-│  │    concernée et validez l'avoir.                                         ││
-│  │                                                                          ││
-│  │ [✅ Valider pour entraînement] [✏️ Modifier] [❌ Rejeter]                ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │ #4518 | Agent: FAQ Produit | Admin: Pierre | 2024-12-30                 ││
-│  │ ...                                                                      ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+#### Composant Blade partagé
+
+Le même composant est utilisé sur la page Sessions et le Support Live pour éviter la duplication :
+
+```blade
+{{-- resources/views/components/support/qr-correction-form.blade.php --}}
+@props([
+    'messageId',
+    'originalQuestion',
+    'originalAnswer',
+    'wireMethod' => 'saveAsLearnedResponse',
+    'agentId' => null,
+])
+
+<div x-data="{
+    showForm: false,
+    question: @js($originalQuestion),
+    answer: @js($originalAnswer)
+}">
+    <x-filament::button
+        size="xs"
+        color="primary"
+        icon="heroicon-o-bookmark"
+        x-on:click="showForm = !showForm"
+    >
+        💾 Sauver Q/R
+    </x-filament::button>
+
+    <div x-show="showForm" x-cloak class="mt-3 space-y-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border">
+        <div>
+            <label class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase">
+                Question (modifiable)
+            </label>
+            <textarea
+                x-model="question"
+                rows="2"
+                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm mt-1"
+                placeholder="La question de l'utilisateur..."
+            ></textarea>
+        </div>
+        <div>
+            <label class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase">
+                Réponse (modifiable)
+            </label>
+            <textarea
+                x-model="answer"
+                rows="4"
+                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm mt-1"
+                placeholder="La réponse validée..."
+            ></textarea>
+        </div>
+        <div class="flex gap-2">
+            <x-filament::button
+                size="xs"
+                color="success"
+                icon="heroicon-o-check"
+                x-on:click="$wire.{{ $wireMethod }}({{ $messageId }}, question, answer); showForm = false"
+            >
+                Enregistrer dans la base
+            </x-filament::button>
+            <x-filament::button
+                size="xs"
+                color="gray"
+                x-on:click="showForm = false"
+            >
+                Annuler
+            </x-filament::button>
+        </div>
+    </div>
+</div>
 ```
 
-### 7.3 Ajout à learned_responses
+#### Utilisation dans les différents contextes
+
+```blade
+{{-- Page Sessions (existant) --}}
+<x-support.qr-correction-form
+    :messageId="$message->id"
+    :originalQuestion="$userQuestion"
+    :originalAnswer="$message->content"
+    wireMethod="learnFromMessage"
+/>
+
+{{-- Page Support Live (nouveau) --}}
+<x-support.qr-correction-form
+    :messageId="$message->id"
+    :originalQuestion="$userQuestion"
+    :originalAnswer="$message->content"
+    wireMethod="saveAsLearnedResponse"
+    :agentId="$conversation->agent_id"
+/>
+```
+
+#### Service de sauvegarde
 
 ```php
-// Migration: ajouter champs source à learned_responses
-Schema::table('learned_responses', function (Blueprint $table) {
-    $table->string('source')->default('manual');
-    // 'manual'         : Créé manuellement par admin
-    // 'human_support'  : Créé depuis résolution support
-    // 'feedback'       : Créé depuis feedback positif
-    // 'import'         : Importé depuis fichier
+class SupportTrainingService
+{
+    /**
+     * Sauvegarde une Q/R atomique depuis le support
+     */
+    public function saveQrPair(
+        SupportConversation $conversation,
+        string $question,
+        string $answer,
+        ?int $messageId = null
+    ): LearnedResponse {
+        // Créer la learned_response
+        $learned = LearnedResponse::create([
+            'agent_id' => $conversation->agent_id,
+            'question' => $question,
+            'answer' => $answer,
+            'source' => 'human_support',
+            'support_conversation_id' => $conversation->id,
+            'is_active' => true,
+        ]);
 
-    $table->foreignId('support_conversation_id')
-          ->nullable()
-          ->constrained('support_conversations')
-          ->nullOnDelete();
-});
+        // Indexer immédiatement dans Qdrant
+        dispatch(new IndexLearnedResponseJob($learned));
+
+        // Mettre à jour la conversation
+        $conversation->update([
+            'learned_response_id' => $learned->id,
+            'training_status' => 'indexed',
+        ]);
+
+        return $learned;
+    }
+}
 ```
+
+### 7.3 Option 2 : Conversation complète via pipeline
+
+#### Flux de traitement
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│               CHAT → MARKDOWN → PIPELINE EXISTANT                           │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. Admin clôture la conversation                                          │
+│         ↓                                                                   │
+│  2. Coche "📄 Indexer la conversation complète"                            │
+│         ↓                                                                   │
+│  3. ConversationToMarkdownService::convert($conversation)                   │
+│         ↓                                                                   │
+│  4. Crée un Document avec type = 'support_conversation'                    │
+│         ↓                                                                   │
+│  5. Lance ProcessDocumentPipeline (même que les autres docs)               │
+│         ↓                                                                   │
+│  6. Chunking (markdown_text_splitter)                                      │
+│         ↓                                                                   │
+│  7. QrGeneratorService::processChunk()                                     │
+│     → Utilise le MÊME prompt que pour les documents                        │
+│         ↓                                                                   │
+│  8. LLM extrait les Q/R du chunk de conversation                           │
+│         ↓                                                                   │
+│  9. Indexation Qdrant (qa_pair + source_material)                          │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Service de conversion Markdown
+
+```php
+class ConversationToMarkdownService
+{
+    /**
+     * Convertit une conversation support en document Markdown
+     * optimisé pour le prompt Q/R existant
+     */
+    public function convert(SupportConversation $conversation): string
+    {
+        $messages = $conversation->messages()
+            ->whereIn('sender_type', ['user', 'admin'])
+            ->orderBy('created_at')
+            ->get();
+
+        $title = $this->extractTitle($conversation);
+
+        $markdown = "# Résolution Support: {$title}\n\n";
+        $markdown .= "**Agent**: {$conversation->agent->name}\n";
+        $markdown .= "**Date**: {$conversation->created_at->format('d/m/Y')}\n";
+        $markdown .= "**Catégorie**: {$this->detectCategory($conversation)}\n\n";
+        $markdown .= "---\n\n";
+
+        // Format optimisé pour extraction Q/R
+        foreach ($messages as $msg) {
+            if ($msg->sender_type === 'user') {
+                $markdown .= "## Question utilisateur\n\n";
+                $markdown .= $msg->content . "\n\n";
+            } else {
+                $markdown .= "## Réponse support\n\n";
+                $markdown .= $msg->content . "\n\n";
+            }
+        }
+
+        return $markdown;
+    }
+
+    private function extractTitle(SupportConversation $conversation): string
+    {
+        $firstUserMessage = $conversation->messages()
+            ->where('sender_type', 'user')
+            ->first();
+
+        if ($firstUserMessage) {
+            return Str::limit($firstUserMessage->content, 50);
+        }
+
+        return "Conversation #{$conversation->id}";
+    }
+
+    private function detectCategory(SupportConversation $conversation): string
+    {
+        return $conversation->metadata['category_detected'] ?? 'Support';
+    }
+}
+```
+
+#### Exemple de conversion
+
+**Conversation support originale :**
+```
+User: Comment annuler une facture validée ?
+Admin: Pour annuler une facture validée, vous devez créer un avoir.
+       Allez dans Facturation > Avoirs > Nouveau, sélectionnez la facture concernée.
+User: Et si la facture a déjà été payée ?
+Admin: Si la facture est payée, vous devez d'abord annuler le paiement,
+       puis créer l'avoir. Le remboursement sera automatiquement déclenché.
+```
+
+**Markdown généré :**
+```markdown
+# Résolution Support: Comment annuler une facture validée ?
+
+**Agent**: Support BTP
+**Date**: 30/12/2024
+**Catégorie**: Facturation
 
 ---
 
-## 8. Cas admin non connecté
+## Question utilisateur
 
-### 8.1 Mode différé
+Comment annuler une facture validée ?
+
+## Réponse support
+
+Pour annuler une facture validée, vous devez créer un avoir.
+Allez dans Facturation > Avoirs > Nouveau, sélectionnez la facture concernée.
+
+## Question utilisateur
+
+Et si la facture a déjà été payée ?
+
+## Réponse support
+
+Si la facture est payée, vous devez d'abord annuler le paiement,
+puis créer l'avoir. Le remboursement sera automatiquement déclenché.
+```
+
+**LLM extrait (via le prompt QrAtomiqueSetting existant) :**
+```json
+{
+  "useful": true,
+  "category": "Facturation",
+  "knowledge_units": [
+    {
+      "question": "Comment annuler une facture validée ?",
+      "answer": "Pour annuler une facture validée, vous devez créer un avoir. Allez dans Facturation > Avoirs > Nouveau, puis sélectionnez la facture concernée."
+    },
+    {
+      "question": "Comment annuler une facture déjà payée ?",
+      "answer": "Si la facture est déjà payée, vous devez d'abord annuler le paiement, puis créer l'avoir. Le remboursement sera automatiquement déclenché."
+    }
+  ],
+  "summary": "Procédure d'annulation de factures validées et payées via création d'avoirs."
+}
+```
+
+#### Job d'indexation
+
+```php
+class IndexConversationAsDocumentJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        protected SupportConversation $conversation
+    ) {}
+
+    public function handle(ConversationToMarkdownService $converter): void
+    {
+        $markdown = $converter->convert($this->conversation);
+
+        // Créer un Document
+        $document = Document::create([
+            'name' => "Support: " . $this->extractTitle(),
+            'type' => 'support_conversation',
+            'content' => $markdown,
+            'source_type' => 'support_conversation',
+            'source_id' => $this->conversation->id,
+            'agent_id' => $this->conversation->agent_id,
+            'status' => 'pending',
+        ]);
+
+        // Lancer le pipeline d'indexation standard
+        dispatch(new ProcessDocumentPipeline($document));
+
+        // Mettre à jour la conversation
+        $this->conversation->update([
+            'indexed_document_id' => $document->id,
+            'training_status' => 'indexed_full',
+        ]);
+    }
+
+    private function extractTitle(): string
+    {
+        $firstMessage = $this->conversation->messages()
+            ->where('sender_type', 'user')
+            ->first();
+
+        return Str::limit($firstMessage?->content ?? "Conversation #{$this->conversation->id}", 50);
+    }
+}
+```
+
+### 7.4 Comparaison des deux options
+
+| Critère | Option 1: Q/R Atomique | Option 2: Pipeline complet |
+|---------|------------------------|---------------------------|
+| **Quand** | Pendant le chat | Après clôture |
+| **Granularité** | Une Q/R précise | Toutes les Q/R de la conversation |
+| **Contrôle** | Admin choisit et édite chaque Q/R | LLM extrait automatiquement |
+| **Indexation** | Immédiate | Via pipeline (quelques minutes) |
+| **Idéal pour** | FAQ, questions simples | Cas complexes, procédures |
+| **Réutilisation code** | Composant Sessions | Pipeline documents |
+
+---
+
+## 8. Intégration Email bidirectionnelle
+
+### 8.1 Vue d'ensemble
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     MODE DIFFÉRÉ (Admin absent)                              │
+│                    FLUX EMAIL BIDIRECTIONNEL                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. Escalade déclenchée                                                      │
+│  1. Escalade sans admin connecté                                            │
 │         ↓                                                                    │
-│  2. Aucun admin disponible OU hors horaires                                 │
+│  2. Création thread email unique: support+conv_123_abc@domain.com           │
 │         ↓                                                                    │
-│  3. Afficher message personnalisé:                                          │
-│     "Notre équipe n'est pas disponible actuellement.                        │
-│      Nous avons enregistré votre demande et vous répondrons                 │
-│      dès que possible par email."                                           │
+│  3. Email envoyé à l'utilisateur:                                           │
+│     "Votre demande #123 a été enregistrée"                                  │
+│     + Bouton "💬 Continuer sur le chat"                                     │
 │         ↓                                                                    │
-│  4. Demander email (si pas connecté):                                       │
-│     [Votre email: ________________] [Envoyer]                               │
+│  4. Admin répond via dashboard                                              │
 │         ↓                                                                    │
-│  5. Créer ticket avec status = 'escalated'                                  │
+│  5. Email envoyé à l'utilisateur avec:                                      │
+│     - La réponse de l'admin                                                 │
+│     - Reply-To: support+conv_123_abc@domain.com                             │
+│     - Bouton "💬 Continuer sur le chat"                                     │
 │         ↓                                                                    │
-│  6. Envoyer notification par email aux admins                               │
+│  6. Utilisateur répond par email                                            │
 │         ↓                                                                    │
-│  7. Admin répond via dashboard (quand disponible)                           │
+│  7. Job FetchIncomingEmailsJob récupère le mail                             │
 │         ↓                                                                    │
-│  8. Email envoyé à l'utilisateur avec la réponse                            │
+│  8. EmailReplyParser extrait UNIQUEMENT le nouveau message                  │
 │         ↓                                                                    │
-│  9. Si utilisateur revient sur le chat → voir l'historique                  │
+│  9. Crée SupportMessage(sender_type: 'user', channel: 'email')              │
+│         ↓                                                                    │
+│  10. Notification temps réel à l'admin dans le dashboard                    │
+│         ↓                                                                    │
+│  (boucle 4-10 jusqu'à résolution)                                           │
+│                                                                              │
+│  ✅ AVANTAGE: Toute la communication est centralisée dans le back-office   │
+│               pour l'apprentissage et l'historique                          │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 Notifications
+### 8.2 Service de parsing email
 
 ```php
-// Jobs de notification
-class NotifyAdminsOfEscalation implements ShouldQueue
-{
-    public function handle(): void
-    {
-        // Email aux admins
-        $admins = User::permission('support.handle')->get();
+<?php
 
-        foreach ($admins as $admin) {
-            Mail::to($admin)->queue(new NewEscalatedConversation($this->conversation));
+namespace App\Services\Support;
+
+class EmailReplyParser
+{
+    /**
+     * Extrait uniquement le nouveau contenu d'un email de réponse
+     * Supprime les citations, signatures, et historique
+     */
+    public function extractReply(string $emailBody): string
+    {
+        $lines = explode("\n", $emailBody);
+        $replyLines = [];
+
+        foreach ($lines as $line) {
+            // Arrêter aux marqueurs de citation courants
+            if ($this->isQuoteMarker($line)) {
+                break;
+            }
+
+            // Ignorer les lignes citées (commençant par >)
+            if (str_starts_with(trim($line), '>')) {
+                continue;
+            }
+
+            // Arrêter à la signature
+            if ($this->isSignatureMarker($line)) {
+                break;
+            }
+
+            $replyLines[] = $line;
         }
 
-        // Notification push (si configuré)
-        // Slack/Discord webhook (si configuré)
+        return trim(implode("\n", $replyLines));
+    }
+
+    protected function isQuoteMarker(string $line): bool
+    {
+        $markers = [
+            '/^-{3,}\s*Original Message\s*-{3,}/i',
+            '/^-{3,}\s*Message original\s*-{3,}/i',
+            '/^Le \d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}.*a écrit\s*:/i',
+            '/^On .* wrote:/i',
+            '/^From:.*Sent:/is',
+            '/^De\s*:.*Envoyé\s*:/is',
+            '/^_{5,}/',
+            '/^\*{5,}/',
+        ];
+
+        foreach ($markers as $pattern) {
+            if (preg_match($pattern, trim($line))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function isSignatureMarker(string $line): bool
+    {
+        $markers = [
+            '/^--\s*$/',           // Standard signature separator
+            '/^_{3,}$/',           // Underscores
+            '/^Cordialement/i',
+            '/^Bien cordialement/i',
+            '/^Best regards/i',
+            '/^Envoyé depuis/i',   // "Envoyé depuis mon iPhone"
+            '/^Sent from/i',
+        ];
+
+        foreach ($markers as $pattern) {
+            if (preg_match($pattern, trim($line))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
+```
 
-class NotifyUserOfResponse implements ShouldQueue
+### 8.3 Job de récupération des emails
+
+```php
+<?php
+
+namespace App\Jobs\Support;
+
+class FetchIncomingEmailsJob implements ShouldQueue
 {
-    public function handle(): void
-    {
-        if ($email = $this->conversation->getUserEmail()) {
-            Mail::to($email)->queue(new SupportResponseReceived(
-                $this->conversation,
-                $this->message
-            ));
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function handle(
+        MailboxService $mailbox,
+        EmailReplyParser $parser
+    ): void {
+        // Récupérer les nouveaux emails (IMAP ou webhook Mailgun/SendGrid)
+        $emails = $mailbox->fetchUnread();
+
+        foreach ($emails as $email) {
+            $this->processEmail($email, $parser);
         }
+    }
+
+    private function processEmail(IncomingEmail $email, EmailReplyParser $parser): void
+    {
+        // Parser l'adresse de destination pour trouver la conversation
+        // Format: support+conv_{id}_{token}@domain.com
+        if (!preg_match('/support\+conv_(\d+)_([a-z0-9]+)@/i', $email->to, $matches)) {
+            Log::warning('Email reçu avec adresse non reconnue', ['to' => $email->to]);
+            return;
+        }
+
+        $conversationId = (int) $matches[1];
+        $token = $matches[2];
+
+        // Vérifier la conversation
+        $conversation = SupportConversation::find($conversationId);
+        if (!$conversation) {
+            Log::warning('Conversation non trouvée', ['id' => $conversationId]);
+            return;
+        }
+
+        // Vérifier le token (sécurité)
+        $thread = $conversation->emailThread;
+        if (!$thread || !Str::contains($thread->thread_email, $token)) {
+            Log::warning('Token email invalide', ['conversation_id' => $conversationId]);
+            return;
+        }
+
+        // Extraire uniquement le nouveau contenu (pas les citations)
+        $cleanContent = $parser->extractReply($email->textBody ?? $email->htmlBody);
+
+        if (empty(trim($cleanContent))) {
+            Log::info('Email vide après parsing', ['conversation_id' => $conversationId]);
+            return;
+        }
+
+        // Créer le message
+        SupportMessage::create([
+            'conversation_id' => $conversationId,
+            'sender_type' => 'user',
+            'channel' => 'email',
+            'content' => $cleanContent,
+            'email_metadata' => [
+                'message_id' => $email->messageId,
+                'from' => $email->from,
+                'subject' => $email->subject,
+                'received_at' => now()->toIso8601String(),
+            ],
+        ]);
+
+        // Mettre à jour le thread
+        $thread->update(['last_message_id' => $email->messageId]);
+
+        // Réactiver la conversation si elle était résolue
+        if ($conversation->status === 'resolved') {
+            $conversation->update(['status' => 'escalated']);
+        }
+
+        // Notifier les admins en temps réel
+        event(new NewSupportMessage($conversation));
+
+        Log::info('Email traité et rattaché à la conversation', [
+            'conversation_id' => $conversationId,
+            'content_length' => strlen($cleanContent),
+        ]);
+    }
+}
+```
+
+### 8.4 Template email avec bouton retour chat
+
+```blade
+{{-- resources/views/emails/support/response.blade.php --}}
+@component('mail::message')
+# Réponse à votre demande #{{ $conversation->id }}
+
+Bonjour,
+
+Notre équipe a répondu à votre demande :
+
+@component('mail::panel')
+{{ $message->content }}
+@endcomponent
+
+---
+
+**Vous pouvez répondre directement à cet email** pour continuer la conversation.
+
+Ou si vous préférez, utilisez notre interface de chat :
+
+@component('mail::button', ['url' => $chatUrl, 'color' => 'primary'])
+💬 Continuer sur le chat
+@endcomponent
+
+@if($adminAvailable)
+<small>Un conseiller est actuellement disponible pour vous répondre en direct.</small>
+@else
+<small>Notre équipe vous répondra dès que possible.</small>
+@endif
+
+Cordialement,<br>
+{{ $conversation->agent->name }}
+@endcomponent
+```
+
+### 8.5 Contrôleur de reprise de chat
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+class SupportChatController extends Controller
+{
+    /**
+     * Reprendre une conversation depuis un lien email
+     */
+    public function resumeFromEmail(Request $request, SupportConversation $conversation)
+    {
+        // Vérifier le token d'accès
+        if (!$this->validateAccessToken($request->token, $conversation)) {
+            abort(403, 'Lien expiré ou invalide');
+        }
+
+        // Vérifier si un admin est disponible
+        $adminAvailable = AdminAvailability::where('status', 'online')
+            ->where('current_conversations', '<', DB::raw('max_conversations'))
+            ->where(function ($q) use ($conversation) {
+                $q->whereNull('agent_ids')
+                  ->orWhereJsonContains('agent_ids', $conversation->agent_id);
+            })
+            ->exists();
+
+        // Charger les messages
+        $messages = $conversation->messages()
+            ->orderBy('created_at')
+            ->get();
+
+        return view('support.chat-widget', [
+            'conversation' => $conversation,
+            'messages' => $messages,
+            'adminAvailable' => $adminAvailable,
+            'mode' => $adminAvailable ? 'live' : 'async',
+        ]);
+    }
+
+    private function validateAccessToken(?string $token, SupportConversation $conversation): bool
+    {
+        if (!$token || !$conversation->access_token) {
+            return false;
+        }
+
+        if ($conversation->access_token !== $token) {
+            return false;
+        }
+
+        if ($conversation->access_token_expires_at &&
+            $conversation->access_token_expires_at->isPast()) {
+            return false;
+        }
+
+        return true;
     }
 }
 ```
@@ -714,6 +1277,7 @@ class NotifyUserOfResponse implements ShouldQueue
 | **Taux de résolution** | % escalades résolues | > 95% |
 | **CSAT** | Satisfaction après résolution | > 4/5 |
 | **Réutilisation** | % questions similaires après training | Croissant |
+| **Canal** | Répartition chat vs email | - |
 
 ### 9.2 Dashboard analytique
 
@@ -729,8 +1293,16 @@ class NotifyUserOfResponse implements ShouldQueue
 │      ├── En cours: 8                                                        │
 │      └── Abandonnées: 4                                                     │
 │                                                                              │
+│  Par canal:                                                                  │
+│  ├── Chat live: 156 (70%)                                                  │
+│  └── Email async: 66 (30%)                                                 │
+│                                                                              │
 │  Temps de réponse moyen: 3 min 24 sec                                       │
 │  Satisfaction moyenne: 4.2/5                                                │
+│                                                                              │
+│  Apprentissage IA:                                                          │
+│  ├── Q/R atomiques créées: 45                                              │
+│  └── Conversations indexées: 12                                            │
 │                                                                              │
 │  Top 5 questions escaladées:                                                │
 │  1. "Comment annuler une facture ?" (15 fois)                               │
@@ -748,39 +1320,42 @@ class NotifyUserOfResponse implements ShouldQueue
 
 ## 10. Plan d'implémentation
 
-### Phase 1 : Base (1-2 semaines)
-- [ ] Migrations (tables support_conversations, support_messages, admin_availability)
+### Phase 1 : Base
+- [ ] Migrations (tables support_conversations, support_messages, admin_availability, support_email_threads)
 - [ ] Models Eloquent + relations
 - [ ] EscalationService (logique de base)
 - [ ] Intégration RagService (détection escalade)
 - [ ] Message utilisateur lors de l'escalade
 
-### Phase 2 : Interface Admin (1-2 semaines)
+### Phase 2 : Interface Admin
 - [ ] Page Filament "Support Live"
-- [ ] Liste des conversations escaladées
+- [ ] Liste des conversations escaladées (avec indicateur canal chat/email)
 - [ ] Vue conversation avec historique
 - [ ] Formulaire de réponse
 - [ ] Actions de clôture
 
-### Phase 3 : Temps réel (1 semaine)
+### Phase 3 : Temps réel
 - [ ] Configuration Laravel Echo + Pusher/Soketi
 - [ ] Events (ConversationEscalated, NewMessage, etc.)
 - [ ] Listeners côté admin
 - [ ] Notifications sonores
 
-### Phase 4 : Mode différé (1 semaine)
-- [ ] Gestion horaires de support
-- [ ] Emails de notification (admins + utilisateurs)
-- [ ] Reprise conversation par email
-- [ ] File d'attente des tickets
+### Phase 4 : Email bidirectionnel
+- [ ] Configuration boîte mail (IMAP ou webhook Mailgun/SendGrid)
+- [ ] EmailReplyParser pour extraire les réponses
+- [ ] FetchIncomingEmailsJob (scheduler toutes les minutes)
+- [ ] Templates email avec bouton retour chat
+- [ ] Contrôleur de reprise de conversation
 
-### Phase 5 : Entraînement IA (1 semaine)
-- [ ] Interface validation des résolutions
-- [ ] Job CreateLearnedResponseJob
-- [ ] Lien learned_responses ↔ support_conversations
-- [ ] Dashboard analytique entraînement
+### Phase 5 : Apprentissage IA (double flux)
+- [ ] Composant Blade partagé `<x-support.qr-correction-form>`
+- [ ] Intégration dans page Sessions (refactor existant)
+- [ ] Intégration dans page Support Live
+- [ ] ConversationToMarkdownService
+- [ ] IndexConversationAsDocumentJob
+- [ ] Options de clôture avec checkboxes apprentissage
 
-### Phase 6 : Analytiques (1 semaine)
+### Phase 6 : Analytiques
 - [ ] Dashboard métriques
 - [ ] Export rapports
 - [ ] Alertes (taux escalade élevé, temps réponse long)
@@ -797,6 +1372,7 @@ class NotifyUserOfResponse implements ShouldQueue
 | **Notifications** | Laravel Notifications | Email + Push + Slack |
 | **Queue** | Redis + Horizon | Performance et monitoring |
 | **Cache** | Redis | Sessions, availability |
+| **Email entrant** | Mailgun/SendGrid webhooks ou IMAP | Parsing des réponses |
 
 ---
 
@@ -808,6 +1384,7 @@ class NotifyUserOfResponse implements ShouldQueue
 4. **Chatbot widget** : Intégrer sur sites externes ou uniquement backoffice ?
 5. **SLA** : Définir des niveaux de service avec alertes ?
 6. **Escalade en chaîne** : Permettre escalade admin → admin senior ?
+7. **Fournisseur email** : Mailgun, SendGrid, ou IMAP direct ?
 
 ---
 
@@ -818,12 +1395,15 @@ app/
 ├── Models/
 │   ├── SupportConversation.php
 │   ├── SupportMessage.php
+│   ├── SupportEmailThread.php
 │   └── AdminAvailability.php
 ├── Services/
 │   └── Support/
 │       ├── EscalationService.php
 │       ├── ConversationService.php
-│       └── TrainingService.php
+│       ├── SupportTrainingService.php
+│       ├── ConversationToMarkdownService.php
+│       └── EmailReplyParser.php
 ├── Events/
 │   ├── ConversationEscalated.php
 │   ├── ConversationAssigned.php
@@ -836,28 +1416,42 @@ app/
 │   └── Support/
 │       ├── NotifyAdminsOfEscalation.php
 │       ├── NotifyUserOfResponse.php
-│       └── CreateLearnedResponseJob.php
+│       ├── FetchIncomingEmailsJob.php
+│       ├── IndexLearnedResponseJob.php
+│       └── IndexConversationAsDocumentJob.php
 ├── Mail/
 │   ├── NewEscalatedConversation.php
-│   └── SupportResponseReceived.php
+│   ├── SupportResponseReceived.php
+│   └── ConversationConfirmation.php
 ├── Filament/
 │   └── Pages/
 │       ├── LiveSupport.php
-│       └── SupportTraining.php
+│       └── SupportAnalytics.php
 ├── Http/
 │   └── Controllers/
+│       ├── SupportChatController.php
 │       └── Api/
-│           └── SupportChatController.php
+│           └── SupportWebhookController.php
 database/
 └── migrations/
     ├── xxxx_create_support_conversations_table.php
     ├── xxxx_create_support_messages_table.php
+    ├── xxxx_create_support_email_threads_table.php
     ├── xxxx_create_admin_availability_table.php
     └── xxxx_add_support_fields_to_agents_table.php
 resources/
 └── views/
-    └── filament/
-        └── pages/
-            ├── live-support.blade.php
-            └── support-training.blade.php
+    ├── components/
+    │   └── support/
+    │       └── qr-correction-form.blade.php
+    ├── emails/
+    │   └── support/
+    │       ├── escalation-confirmation.blade.php
+    │       └── response.blade.php
+    ├── filament/
+    │   └── pages/
+    │       ├── live-support.blade.php
+    │       └── support-analytics.blade.php
+    └── support/
+        └── chat-widget.blade.php
 ```
