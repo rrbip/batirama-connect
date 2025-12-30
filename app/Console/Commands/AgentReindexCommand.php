@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Jobs\RebuildAgentIndexJob;
 use App\Models\Agent;
 use App\Models\Ouvrage;
 use App\Services\AI\EmbeddingService;
@@ -14,10 +15,12 @@ use Illuminate\Support\Facades\Log;
 class AgentReindexCommand extends Command
 {
     protected $signature = 'agent:reindex
-                            {slug : Slug de l\'agent à réindexer}
-                            {--force : Supprime et recrée la collection}';
+                            {slug? : Slug de l\'agent à réindexer (optionnel si --all)}
+                            {--all : Réindexe tous les agents}
+                            {--force : Supprime et recrée la collection}
+                            {--sync : Exécute en synchrone au lieu de dispatcher un job}';
 
-    protected $description = 'Réindexe les données d\'un agent dans Qdrant';
+    protected $description = 'Réindexe les données d\'un agent dans Qdrant (format Q/R Atomique)';
 
     public function __construct(
         private QdrantService $qdrantService,
@@ -30,6 +33,19 @@ class AgentReindexCommand extends Command
     {
         $slug = $this->argument('slug');
         $force = $this->option('force');
+        $all = $this->option('all');
+        $sync = $this->option('sync');
+
+        // Mode --all : réindexer tous les agents
+        if ($all) {
+            return $this->reindexAllAgents($force, $sync);
+        }
+
+        // Mode normal : un agent spécifique
+        if (!$slug) {
+            $this->error("Veuillez spécifier un slug d'agent ou utiliser --all");
+            return Command::FAILURE;
+        }
 
         $agent = Agent::where('slug', $slug)->first();
 
@@ -38,16 +54,77 @@ class AgentReindexCommand extends Command
             return Command::FAILURE;
         }
 
+        return $this->reindexAgent($agent, $force, $sync);
+    }
+
+    /**
+     * Réindexe tous les agents avec collection Qdrant.
+     */
+    private function reindexAllAgents(bool $force, bool $sync): int
+    {
+        $agents = Agent::whereNotNull('qdrant_collection')
+            ->where('is_active', true)
+            ->get();
+
+        if ($agents->isEmpty()) {
+            $this->warn("Aucun agent actif avec collection Qdrant trouvé");
+            return Command::SUCCESS;
+        }
+
+        $this->info("🔄 Réindexation de {$agents->count()} agents...");
+        $this->newLine();
+
+        $success = 0;
+        $failed = 0;
+
+        foreach ($agents as $agent) {
+            try {
+                $this->line("  → {$agent->name} ({$agent->slug})");
+
+                if ($sync) {
+                    // Exécution synchrone
+                    $this->reindexAgent($agent, $force, true);
+                } else {
+                    // Dispatcher le job
+                    RebuildAgentIndexJob::dispatch($agent);
+                    $this->info("    Job dispatché");
+                }
+
+                $success++;
+            } catch (\Exception $e) {
+                $this->error("    Erreur: {$e->getMessage()}");
+                $failed++;
+            }
+        }
+
+        $this->newLine();
+
+        if ($sync) {
+            $this->info("✅ {$success} agents réindexés" . ($failed > 0 ? ", {$failed} erreurs" : ""));
+        } else {
+            $this->info("✅ {$success} jobs de réindexation lancés" . ($failed > 0 ? ", {$failed} erreurs" : ""));
+            $this->line("   Suivez la progression dans les logs ou le tableau de bord des jobs.");
+        }
+
+        return $failed > 0 ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * Réindexe un agent spécifique.
+     */
+    private function reindexAgent(Agent $agent, bool $force, bool $sync): int
+    {
         $collection = $agent->qdrant_collection;
 
         if (!$collection) {
-            $this->error("L'agent '{$slug}' n'a pas de collection Qdrant configurée");
+            $this->error("L'agent '{$agent->slug}' n'a pas de collection Qdrant configurée");
             return Command::FAILURE;
         }
 
         $this->info("🔄 Réindexation de l'agent '{$agent->name}'");
         $this->line("   Collection: {$collection}");
         $this->line("   Mode RAG: {$agent->retrieval_mode}");
+        $this->line("   Méthode d'indexation: {$agent->getIndexingMethod()->label()}");
         $this->newLine();
 
         // Supprimer et recréer si --force
@@ -70,7 +147,7 @@ class AgentReindexCommand extends Command
         return match ($agent->retrieval_mode) {
             'SQL_HYDRATION' => $this->reindexSqlHydration($agent),
             'TEXT_ONLY' => $this->reindexTextOnly($agent),
-            default => $this->reindexGeneric($agent),
+            default => $this->reindexGeneric($agent, $sync),
         };
     }
 
@@ -159,10 +236,53 @@ class AgentReindexCommand extends Command
         return Command::SUCCESS;
     }
 
-    private function reindexGeneric(Agent $agent): int
+    /**
+     * Réindexe un agent en mode générique (Q/R Atomique).
+     */
+    private function reindexGeneric(Agent $agent, bool $sync = false): int
     {
-        $this->warn("   Mode générique - Pas d'action automatique");
-        $this->line("   Utilisez une commande spécifique pour cet agent");
+        $this->info("   📚 Mode générique - Réindexation Q/R Atomique...");
+
+        $documentsCount = $agent->documents()->count();
+        $chunksCount = $agent->documents()
+            ->withCount('chunks')
+            ->get()
+            ->sum('chunks_count');
+
+        $this->line("   Documents: {$documentsCount}");
+        $this->line("   Chunks: {$chunksCount}");
+
+        if ($documentsCount === 0) {
+            $this->warn("   Aucun document à indexer");
+            return Command::SUCCESS;
+        }
+
+        if ($sync) {
+            // Exécution synchrone
+            $this->line("   Exécution synchrone...");
+
+            try {
+                $job = new RebuildAgentIndexJob($agent);
+                $job->handle(
+                    app(QdrantService::class),
+                    app(EmbeddingService::class)
+                );
+
+                $this->info("   ✅ Réindexation terminée");
+            } catch (\Exception $e) {
+                $this->error("   ❌ Erreur: {$e->getMessage()}");
+                Log::error("AgentReindexCommand: Erreur réindexation", [
+                    'agent' => $agent->slug,
+                    'error' => $e->getMessage(),
+                ]);
+                return Command::FAILURE;
+            }
+        } else {
+            // Dispatcher le job
+            RebuildAgentIndexJob::dispatch($agent);
+            $this->info("   ✅ Job de réindexation dispatché");
+            $this->line("   Suivez la progression dans les logs.");
+        }
 
         return Command::SUCCESS;
     }

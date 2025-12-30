@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources;
 
+use App\Enums\IndexingMethod;
 use App\Filament\Resources\AgentResource\Pages;
 use App\Models\Agent;
 use App\Services\AgentResetService;
@@ -215,6 +216,16 @@ class AgentResource extends Resource
                                                 'HYBRID' => 'Hybride',
                                             ])
                                             ->default('VECTOR_ONLY'),
+
+                                        Forms\Components\Select::make('indexing_method')
+                                            ->label('Méthode d\'indexation')
+                                            ->options(collect(IndexingMethod::cases())->mapWithKeys(fn ($m) => [
+                                                $m->value => $m->label(),
+                                            ]))
+                                            ->default('qr_atomique')
+                                            ->helperText(fn ($state) => IndexingMethod::tryFrom($state ?? 'qr_atomique')?->description() ?? '')
+                                            ->disabled()
+                                            ->dehydrated(),
 
                                         Forms\Components\TextInput::make('qdrant_collection')
                                             ->label('Collection Qdrant')

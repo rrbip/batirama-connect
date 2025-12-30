@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\IndexingMethod;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -199,6 +200,20 @@ class AgentDeployment extends Model
         );
 
         return $config;
+    }
+
+    /**
+     * Retourne la méthode d'indexation effective (Deployment > Agent).
+     */
+    public function getEffectiveIndexingMethod(): IndexingMethod
+    {
+        $overlay = $this->config_overlay['indexing_method'] ?? null;
+
+        if ($overlay) {
+            return IndexingMethod::tryFrom($overlay) ?? $this->agent->getIndexingMethod();
+        }
+
+        return $this->agent->getIndexingMethod();
     }
 
     /**

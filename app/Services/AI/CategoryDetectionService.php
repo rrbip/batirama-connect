@@ -228,7 +228,8 @@ class CategoryDetectionService
     }
 
     /**
-     * Construit un filtre Qdrant pour les catégories détectées
+     * Construit un filtre Qdrant pour les catégories détectées.
+     * Utilise le champ 'category' du format Q/R Atomique.
      */
     public function buildQdrantFilter(Collection $categories): array
     {
@@ -240,7 +241,7 @@ class CategoryDetectionService
 
         return [
             'should' => array_map(fn($name) => [
-                'key' => 'chunk_category',
+                'key' => 'category',
                 'match' => ['value' => $name],
             ], $categoryNames),
         ];

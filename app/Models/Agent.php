@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\IndexingMethod;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -56,6 +57,7 @@ class Agent extends Model
         'system_prompt',
         'qdrant_collection',
         'retrieval_mode',
+        'indexing_method',
         'hydration_config',
         'ollama_host',
         'ollama_port',
@@ -95,6 +97,7 @@ class Agent extends Model
 
     protected $casts = [
         'hydration_config' => 'array',
+        'indexing_method' => IndexingMethod::class,
         'temperature' => 'float',
         'min_rag_score' => 'float',
         'learned_min_score' => 'float',
@@ -334,6 +337,14 @@ GUARDRAILS;
     public function getDefaultChunkStrategy(): string
     {
         return $this->default_chunk_strategy ?? 'sentence';
+    }
+
+    /**
+     * Retourne la méthode d'indexation (Q/R Atomique par défaut)
+     */
+    public function getIndexingMethod(): IndexingMethod
+    {
+        return $this->indexing_method ?? IndexingMethod::QR_ATOMIQUE;
     }
 
     // ─────────────────────────────────────────────────────────────────

@@ -139,6 +139,10 @@ class PromptBuilder
         return "## CONTEXTE DOCUMENTAIRE\n\nUtilise les informations suivantes pour répondre à la question.\n**IMPORTANT:** Privilégie les sources dont la catégorie correspond au sujet de la question. Ignore les sources hors-sujet même si elles ont un score de pertinence élevé.\nSi l'information n'est pas dans le contexte, indique-le clairement.\n\n{$contextContent}";
     }
 
+    /**
+     * Formate le contexte RAG pour inclusion dans le prompt.
+     * Supporte le format Q/R Atomique avec display_text, category, source_doc, etc.
+     */
     private function formatRagContext(array $ragResults, Agent $agent): string
     {
         $contextParts = [];
@@ -151,30 +155,42 @@ class PromptBuilder
             if ($agent->usesHydration() && isset($result['hydrated_data'])) {
                 $content = $this->hydrationService->formatForContext($result);
             } else {
-                $content = $result['payload']['content'] ?? $result['content'] ?? '';
+                // Format Q/R Atomique : display_text en priorité
+                $content = $result['payload']['display_text'] ?? $result['content'] ?? '';
             }
 
-            // Extraire les métadonnées utiles du payload
+            // Extraire les métadonnées du payload (format Q/R Atomique)
             $payload = $result['payload'] ?? [];
-            $documentTitle = $payload['document_title'] ?? null;
-            $chunkCategory = $payload['chunk_category'] ?? null;
+            $type = $payload['type'] ?? null;
+            $category = $payload['category'] ?? null;
+            $sourceDoc = $payload['source_doc'] ?? null;
+            $parentContext = $payload['parent_context'] ?? null;
+            $question = $payload['question'] ?? null;
             $summary = $payload['summary'] ?? null;
 
             // Construire l'en-tête avec les métadonnées
             $header = "### Source {$num} (pertinence: {$score}%)";
 
             // Ajouter la catégorie si présente
-            if ($chunkCategory) {
-                $header .= " [Catégorie: {$chunkCategory}]";
+            if ($category) {
+                $header .= " [{$category}]";
             }
 
-            // Ajouter le titre du document si présent
-            if ($documentTitle) {
-                $header .= "\n**Document:** {$documentTitle}";
+            // Ajouter le titre du document source
+            if ($sourceDoc) {
+                $header .= "\n**Document:** {$sourceDoc}";
+                if ($parentContext) {
+                    $header .= " > {$parentContext}";
+                }
             }
 
-            // Ajouter le résumé si présent (aide l'IA à comprendre rapidement)
-            if ($summary) {
+            // Pour les Q/R pairs, afficher la question associée
+            if ($type === 'qa_pair' && $question) {
+                $header .= "\n**Question associée:** {$question}";
+            }
+
+            // Ajouter le résumé si présent (pour source_material)
+            if ($type === 'source_material' && $summary) {
                 $header .= "\n**Résumé:** {$summary}";
             }
 
@@ -249,7 +265,8 @@ class PromptBuilder
     }
 
     /**
-     * Tronque le contexte pour respecter la limite de tokens
+     * Tronque le contexte pour respecter la limite de tokens.
+     * Supporte le format Q/R Atomique (display_text).
      */
     public function truncateToTokenLimit(array $ragResults, int $maxTokens = 4000): array
     {
@@ -257,7 +274,8 @@ class PromptBuilder
         $truncatedResults = [];
 
         foreach ($ragResults as $result) {
-            $content = $result['payload']['content'] ?? $result['content'] ?? '';
+            // Format Q/R Atomique : display_text en priorité
+            $content = $result['payload']['display_text'] ?? $result['content'] ?? '';
             $contentTokens = $this->estimateTokens($content);
 
             if ($totalTokens + $contentTokens > $maxTokens) {
