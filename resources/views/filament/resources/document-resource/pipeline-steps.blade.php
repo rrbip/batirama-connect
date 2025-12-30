@@ -32,6 +32,7 @@
         'imagemagick' => 'ImageMagick',
         'vision_llm' => 'Vision LLM',
         'html_converter' => 'Convertisseur HTML',
+        'readability' => 'Readability (extraction contenu)',
         'qr_atomique' => 'Q/R Atomique',
     ];
 
@@ -40,7 +41,7 @@
         'pdf_to_images' => ['pdftoppm', 'imagemagick'],
         'images_to_markdown' => ['vision_llm'],
         'image_to_markdown' => ['vision_llm'],
-        'html_to_markdown' => ['html_converter'],
+        'html_to_markdown' => ['html_converter', 'readability'],
         'markdown_to_qr' => ['qr_atomique'],
     ];
 @endphp
