@@ -250,6 +250,130 @@ class ViewAiSession extends ViewRecord
         return $this->record->support_agent_id === auth()->id();
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // ASSISTANCE IA
+    // ─────────────────────────────────────────────────────────────────
+
+    public ?string $suggestedResponse = null;
+    public array $ragSources = [];
+
+    /**
+     * Suggère une réponse basée sur le RAG.
+     */
+    public function suggestAiResponse(): void
+    {
+        // Récupérer le dernier message utilisateur
+        $lastUserMessage = $this->record->messages()
+            ->where('role', 'user')
+            ->orderBy('created_at', 'desc')
+            ->first();
+
+        if (!$lastUserMessage) {
+            Notification::make()
+                ->title('Pas de message')
+                ->body('Aucun message utilisateur trouvé.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        try {
+            $result = app(\App\Services\Support\AgentAssistanceService::class)
+                ->suggestResponse($this->record, $lastUserMessage->content);
+
+            if (!$result || !$result['has_sources']) {
+                Notification::make()
+                    ->title('Pas de suggestion')
+                    ->body('Aucune source pertinente trouvée dans la base de connaissances.')
+                    ->warning()
+                    ->send();
+                return;
+            }
+
+            $this->suggestedResponse = $result['suggested_response'];
+            $this->ragSources = $result['sources'];
+
+            Notification::make()
+                ->title('Suggestion générée')
+                ->body('Une réponse a été suggérée basée sur ' . count($result['sources']) . ' source(s).')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Améliore le message actuel avec l'IA.
+     */
+    public function improveWithAi(): void
+    {
+        if (empty(trim($this->supportMessage))) {
+            Notification::make()
+                ->title('Message vide')
+                ->body('Écrivez d\'abord un message à améliorer.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        try {
+            $improved = app(\App\Services\Support\AgentAssistanceService::class)
+                ->improveResponse($this->record, $this->supportMessage);
+
+            if (!$improved) {
+                Notification::make()
+                    ->title('Pas d\'amélioration')
+                    ->body('Le message est déjà optimal ou l\'IA n\'a pas pu l\'améliorer.')
+                    ->info()
+                    ->send();
+                return;
+            }
+
+            // Garder l'original et mettre à jour
+            $this->supportMessage = $improved;
+
+            Notification::make()
+                ->title('Message amélioré')
+                ->body('Votre message a été reformulé par l\'IA.')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Utilise la suggestion comme message.
+     */
+    public function useSuggestion(): void
+    {
+        if ($this->suggestedResponse) {
+            $this->supportMessage = $this->suggestedResponse;
+            $this->suggestedResponse = null;
+            $this->ragSources = [];
+
+            Notification::make()
+                ->title('Suggestion appliquée')
+                ->success()
+                ->send();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // VALIDATION / APPRENTISSAGE
+    // ─────────────────────────────────────────────────────────────────
+
     public function validateMessage(int $messageId): void
     {
         $message = AiMessage::findOrFail($messageId);

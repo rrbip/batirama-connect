@@ -901,6 +901,49 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                         @endforelse
                     </div>
 
+                    {{-- Suggestion IA --}}
+                    @if($this->suggestedResponse)
+                        <div class="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4 mb-4 border border-blue-200 dark:border-blue-700">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                                    <x-heroicon-o-sparkles class="w-5 h-5" />
+                                    <span class="font-medium">Suggestion IA</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <x-filament::button
+                                        wire:click="useSuggestion"
+                                        size="sm"
+                                        color="success"
+                                    >
+                                        Utiliser
+                                    </x-filament::button>
+                                    <x-filament::button
+                                        wire:click="$set('suggestedResponse', null)"
+                                        size="sm"
+                                        color="gray"
+                                    >
+                                        Ignorer
+                                    </x-filament::button>
+                                </div>
+                            </div>
+                            <div class="prose prose-sm dark:prose-invert max-w-none text-blue-800 dark:text-blue-200">
+                                {!! \Illuminate\Support\Str::markdown($this->suggestedResponse) !!}
+                            </div>
+                            @if(!empty($this->ragSources))
+                                <div class="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                                    <p class="text-xs text-blue-600 dark:text-blue-400 mb-2">Sources utilisées :</p>
+                                    <div class="space-y-1">
+                                        @foreach($this->ragSources as $source)
+                                            <div class="text-xs text-blue-600 dark:text-blue-400">
+                                                • {{ $source['title'] }} ({{ number_format($source['score'] * 100, 0) }}%)
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @endif
+
                     {{-- Zone de saisie (si session non résolue) --}}
                     @if($session->support_status !== 'resolved' && ($session->support_status === 'escalated' || $isAssignedAgent))
                         <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
@@ -910,7 +953,7 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                     rows="2"
                                     class="flex-1 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm resize-none"
                                     placeholder="Tapez votre réponse..."
-                                    wire:keydown.enter.prevent="sendSupportMessage"
+                                    wire:keydown.ctrl.enter="sendSupportMessage"
                                 ></textarea>
                                 <div class="flex flex-col gap-2">
                                     <x-filament::button
@@ -920,11 +963,29 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                     >
                                         Envoyer
                                     </x-filament::button>
+                                    <x-filament::button
+                                        wire:click="improveWithAi"
+                                        icon="heroicon-o-sparkles"
+                                        color="info"
+                                        title="Améliorer avec l'IA"
+                                    >
+                                        Améliorer
+                                    </x-filament::button>
                                 </div>
                             </div>
-                            <p class="mt-2 text-xs text-gray-500">
-                                Appuyez sur Entrée pour envoyer • Ctrl+Entrée pour aller à la ligne
-                            </p>
+                            <div class="flex items-center justify-between mt-2">
+                                <p class="text-xs text-gray-500">
+                                    Ctrl+Entrée pour envoyer
+                                </p>
+                                <x-filament::button
+                                    wire:click="suggestAiResponse"
+                                    size="sm"
+                                    color="gray"
+                                    icon="heroicon-o-light-bulb"
+                                >
+                                    Suggérer une réponse
+                                </x-filament::button>
+                            </div>
                         </div>
                     @elseif($session->support_status === 'resolved')
                         <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
