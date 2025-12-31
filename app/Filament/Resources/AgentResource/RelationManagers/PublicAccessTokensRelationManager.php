@@ -97,7 +97,7 @@ class PublicAccessTokensRelationManager extends RelationManager
 
                 Tables\Columns\TextColumn::make('uses_display')
                     ->label('Utilisations')
-                    ->getStateUsing(fn ($record) => ($record->uses_count ?? $record->use_count ?? 0) . '/' . ($record->max_uses ?? '∞')),
+                    ->getStateUsing(fn ($record) => ($record->use_count ?? 0) . '/' . ($record->max_uses ?? '∞')),
 
                 Tables\Columns\TextColumn::make('expires_at')
                     ->label('Expiration')
@@ -164,7 +164,6 @@ class PublicAccessTokensRelationManager extends RelationManager
                             'created_by' => auth()->id(),
                             'expires_at' => now()->addHours((int) ($data['expires_in_hours'] ?? 168)),
                             'max_uses' => $data['max_uses'] ?? 1,
-                            'uses_count' => 0,
                             'use_count' => 0,
                             'status' => 'active',
                             'client_info' => $data['note'] ? ['note' => $data['note']] : null,
@@ -241,7 +240,6 @@ class PublicAccessTokensRelationManager extends RelationManager
                             'created_by' => auth()->id(),
                             'expires_at' => now()->addHours($agent->default_token_expiry_hours ?? 168),
                             'max_uses' => 1,
-                            'uses_count' => 0,
                             'use_count' => 0,
                             'status' => 'active',
                             'created_at' => now(),

@@ -28,7 +28,6 @@ class PublicAccessToken extends Model
         'expires_at',
         'max_uses',
         'use_count',
-        'uses_count',
         'status',
         'first_used_at',
         'last_used_at',
@@ -90,8 +89,7 @@ class PublicAccessToken extends Model
 
     public function isExhausted(): bool
     {
-        $usesCount = $this->uses_count ?? $this->use_count ?? 0;
-        return $this->max_uses && $usesCount >= $this->max_uses;
+        return $this->max_uses && ($this->use_count ?? 0) >= $this->max_uses;
     }
 
     public function markAsUsed(string $ip, string $userAgent): void
