@@ -670,6 +670,24 @@ class AgentResource extends Resource
                                     ->collapsible()
                                     ->collapsed(),
                             ]),
+
+                        Forms\Components\Tabs\Tab::make('Liens Publics')
+                            ->icon('heroicon-o-link')
+                            ->schema([
+                                Forms\Components\Placeholder::make('public_links_info')
+                                    ->label('')
+                                    ->content('Générez des liens publics pour partager l\'accès à cet agent sans authentification.')
+                                    ->visible(fn ($record) => $record === null),
+
+                                Forms\Components\Livewire::make(\App\Livewire\Agent\PublicLinksManager::class, fn ($record) => ['agent' => $record])
+                                    ->visible(fn ($record) => $record !== null),
+
+                                Forms\Components\Placeholder::make('save_first')
+                                    ->label('')
+                                    ->content('Sauvegardez d\'abord l\'agent pour pouvoir gérer les liens publics.')
+                                    ->visible(fn ($record) => $record === null),
+                            ])
+                            ->visible(fn (callable $get) => $get('allow_public_access')),
                     ])
                     ->columnSpanFull(),
             ]);
@@ -832,9 +850,7 @@ class AgentResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            RelationManagers\PublicAccessTokensRelationManager::class,
-        ];
+        return [];
     }
 
     public static function getPages(): array
