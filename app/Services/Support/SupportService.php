@@ -263,4 +263,57 @@ class SupportService
 
         return $session->fresh();
     }
+
+    /**
+     * Envoie un message par email à l'utilisateur.
+     */
+    public function sendEmailResponse(
+        AiSession $session,
+        User $agent,
+        string $content,
+        ?string $originalContent = null
+    ): ?SupportMessage {
+        // Vérifier que l'utilisateur a un email
+        if (!$session->user_email) {
+            Log::warning('Cannot send email: no user email on session', [
+                'session_id' => $session->id,
+            ]);
+            return null;
+        }
+
+        // Générer un token d'accès si pas encore fait
+        if (!$session->support_access_token) {
+            $session->generateSupportAccessToken();
+            $session->refresh();
+        }
+
+        // Créer le message de support
+        $message = $this->sendAgentMessage(
+            $session,
+            $agent,
+            $content,
+            'email',
+            $originalContent
+        );
+
+        // Envoyer l'email
+        try {
+            \Illuminate\Support\Facades\Mail::to($session->user_email)
+                ->queue(new \App\Mail\Support\SupportReplyMail($session, $message, $agent));
+
+            Log::info('Support email sent', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+                'to' => $session->user_email,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('Failed to send support email', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $message;
+    }
 }

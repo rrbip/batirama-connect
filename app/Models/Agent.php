@@ -392,6 +392,37 @@ GUARDRAILS;
         return false;
     }
 
+    /**
+     * Récupère la configuration IMAP pour cet agent.
+     */
+    public function getImapConfig(): ?array
+    {
+        $config = $this->ai_assistance_config ?? [];
+
+        // Les données IMAP sont stockées dans ai_assistance_config
+        if (empty($config['imap_host']) || empty($config['imap_username']) || empty($config['imap_password'])) {
+            return null;
+        }
+
+        return [
+            'host' => $config['imap_host'],
+            'port' => $config['imap_port'] ?? 993,
+            'encryption' => $config['imap_encryption'] ?? 'ssl',
+            'validate_cert' => $config['imap_validate_cert'] ?? true,
+            'username' => $config['imap_username'],
+            'password' => $config['imap_password'],
+            'folder' => $config['imap_folder'] ?? 'INBOX',
+        ];
+    }
+
+    /**
+     * Vérifie si l'agent a une configuration IMAP valide.
+     */
+    public function hasImapConfig(): bool
+    {
+        return $this->getImapConfig() !== null;
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // RELATIONS WHITELABEL
     // ─────────────────────────────────────────────────────────────────
