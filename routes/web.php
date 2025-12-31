@@ -157,3 +157,9 @@ Route::middleware(['web', 'auth'])->prefix('admin')->name('admin.')->group(funct
     Route::get('/documents/{document}/view', [DocumentController::class, 'view'])
         ->name('documents.view');
 });
+
+// Support attachment download (signed URLs)
+Route::get('/support/attachment/{attachment}/download', [\App\Http\Controllers\Support\AttachmentController::class, 'download'])
+    ->name('support.attachment.download');
+Route::get('/support/attachment/{attachment}/inline', [\App\Http\Controllers\Support\AttachmentController::class, 'inline'])
+    ->name('support.attachment.inline');

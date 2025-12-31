@@ -14,4 +14,20 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | ClamAV Antivirus Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for ClamAV virus scanning service.
+    | The service communicates via TCP socket.
+    |
+    */
+
+    'clamav' => [
+        'host' => env('CLAMAV_HOST', '127.0.0.1'),
+        'port' => env('CLAMAV_PORT', 3310),
+        'timeout' => env('CLAMAV_TIMEOUT', 30),
+    ],
+
 ];
