@@ -1,0 +1,246 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Support;
+
+use App\Models\Agent;
+use App\Models\AiSession;
+use App\Models\User;
+use App\Events\Support\SessionEscalated;
+use App\Events\Support\SessionAssigned;
+use App\Mail\Support\EscalationNotificationMail;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+
+class EscalationService
+{
+    /**
+     * Vérifie si une session doit être escaladée en fonction du score RAG.
+     */
+    public function shouldEscalate(AiSession $session, float $maxRagScore): bool
+    {
+        $agent = $session->agent;
+
+        if (!$agent || !$agent->human_support_enabled) {
+            return false;
+        }
+
+        $threshold = $agent->escalation_threshold ?? 0.60;
+
+        return $maxRagScore < $threshold;
+    }
+
+    /**
+     * Escalade une session vers le support humain.
+     */
+    public function escalate(
+        AiSession $session,
+        string $reason,
+        ?float $maxRagScore = null,
+        ?string $userEmail = null
+    ): AiSession {
+        // Mettre à jour la session
+        $session->update([
+            'support_status' => 'escalated',
+            'escalation_reason' => $reason,
+            'escalated_at' => now(),
+            'user_email' => $userEmail ?? $session->user_email,
+            'support_metadata' => array_merge($session->support_metadata ?? [], [
+                'max_rag_score' => $maxRagScore,
+                'escalated_by' => 'system',
+                'escalated_at_utc' => now()->utc()->toISOString(),
+            ]),
+        ]);
+
+        Log::info('Session escalated to human support', [
+            'session_id' => $session->id,
+            'session_uuid' => $session->uuid,
+            'agent_id' => $session->agent_id,
+            'reason' => $reason,
+            'max_rag_score' => $maxRagScore,
+        ]);
+
+        // Dispatcher l'événement (pour WebSocket)
+        event(new SessionEscalated($session));
+
+        // Vérifier si des agents de support sont disponibles
+        $this->notifyAvailableAgents($session);
+
+        return $session;
+    }
+
+    /**
+     * Assigne une session à un agent de support.
+     */
+    public function assignToAgent(AiSession $session, User $agent): AiSession
+    {
+        $session->update([
+            'support_status' => 'assigned',
+            'support_agent_id' => $agent->id,
+            'assigned_at' => now(),
+        ]);
+
+        Log::info('Session assigned to support agent', [
+            'session_id' => $session->id,
+            'agent_user_id' => $agent->id,
+            'agent_name' => $agent->name,
+        ]);
+
+        // Dispatcher l'événement
+        event(new SessionAssigned($session, $agent));
+
+        return $session;
+    }
+
+    /**
+     * Trouve les agents de support disponibles pour une session.
+     */
+    public function findAvailableAgents(AiSession $session): Collection
+    {
+        $agent = $session->agent;
+
+        if (!$agent) {
+            return collect();
+        }
+
+        // 1. Agents assignés spécifiquement à cet agent IA
+        $assignedAgents = $agent->supportUsers()
+            ->wherePivot('notify_on_escalation', true)
+            ->get();
+
+        if ($assignedAgents->isNotEmpty()) {
+            return $assignedAgents;
+        }
+
+        // 2. Fallback : Admins et super-admins
+        return User::whereHas('roles', function ($query) {
+            $query->whereIn('name', ['super-admin', 'admin']);
+        })->get();
+    }
+
+    /**
+     * Vérifie si des agents de support sont connectés.
+     * Note: Sera amélioré avec Soketi pour vérifier la présence en temps réel.
+     */
+    public function hasConnectedAgents(AiSession $session): bool
+    {
+        // Pour l'instant, on retourne toujours false car on n'a pas encore
+        // implémenté la détection de présence avec Soketi.
+        // Cela sera fait dans la Phase 4.
+        return false;
+    }
+
+    /**
+     * Notifie les agents de support disponibles.
+     */
+    public function notifyAvailableAgents(AiSession $session): void
+    {
+        $agents = $this->findAvailableAgents($session);
+
+        if ($agents->isEmpty()) {
+            Log::warning('No support agents available for escalated session', [
+                'session_id' => $session->id,
+            ]);
+            return;
+        }
+
+        // Si aucun agent n'est connecté, envoyer un email
+        if (!$this->hasConnectedAgents($session)) {
+            $this->sendEmailNotifications($session, $agents);
+        }
+    }
+
+    /**
+     * Envoie des notifications par email aux agents de support.
+     */
+    protected function sendEmailNotifications(AiSession $session, Collection $agents): void
+    {
+        foreach ($agents as $agent) {
+            if (!$agent->email) {
+                continue;
+            }
+
+            try {
+                Mail::to($agent->email)->queue(new EscalationNotificationMail($session, $agent));
+
+                Log::info('Escalation email sent to support agent', [
+                    'session_id' => $session->id,
+                    'agent_email' => $agent->email,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Failed to send escalation email', [
+                    'session_id' => $session->id,
+                    'agent_email' => $agent->email,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // Mettre à jour les métadonnées
+        $session->update([
+            'support_metadata' => array_merge($session->support_metadata ?? [], [
+                'notification_sent_at' => now()->toISOString(),
+                'notified_agents_count' => $agents->count(),
+            ]),
+        ]);
+    }
+
+    /**
+     * Retourne le message d'escalade configuré pour l'agent.
+     */
+    public function getEscalationMessage(Agent $agent): string
+    {
+        return $agent->escalation_message
+            ?? "Je n'ai pas trouvé d'information fiable pour répondre à votre question. Un conseiller va prendre le relais.";
+    }
+
+    /**
+     * Retourne le message quand aucun agent n'est disponible.
+     */
+    public function getNoAgentMessage(Agent $agent): string
+    {
+        return $agent->no_admin_message
+            ?? "Aucun conseiller n'est disponible pour le moment. Laissez-nous votre email et nous vous répondrons dès que possible.";
+    }
+
+    /**
+     * Marque une session comme résolue.
+     */
+    public function resolve(
+        AiSession $session,
+        string $resolutionType,
+        ?string $notes = null
+    ): AiSession {
+        $session->update([
+            'support_status' => 'resolved',
+            'resolved_at' => now(),
+            'resolution_type' => $resolutionType,
+            'resolution_notes' => $notes,
+        ]);
+
+        Log::info('Support session resolved', [
+            'session_id' => $session->id,
+            'resolution_type' => $resolutionType,
+            'resolved_by' => auth()->id(),
+        ]);
+
+        return $session;
+    }
+
+    /**
+     * Marque une session comme abandonnée.
+     */
+    public function markAsAbandoned(AiSession $session): AiSession
+    {
+        $session->update([
+            'support_status' => 'abandoned',
+            'support_metadata' => array_merge($session->support_metadata ?? [], [
+                'abandoned_at' => now()->toISOString(),
+            ]),
+        ]);
+
+        return $session;
+    }
+}
