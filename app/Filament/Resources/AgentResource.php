@@ -543,13 +543,59 @@ class AgentResource extends Resource
                                     ->visible(fn (callable $get) => $get('human_support_enabled')),
 
                                 Forms\Components\Section::make('Configuration email')
-                                    ->description('Paramètres pour la communication email asynchrone')
+                                    ->description('Paramètres pour la communication email asynchrone (réception et envoi)')
                                     ->schema([
                                         Forms\Components\TextInput::make('support_email')
-                                            ->label('Email de notification')
+                                            ->label('Email de support')
                                             ->email()
                                             ->placeholder('support@example.com')
-                                            ->helperText('Email générique pour recevoir les notifications d\'escalade (en plus des agents assignés)'),
+                                            ->helperText('Adresse email utilisée pour envoyer et recevoir les messages de support')
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Fieldset::make('Serveur IMAP (réception)')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_host')
+                                                    ->label('Serveur IMAP')
+                                                    ->placeholder('imap.example.com')
+                                                    ->helperText('Ex: imap.gmail.com, imap.ovh.net'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_port')
+                                                    ->label('Port')
+                                                    ->numeric()
+                                                    ->default(993)
+                                                    ->placeholder('993'),
+
+                                                Forms\Components\Select::make('ai_assistance_config.imap_encryption')
+                                                    ->label('Chiffrement')
+                                                    ->options([
+                                                        'ssl' => 'SSL (port 993)',
+                                                        'tls' => 'TLS (port 143)',
+                                                        'none' => 'Aucun',
+                                                    ])
+                                                    ->default('ssl'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_username')
+                                                    ->label('Identifiant')
+                                                    ->placeholder('support@example.com')
+                                                    ->helperText('Généralement l\'adresse email complète'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_password')
+                                                    ->label('Mot de passe')
+                                                    ->password()
+                                                    ->revealable()
+                                                    ->helperText('Pour Gmail, utilisez un mot de passe d\'application'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_folder')
+                                                    ->label('Dossier')
+                                                    ->default('INBOX')
+                                                    ->placeholder('INBOX'),
+                                            ])
+                                            ->columns(3),
+
+                                        Forms\Components\Placeholder::make('imap_help')
+                                            ->label('')
+                                            ->content('💡 Les emails entrants sont récupérés automatiquement toutes les minutes. Pour Gmail, activez "Accès aux applications moins sécurisées" ou créez un mot de passe d\'application.')
+                                            ->columnSpanFull(),
                                     ])
                                     ->visible(fn (callable $get) => $get('human_support_enabled'))
                                     ->collapsible()
