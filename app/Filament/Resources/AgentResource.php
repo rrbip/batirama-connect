@@ -6,6 +6,7 @@ namespace App\Filament\Resources;
 
 use App\Enums\IndexingMethod;
 use App\Filament\Resources\AgentResource\Pages;
+use App\Filament\Resources\AgentResource\RelationManagers;
 use App\Models\Agent;
 use App\Services\AgentResetService;
 use Filament\Forms;
@@ -832,7 +833,7 @@ class AgentResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            RelationManagers\PublicAccessTokensRelationManager::class,
         ];
     }
 
