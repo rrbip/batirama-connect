@@ -234,7 +234,7 @@ class ViewAiSession extends ViewRecord
         $user = auth()->user();
 
         // Super-admin et admin peuvent toujours
-        if ($user->hasRole(['super-admin', 'admin'])) {
+        if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
             return true;
         }
 

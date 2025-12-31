@@ -29,7 +29,7 @@ Broadcast::channel('user.{id}', function (User $user, int $id) {
  */
 Broadcast::channel('agent.{agentId}.support', function (User $user, int $agentId) {
     // Super-admin et admin peuvent tout voir
-    if ($user->hasRole(['super-admin', 'admin'])) {
+    if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
         return true;
     }
 
@@ -64,7 +64,7 @@ Broadcast::channel('session.{uuid}', function (User $user, string $uuid) {
     }
 
     // Super-admin et admin peuvent tout voir
-    if ($user->hasRole(['super-admin', 'admin'])) {
+    if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
         return true;
     }
 
