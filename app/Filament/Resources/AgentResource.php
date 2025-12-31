@@ -522,18 +522,23 @@ class AgentResource extends Resource
                                 Forms\Components\Section::make('Agents de support assignés')
                                     ->description('Utilisateurs avec le rôle "Agent de support" qui peuvent répondre aux conversations de cet agent IA')
                                     ->schema([
-                                        Forms\Components\Placeholder::make('support_agents_info')
-                                            ->label('')
-                                            ->content(fn ($record) =>
-                                                $record?->id
-                                                    ? '👥 ' . ($record->supportUsers()->count() ?? 0) . ' agent(s) de support assigné(s)'
-                                                    : '💡 Sauvegardez d\'abord l\'agent pour pouvoir assigner des agents de support.'
-                                            ),
+                                        Forms\Components\CheckboxList::make('supportUsers')
+                                            ->label('Agents de support')
+                                            ->relationship(
+                                                'supportUsers',
+                                                'name',
+                                                fn ($query) => $query->whereHas('roles', fn ($q) => $q->whereIn('slug', ['support-agent', 'admin', 'super-admin']))
+                                            )
+                                            ->columns(2)
+                                            ->searchable()
+                                            ->bulkToggleable()
+                                            ->helperText('Sélectionnez les utilisateurs qui peuvent gérer le support pour cet agent IA. Les admins et super-admins ont accès par défaut.')
+                                            ->visible(fn ($record) => $record?->id !== null),
 
                                         Forms\Components\Placeholder::make('support_agents_notice')
                                             ->label('')
-                                            ->content('💡 La gestion des agents de support sera disponible dans une prochaine mise à jour.')
-                                            ->visible(fn ($record) => $record?->id !== null),
+                                            ->content('💡 Sauvegardez d\'abord l\'agent pour pouvoir assigner des agents de support.')
+                                            ->visible(fn ($record) => $record?->id === null),
                                     ])
                                     ->visible(fn (callable $get) => $get('human_support_enabled')),
 
