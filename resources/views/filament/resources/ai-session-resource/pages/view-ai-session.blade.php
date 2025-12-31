@@ -1,7 +1,7 @@
 <x-filament-panels::page>
     @php
         $session = $this->record;
-        $messages = $this->getMessages();
+        $messages = $this->getChatMessages();
         $stats = $this->getSessionStats();
         $supportMessages = $session->isEscalated() ? $this->getSupportMessages() : collect();
         $canHandleSupport = $this->canHandleSupport();
