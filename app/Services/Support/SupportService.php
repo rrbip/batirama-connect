@@ -296,15 +296,25 @@ class SupportService
             $originalContent
         );
 
-        // Envoyer l'email
+        // Envoyer l'email avec la config SMTP de l'agent si disponible
         try {
-            \Illuminate\Support\Facades\Mail::to($session->user_email)
-                ->queue(new \App\Mail\Support\SupportReplyMail($session, $message, $agent));
+            $mailable = new \App\Mail\Support\SupportReplyMail($session, $message, $agent);
+
+            // Utiliser la config SMTP de l'agent IA si disponible
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($session->user_email, $mailable, $smtpConfig);
+            } else {
+                // Utiliser la config par défaut de Laravel
+                \Illuminate\Support\Facades\Mail::to($session->user_email)->queue($mailable);
+            }
 
             Log::info('Support email sent', [
                 'session_id' => $session->id,
                 'message_id' => $message->id,
                 'to' => $session->user_email,
+                'custom_smtp' => $smtpConfig !== null,
             ]);
 
         } catch (\Throwable $e) {
@@ -315,5 +325,39 @@ class SupportService
         }
 
         return $message;
+    }
+
+    /**
+     * Envoie un email avec une configuration SMTP personnalisée.
+     */
+    protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
+    {
+        // Créer un transport SMTP personnalisé
+        $transport = new \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport(
+            $smtpConfig['host'],
+            $smtpConfig['port'],
+            $smtpConfig['encryption'] === 'tls'
+        );
+
+        $transport->setUsername($smtpConfig['username']);
+        $transport->setPassword($smtpConfig['password']);
+
+        // Créer un mailer avec ce transport
+        $mailer = new \Symfony\Component\Mailer\Mailer($transport);
+
+        // Configurer le from sur le mailable
+        $mailable->from($smtpConfig['from_address'], $smtpConfig['from_name']);
+
+        // Rendre le mailable et envoyer
+        $symfonyMessage = $mailable->to($to)->render();
+
+        // Créer un email Symfony à partir du mailable Laravel
+        $email = (new \Symfony\Component\Mime\Email())
+            ->from(new \Symfony\Component\Mime\Address($smtpConfig['from_address'], $smtpConfig['from_name']))
+            ->to($to)
+            ->subject($mailable->subject ?? 'Support')
+            ->html($symfonyMessage);
+
+        $mailer->send($email);
     }
 }

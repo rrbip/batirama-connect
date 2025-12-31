@@ -423,6 +423,37 @@ GUARDRAILS;
         return $this->getImapConfig() !== null;
     }
 
+    /**
+     * Récupère la configuration SMTP de l'agent.
+     */
+    public function getSmtpConfig(): ?array
+    {
+        $config = $this->ai_assistance_config ?? [];
+
+        // Les données SMTP sont stockées dans ai_assistance_config
+        if (empty($config['smtp_host']) || empty($config['smtp_username']) || empty($config['smtp_password'])) {
+            return null;
+        }
+
+        return [
+            'host' => $config['smtp_host'],
+            'port' => (int) ($config['smtp_port'] ?? 587),
+            'encryption' => $config['smtp_encryption'] ?? 'tls',
+            'username' => $config['smtp_username'],
+            'password' => $config['smtp_password'],
+            'from_address' => $this->support_email,
+            'from_name' => $config['smtp_from_name'] ?? $this->name,
+        ];
+    }
+
+    /**
+     * Vérifie si l'agent a une configuration SMTP valide.
+     */
+    public function hasSmtpConfig(): bool
+    {
+        return $this->getSmtpConfig() !== null;
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // RELATIONS WHITELABEL
     // ─────────────────────────────────────────────────────────────────

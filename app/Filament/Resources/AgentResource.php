@@ -592,9 +592,49 @@ class AgentResource extends Resource
                                             ])
                                             ->columns(3),
 
-                                        Forms\Components\Placeholder::make('imap_help')
+                                        Forms\Components\Fieldset::make('Serveur SMTP (envoi)')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_host')
+                                                    ->label('Serveur SMTP')
+                                                    ->placeholder('smtp.example.com')
+                                                    ->helperText('Ex: smtp.gmail.com, ssl0.ovh.net'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_port')
+                                                    ->label('Port')
+                                                    ->numeric()
+                                                    ->default(587)
+                                                    ->placeholder('587'),
+
+                                                Forms\Components\Select::make('ai_assistance_config.smtp_encryption')
+                                                    ->label('Chiffrement')
+                                                    ->options([
+                                                        'tls' => 'TLS (port 587)',
+                                                        'ssl' => 'SSL (port 465)',
+                                                        'none' => 'Aucun (port 25)',
+                                                    ])
+                                                    ->default('tls'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_username')
+                                                    ->label('Identifiant')
+                                                    ->placeholder('support@example.com')
+                                                    ->helperText('Généralement identique à l\'IMAP'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_password')
+                                                    ->label('Mot de passe')
+                                                    ->password()
+                                                    ->revealable()
+                                                    ->helperText('Généralement identique à l\'IMAP'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_from_name')
+                                                    ->label('Nom expéditeur')
+                                                    ->placeholder('Support Technique')
+                                                    ->helperText('Nom affiché dans les emails envoyés'),
+                                            ])
+                                            ->columns(3),
+
+                                        Forms\Components\Placeholder::make('email_help')
                                             ->label('')
-                                            ->content('💡 Les emails entrants sont récupérés automatiquement toutes les minutes. Pour Gmail, activez "Accès aux applications moins sécurisées" ou créez un mot de passe d\'application.')
+                                            ->content('💡 Les emails entrants sont récupérés automatiquement. Pour Gmail, créez un mot de passe d\'application dans les paramètres de sécurité Google.')
                                             ->columnSpanFull(),
                                     ])
                                     ->visible(fn (callable $get) => $get('human_support_enabled'))
