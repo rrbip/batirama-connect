@@ -13,3 +13,10 @@ use Illuminate\Support\Facades\Schedule;
 // Scheduled tasks
 Schedule::command('queue:work --stop-when-empty')->everyMinute()->withoutOverlapping();
 Schedule::command('logs:purge --days=90')->daily();
+
+// Support email polling (IMAP)
+Schedule::command('support:fetch-emails')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->appendOutputTo(storage_path('logs/support-emails.log'));

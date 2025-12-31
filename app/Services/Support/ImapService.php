@@ -13,10 +13,12 @@ use Webklex\IMAP\Facades\Client;
 class ImapService
 {
     protected SupportService $supportService;
+    protected EmailReplyParser $emailParser;
 
-    public function __construct(SupportService $supportService)
+    public function __construct(SupportService $supportService, EmailReplyParser $emailParser)
     {
         $this->supportService = $supportService;
+        $this->emailParser = $emailParser;
     }
 
     /**
@@ -177,44 +179,9 @@ class ImapService
      */
     protected function cleanEmailBody(string $body): string
     {
-        // Supprimer le HTML si présent
-        if (str_contains($body, '<html') || str_contains($body, '<body')) {
-            $body = strip_tags($body);
-        }
+        $isHtml = str_contains($body, '<html') || str_contains($body, '<body') || str_contains($body, '<div');
 
-        // Décoder les entités HTML
-        $body = html_entity_decode($body, ENT_QUOTES, 'UTF-8');
-
-        // Supprimer les citations (lignes commençant par >)
-        $lines = explode("\n", $body);
-        $cleanLines = [];
-        $inQuote = false;
-
-        foreach ($lines as $line) {
-            $trimmed = trim($line);
-
-            // Détecter le début de la citation
-            if (preg_match('/^(>|Le .+ a écrit|On .+ wrote|From:|Sent:|De :|Envoyé :)/i', $trimmed)) {
-                $inQuote = true;
-                continue;
-            }
-
-            // Détecter les séparateurs de signature
-            if (preg_match('/^(-{2,}|_{2,}|Cordialement|Best regards|Sent from my)/i', $trimmed)) {
-                break;
-            }
-
-            if (!$inQuote) {
-                $cleanLines[] = $line;
-            }
-        }
-
-        $body = implode("\n", $cleanLines);
-
-        // Nettoyer les espaces multiples
-        $body = preg_replace('/\n{3,}/', "\n\n", $body);
-
-        return trim($body);
+        return $this->emailParser->parse($body, $isHtml);
     }
 
     /**

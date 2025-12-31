@@ -494,4 +494,86 @@ class ViewAiSession extends ViewRecord
             'avg_generation_time' => round($messages->where('role', 'assistant')->avg('generation_time_ms') ?? 0),
         ];
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // APPRENTISSAGE DEPUIS LE SUPPORT
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Sauvegarde une Q/R depuis le chat de support.
+     */
+    public function saveAsLearnedResponse(int $messageId, string $question, string $answer): void
+    {
+        if (empty(trim($question)) || empty(trim($answer))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question et la réponse ne peuvent pas être vides.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $learned = app(\App\Services\Support\SupportTrainingService::class)->saveQrPair(
+                $this->record,
+                $question,
+                $answer,
+                auth()->id(),
+                $messageId
+            );
+
+            if ($learned) {
+                Notification::make()
+                    ->title('Q/R enregistrée')
+                    ->body('La paire question/réponse a été indexée pour l\'apprentissage.')
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Impossible d\'enregistrer la Q/R.')
+                    ->danger()
+                    ->send();
+            }
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Indexe la conversation complète comme document.
+     */
+    public function indexConversationAsDocument(): void
+    {
+        try {
+            \App\Jobs\Support\IndexConversationAsDocumentJob::dispatch($this->record);
+
+            Notification::make()
+                ->title('Indexation lancée')
+                ->body('La conversation sera indexée dans quelques instants.')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Récupère les paires Q/R potentielles depuis le support.
+     */
+    public function getPendingQrPairs(): array
+    {
+        return app(\App\Services\Support\SupportTrainingService::class)
+            ->getPendingQrPairs($this->record);
+    }
 }
