@@ -3,11 +3,101 @@
         $session = $this->record;
         $messages = $this->getMessages();
         $stats = $this->getSessionStats();
+        $supportMessages = $session->isEscalated() ? $this->getSupportMessages() : collect();
+        $canHandleSupport = $this->canHandleSupport();
+        $isAssignedAgent = $this->isAssignedAgent();
     @endphp
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {{-- Sidebar: Infos Session --}}
         <div class="lg:col-span-1 space-y-4">
+
+            {{-- Section Support Humain (si escaladé) --}}
+            @if($session->isEscalated())
+                <x-filament::section class="border-2 {{ match($session->support_status) {
+                    'escalated' => 'border-danger-500',
+                    'assigned' => 'border-warning-500',
+                    'resolved' => 'border-success-500',
+                    default => 'border-gray-300'
+                } }}">
+                    <x-slot name="heading">
+                        <div class="flex items-center gap-2">
+                            <x-heroicon-o-user-group class="w-5 h-5" />
+                            Support Humain
+                        </div>
+                    </x-slot>
+
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-500 dark:text-gray-400">Statut</span>
+                            <x-filament::badge color="{{ match($session->support_status) {
+                                'escalated' => 'danger',
+                                'assigned' => 'warning',
+                                'resolved' => 'success',
+                                'abandoned' => 'gray',
+                                default => 'gray'
+                            } }}">
+                                {{ match($session->support_status) {
+                                    'escalated' => 'En attente',
+                                    'assigned' => 'En cours',
+                                    'resolved' => 'Résolu',
+                                    'abandoned' => 'Abandonné',
+                                    default => $session->support_status
+                                } }}
+                            </x-filament::badge>
+                        </div>
+
+                        <div class="flex justify-between">
+                            <span class="text-gray-500 dark:text-gray-400">Raison</span>
+                            <span class="font-medium text-right text-xs">
+                                {{ match($session->escalation_reason) {
+                                    'low_confidence' => 'Score RAG bas',
+                                    'user_request' => 'Demande utilisateur',
+                                    'ai_uncertainty' => 'Incertitude IA',
+                                    'negative_feedback' => 'Feedback négatif',
+                                    default => $session->escalation_reason ?? '-'
+                                } }}
+                            </span>
+                        </div>
+
+                        @if($session->escalated_at)
+                            <div class="flex justify-between">
+                                <span class="text-gray-500 dark:text-gray-400">Escaladé le</span>
+                                <span class="font-medium">{{ $session->escalated_at->format('d/m H:i') }}</span>
+                            </div>
+                        @endif
+
+                        @if($session->supportAgent)
+                            <div class="flex justify-between">
+                                <span class="text-gray-500 dark:text-gray-400">Agent</span>
+                                <span class="font-medium">{{ $session->supportAgent->name }}</span>
+                            </div>
+                        @endif
+
+                        @if($session->user_email)
+                            <div class="flex justify-between">
+                                <span class="text-gray-500 dark:text-gray-400">Email</span>
+                                <span class="font-medium text-xs">{{ $session->user_email }}</span>
+                            </div>
+                        @endif
+
+                        @if($session->resolved_at)
+                            <div class="flex justify-between">
+                                <span class="text-gray-500 dark:text-gray-400">Résolu le</span>
+                                <span class="font-medium">{{ $session->resolved_at->format('d/m H:i') }}</span>
+                            </div>
+                        @endif
+
+                        @if($session->support_metadata['max_rag_score'] ?? null)
+                            <div class="flex justify-between">
+                                <span class="text-gray-500 dark:text-gray-400">Score RAG max</span>
+                                <span class="font-medium">{{ number_format(($session->support_metadata['max_rag_score'] ?? 0) * 100, 0) }}%</span>
+                            </div>
+                        @endif
+                    </div>
+                </x-filament::section>
+            @endif
+
             {{-- Infos Session --}}
             <x-filament::section>
                 <x-slot name="heading">
@@ -724,6 +814,192 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                     @endforelse
                 </div>
             </x-filament::section>
+
+            {{-- Section Support Humain : Chat avec l'agent --}}
+            @if($session->isEscalated() && $canHandleSupport)
+                <x-filament::section class="mt-6">
+                    <x-slot name="heading">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <x-heroicon-o-user-group class="w-5 h-5" />
+                                Chat Support
+                            </div>
+                            @if($supportMessages->count() > 0)
+                                <span class="text-sm text-gray-500">{{ $supportMessages->count() }} message(s)</span>
+                            @endif
+                        </div>
+                    </x-slot>
+
+                    {{-- Messages de support --}}
+                    <div class="space-y-4 max-h-[400px] overflow-y-auto p-4 bg-gray-50 dark:bg-gray-900 rounded-lg mb-4" id="support-messages">
+                        @forelse($supportMessages as $supportMsg)
+                            @php
+                                $isAgent = $supportMsg->sender_type === 'agent';
+                                $isSystem = $supportMsg->sender_type === 'system';
+                            @endphp
+
+                            @if($isSystem)
+                                {{-- Message système --}}
+                                <div class="flex justify-center">
+                                    <div class="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs text-gray-600 dark:text-gray-400">
+                                        {{ $supportMsg->content }}
+                                    </div>
+                                </div>
+                            @else
+                                {{-- Message utilisateur ou agent --}}
+                                <div class="flex {{ $isAgent ? 'justify-start' : 'justify-end' }}">
+                                    <div class="max-w-[80%]">
+                                        <div class="{{ $isAgent
+                                            ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                                            : 'bg-primary-500 text-white' }} rounded-lg p-3 shadow-sm">
+
+                                            @if($isAgent)
+                                                <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+                                                    <x-heroicon-o-user-circle class="w-4 h-4 text-gray-400" />
+                                                    <span class="text-xs text-gray-500">{{ $supportMsg->agent?->name ?? 'Agent' }}</span>
+                                                    @if($supportMsg->was_ai_improved)
+                                                        <x-filament::badge size="sm" color="info">IA</x-filament::badge>
+                                                    @endif
+                                                    @if($supportMsg->channel === 'email')
+                                                        <x-filament::badge size="sm" color="gray">Email</x-filament::badge>
+                                                    @endif
+                                                </div>
+                                            @endif
+
+                                            <div class="{{ $isAgent ? 'prose prose-sm dark:prose-invert' : 'prose prose-sm prose-invert' }} max-w-none">
+                                                {!! \Illuminate\Support\Str::markdown($supportMsg->content) !!}
+                                            </div>
+
+                                            {{-- Pièces jointes --}}
+                                            @if($supportMsg->attachments->count() > 0)
+                                                <div class="mt-2 pt-2 border-t {{ $isAgent ? 'border-gray-100 dark:border-gray-700' : 'border-primary-400' }}">
+                                                    @foreach($supportMsg->attachments as $attachment)
+                                                        <div class="flex items-center gap-2 text-xs {{ $isAgent ? 'text-gray-500' : 'text-primary-200' }}">
+                                                            <x-dynamic-component :component="$attachment->getIcon()" class="w-4 h-4" />
+                                                            <span>{{ $attachment->original_name }}</span>
+                                                            <span>({{ $attachment->getFormattedSize() }})</span>
+                                                        </div>
+                                                    @endforeach
+                                                </div>
+                                            @endif
+
+                                            <div class="flex items-center justify-end mt-2 text-xs {{ $isAgent ? 'text-gray-400' : 'text-primary-200' }}">
+                                                <span>{{ $supportMsg->created_at->format('H:i') }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            @endif
+                        @empty
+                            <div class="flex items-center justify-center h-32 text-gray-400">
+                                <div class="text-center">
+                                    <x-heroicon-o-chat-bubble-left-ellipsis class="w-8 h-8 mx-auto mb-2" />
+                                    <p class="text-sm">Aucun message de support</p>
+                                    <p class="text-xs">Envoyez un message pour démarrer la conversation</p>
+                                </div>
+                            </div>
+                        @endforelse
+                    </div>
+
+                    {{-- Suggestion IA --}}
+                    @if($this->suggestedResponse)
+                        <div class="bg-blue-50 dark:bg-blue-900/30 rounded-lg p-4 mb-4 border border-blue-200 dark:border-blue-700">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                                    <x-heroicon-o-sparkles class="w-5 h-5" />
+                                    <span class="font-medium">Suggestion IA</span>
+                                </div>
+                                <div class="flex gap-2">
+                                    <x-filament::button
+                                        wire:click="useSuggestion"
+                                        size="sm"
+                                        color="success"
+                                    >
+                                        Utiliser
+                                    </x-filament::button>
+                                    <x-filament::button
+                                        wire:click="$set('suggestedResponse', null)"
+                                        size="sm"
+                                        color="gray"
+                                    >
+                                        Ignorer
+                                    </x-filament::button>
+                                </div>
+                            </div>
+                            <div class="prose prose-sm dark:prose-invert max-w-none text-blue-800 dark:text-blue-200">
+                                {!! \Illuminate\Support\Str::markdown($this->suggestedResponse) !!}
+                            </div>
+                            @if(!empty($this->ragSources))
+                                <div class="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                                    <p class="text-xs text-blue-600 dark:text-blue-400 mb-2">Sources utilisées :</p>
+                                    <div class="space-y-1">
+                                        @foreach($this->ragSources as $source)
+                                            <div class="text-xs text-blue-600 dark:text-blue-400">
+                                                • {{ $source['title'] }} ({{ number_format($source['score'] * 100, 0) }}%)
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @endif
+
+                    {{-- Zone de saisie (si session non résolue) --}}
+                    @if($session->support_status !== 'resolved' && ($session->support_status === 'escalated' || $isAssignedAgent))
+                        <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                            <div class="flex gap-2">
+                                <textarea
+                                    wire:model="supportMessage"
+                                    rows="2"
+                                    class="flex-1 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm resize-none"
+                                    placeholder="Tapez votre réponse..."
+                                    wire:keydown.ctrl.enter="sendSupportMessage"
+                                ></textarea>
+                                <div class="flex flex-col gap-2">
+                                    <x-filament::button
+                                        wire:click="sendSupportMessage"
+                                        icon="heroicon-o-paper-airplane"
+                                        color="primary"
+                                    >
+                                        Envoyer
+                                    </x-filament::button>
+                                    <x-filament::button
+                                        wire:click="improveWithAi"
+                                        icon="heroicon-o-sparkles"
+                                        color="info"
+                                        title="Améliorer avec l'IA"
+                                    >
+                                        Améliorer
+                                    </x-filament::button>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-between mt-2">
+                                <p class="text-xs text-gray-500">
+                                    Ctrl+Entrée pour envoyer
+                                </p>
+                                <x-filament::button
+                                    wire:click="suggestAiResponse"
+                                    size="sm"
+                                    color="gray"
+                                    icon="heroicon-o-light-bulb"
+                                >
+                                    Suggérer une réponse
+                                </x-filament::button>
+                            </div>
+                        </div>
+                    @elseif($session->support_status === 'resolved')
+                        <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
+                            <div class="flex items-center justify-center gap-2 text-success-600 dark:text-success-400">
+                                <x-heroicon-o-check-circle class="w-5 h-5" />
+                                <span>Cette conversation est résolue</span>
+                            </div>
+                            @if($session->resolution_notes)
+                                <p class="mt-2 text-sm text-gray-500 text-center">{{ $session->resolution_notes }}</p>
+                            @endif
+                        </div>
+                    @endif
+                </x-filament::section>
+            @endif
         </div>
     </div>
 </x-filament-panels::page>

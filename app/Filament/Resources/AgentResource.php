@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources;
 
+use App\Enums\IndexingMethod;
 use App\Filament\Resources\AgentResource\Pages;
 use App\Models\Agent;
 use App\Services\AgentResetService;
@@ -216,6 +217,16 @@ class AgentResource extends Resource
                                             ])
                                             ->default('VECTOR_ONLY'),
 
+                                        Forms\Components\Select::make('indexing_method')
+                                            ->label('Méthode d\'indexation')
+                                            ->options(collect(IndexingMethod::cases())->mapWithKeys(fn ($m) => [
+                                                $m->value => $m->label(),
+                                            ]))
+                                            ->default('qr_atomique')
+                                            ->helperText(fn ($state) => IndexingMethod::tryFrom($state ?? 'qr_atomique')?->description() ?? '')
+                                            ->disabled()
+                                            ->dehydrated(),
+
                                         Forms\Components\TextInput::make('qdrant_collection')
                                             ->label('Collection Qdrant')
                                             ->placeholder('agent_documents'),
@@ -412,6 +423,251 @@ class AgentResource extends Resource
                                     ])
                                     ->columns(2)
                                     ->visible(fn (callable $get) => $get('is_whitelabel_enabled')),
+                            ]),
+
+                        Forms\Components\Tabs\Tab::make('Handoff Humain')
+                            ->icon('heroicon-o-user-group')
+                            ->schema([
+                                Forms\Components\Section::make('Activation du support humain')
+                                    ->description('Permet de transférer les conversations à un agent humain quand l\'IA ne peut pas répondre')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('human_support_enabled')
+                                            ->label('Activer le handoff humain')
+                                            ->helperText('Active le transfert vers un agent humain quand le score de confiance est trop bas')
+                                            ->live()
+                                            ->columnSpanFull(),
+                                    ]),
+
+                                Forms\Components\Section::make('Configuration de l\'escalade')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('escalation_threshold')
+                                            ->label('Seuil d\'escalade')
+                                            ->numeric()
+                                            ->step(0.05)
+                                            ->minValue(0)
+                                            ->maxValue(1)
+                                            ->default(0.60)
+                                            ->suffix('/ 1.0')
+                                            ->helperText('Score RAG en dessous duquel l\'escalade est déclenchée (0.60 = 60%)'),
+
+                                        Forms\Components\Textarea::make('escalation_message')
+                                            ->label('Message d\'escalade')
+                                            ->rows(3)
+                                            ->placeholder('Je n\'ai pas trouvé d\'information fiable pour répondre à votre question avec certitude. Un conseiller va prendre en charge votre demande.')
+                                            ->helperText('Message affiché à l\'utilisateur lors du transfert'),
+
+                                        Forms\Components\Textarea::make('no_admin_message')
+                                            ->label('Message si aucun agent disponible')
+                                            ->rows(3)
+                                            ->placeholder('Notre équipe n\'est pas disponible actuellement. Nous avons enregistré votre demande et vous répondrons par email dès que possible.')
+                                            ->helperText('Message affiché quand aucun agent de support n\'est connecté'),
+                                    ])
+                                    ->columns(1)
+                                    ->visible(fn (callable $get) => $get('human_support_enabled')),
+
+                                Forms\Components\Section::make('Horaires de support')
+                                    ->description('Définir les plages horaires où le support live est disponible')
+                                    ->schema([
+                                        Forms\Components\Repeater::make('support_hours')
+                                            ->label('')
+                                            ->schema([
+                                                Forms\Components\Select::make('day')
+                                                    ->label('Jour')
+                                                    ->options([
+                                                        'monday' => 'Lundi',
+                                                        'tuesday' => 'Mardi',
+                                                        'wednesday' => 'Mercredi',
+                                                        'thursday' => 'Jeudi',
+                                                        'friday' => 'Vendredi',
+                                                        'saturday' => 'Samedi',
+                                                        'sunday' => 'Dimanche',
+                                                    ])
+                                                    ->required(),
+                                                Forms\Components\TimePicker::make('start')
+                                                    ->label('Début')
+                                                    ->seconds(false)
+                                                    ->required(),
+                                                Forms\Components\TimePicker::make('end')
+                                                    ->label('Fin')
+                                                    ->seconds(false)
+                                                    ->required(),
+                                            ])
+                                            ->columns(3)
+                                            ->defaultItems(0)
+                                            ->addActionLabel('Ajouter une plage horaire')
+                                            ->collapsible()
+                                            ->itemLabel(fn (array $state): ?string =>
+                                                isset($state['day']) ?
+                                                    match($state['day']) {
+                                                        'monday' => 'Lundi',
+                                                        'tuesday' => 'Mardi',
+                                                        'wednesday' => 'Mercredi',
+                                                        'thursday' => 'Jeudi',
+                                                        'friday' => 'Vendredi',
+                                                        'saturday' => 'Samedi',
+                                                        'sunday' => 'Dimanche',
+                                                        default => $state['day']
+                                                    } . ' : ' . ($state['start'] ?? '?') . ' - ' . ($state['end'] ?? '?')
+                                                : null
+                                            ),
+
+                                        Forms\Components\Placeholder::make('support_hours_help')
+                                            ->label('')
+                                            ->content('💡 Si aucune plage n\'est définie, le support est disponible 24h/24. En dehors des horaires, les demandes sont traitées par email.'),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Agents de support assignés')
+                                    ->description('Utilisateurs avec le rôle "Agent de support" qui peuvent répondre aux conversations de cet agent IA')
+                                    ->schema([
+                                        Forms\Components\CheckboxList::make('supportUsers')
+                                            ->label('Agents de support')
+                                            ->relationship(
+                                                'supportUsers',
+                                                'name',
+                                                fn ($query) => $query->whereHas('roles', fn ($q) => $q->whereIn('slug', ['support-agent', 'admin', 'super-admin']))
+                                            )
+                                            ->columns(2)
+                                            ->searchable()
+                                            ->bulkToggleable()
+                                            ->helperText('Sélectionnez les utilisateurs qui peuvent gérer le support pour cet agent IA. Les admins et super-admins ont accès par défaut.')
+                                            ->visible(fn ($record) => $record?->id !== null),
+
+                                        Forms\Components\Placeholder::make('support_agents_notice')
+                                            ->label('')
+                                            ->content('💡 Sauvegardez d\'abord l\'agent pour pouvoir assigner des agents de support.')
+                                            ->visible(fn ($record) => $record?->id === null),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled')),
+
+                                Forms\Components\Section::make('Configuration email')
+                                    ->description('Paramètres pour la communication email asynchrone (réception et envoi)')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('support_email')
+                                            ->label('Email de support')
+                                            ->email()
+                                            ->placeholder('support@example.com')
+                                            ->helperText('Adresse email utilisée pour envoyer et recevoir les messages de support')
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Fieldset::make('Serveur IMAP (réception)')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_host')
+                                                    ->label('Serveur IMAP')
+                                                    ->placeholder('imap.example.com')
+                                                    ->helperText('Ex: imap.gmail.com, imap.ovh.net'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_port')
+                                                    ->label('Port')
+                                                    ->numeric()
+                                                    ->default(993)
+                                                    ->placeholder('993'),
+
+                                                Forms\Components\Select::make('ai_assistance_config.imap_encryption')
+                                                    ->label('Chiffrement')
+                                                    ->options([
+                                                        'ssl' => 'SSL (port 993)',
+                                                        'tls' => 'TLS (port 143)',
+                                                        'none' => 'Aucun',
+                                                    ])
+                                                    ->default('ssl'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_username')
+                                                    ->label('Identifiant')
+                                                    ->placeholder('support@example.com')
+                                                    ->helperText('Généralement l\'adresse email complète'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_password')
+                                                    ->label('Mot de passe')
+                                                    ->password()
+                                                    ->revealable()
+                                                    ->helperText('Pour Gmail, utilisez un mot de passe d\'application'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.imap_folder')
+                                                    ->label('Dossier')
+                                                    ->default('INBOX')
+                                                    ->placeholder('INBOX'),
+                                            ])
+                                            ->columns(3),
+
+                                        Forms\Components\Fieldset::make('Serveur SMTP (envoi)')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_host')
+                                                    ->label('Serveur SMTP')
+                                                    ->placeholder('smtp.example.com')
+                                                    ->helperText('Ex: smtp.gmail.com, ssl0.ovh.net'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_port')
+                                                    ->label('Port')
+                                                    ->numeric()
+                                                    ->default(587)
+                                                    ->placeholder('587'),
+
+                                                Forms\Components\Select::make('ai_assistance_config.smtp_encryption')
+                                                    ->label('Chiffrement')
+                                                    ->options([
+                                                        'tls' => 'TLS (port 587)',
+                                                        'ssl' => 'SSL (port 465)',
+                                                        'none' => 'Aucun (port 25)',
+                                                    ])
+                                                    ->default('tls'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_username')
+                                                    ->label('Identifiant')
+                                                    ->placeholder('support@example.com')
+                                                    ->helperText('Généralement identique à l\'IMAP'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_password')
+                                                    ->label('Mot de passe')
+                                                    ->password()
+                                                    ->revealable()
+                                                    ->helperText('Généralement identique à l\'IMAP'),
+
+                                                Forms\Components\TextInput::make('ai_assistance_config.smtp_from_name')
+                                                    ->label('Nom expéditeur')
+                                                    ->placeholder('Support Technique')
+                                                    ->helperText('Nom affiché dans les emails envoyés'),
+                                            ])
+                                            ->columns(3),
+
+                                        Forms\Components\Placeholder::make('email_help')
+                                            ->label('')
+                                            ->content('💡 Les emails entrants sont récupérés automatiquement. Pour Gmail, créez un mot de passe d\'application dans les paramètres de sécurité Google.')
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Assistance IA pour les agents')
+                                    ->description('Configuration de l\'aide IA pour les agents de support humain')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('ai_assistance_config.suggestions_enabled')
+                                            ->label('Afficher les sources RAG')
+                                            ->helperText('Affiche les sources trouvées pour aider l\'agent à répondre')
+                                            ->default(true),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.auto_generate_enabled')
+                                            ->label('Bouton "Générer suggestion"')
+                                            ->helperText('Permet à l\'agent de demander une suggestion de réponse à l\'IA')
+                                            ->default(false),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.improve_enabled')
+                                            ->label('Bouton "Améliorer"')
+                                            ->helperText('Permet d\'améliorer la réponse (orthographe, clarté) avant envoi')
+                                            ->default(true),
+
+                                        Forms\Components\Toggle::make('ai_assistance_config.add_politeness')
+                                            ->label('Formules de politesse en chat')
+                                            ->helperText('Ajoute automatiquement Bonjour/Cordialement (toujours actif pour les emails)')
+                                            ->default(false),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
                             ]),
                     ])
                     ->columnSpanFull(),

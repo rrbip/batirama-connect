@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Models\Agent;
-use App\Services\AI\EmbeddingService;
+use App\Services\AI\LearningService;
 use App\Services\AI\QdrantService;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -255,43 +255,21 @@ class FaqsPage extends Page implements HasForms
         }
 
         try {
-            $embeddingService = app(EmbeddingService::class);
-            $qdrantService = app(QdrantService::class);
+            $learningService = app(LearningService::class);
 
-            // S'assurer que la collection existe
-            if (!$qdrantService->collectionExists(self::LEARNED_RESPONSES_COLLECTION)) {
-                $qdrantService->createCollection(self::LEARNED_RESPONSES_COLLECTION, [
-                    'vector_size' => config('ai.qdrant.vector_size', 768),
-                    'distance' => 'Cosine',
-                ]);
-            }
-
-            // Générer l'embedding de la question
-            $vector = $embeddingService->embed($data['question']);
-
-            $pointId = Str::uuid()->toString();
-
-            $result = $qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
-                [
-                    'id' => $pointId,
-                    'vector' => $vector,
-                    'payload' => [
-                        'agent_id' => $agent->id,
-                        'agent_slug' => $agent->slug,
-                        'message_id' => null, // null = ajout manuel
-                        'question' => $data['question'],
-                        'answer' => $data['answer'],
-                        'validated_by' => auth()->id(),
-                        'validated_at' => now()->toIso8601String(),
-                        'source' => 'manual',
-                    ],
-                ]
-            ]);
+            // Utiliser LearningService pour la double indexation
+            // (learned_responses + collection agent avec type=qa_pair)
+            $result = $learningService->addManualFaq(
+                agent: $agent,
+                question: $data['question'],
+                answer: $data['answer'],
+                userId: auth()->id()
+            );
 
             if ($result) {
                 Notification::make()
                     ->title('FAQ ajoutée')
-                    ->body('La question/réponse a été indexée et sera utilisée par l\'IA.')
+                    ->body('La question/réponse a été indexée dans la base d\'apprentissage ET dans l\'index de l\'agent.')
                     ->success()
                     ->send();
 
@@ -299,7 +277,7 @@ class FaqsPage extends Page implements HasForms
                 $this->showAddForm = false;
                 $this->loadFaqs();
             } else {
-                throw new \RuntimeException('Échec de l\'indexation dans Qdrant');
+                throw new \RuntimeException('Échec de l\'indexation');
             }
 
         } catch (\Exception $e) {

@@ -114,6 +114,24 @@ class AiSessionResource extends Resource
                     })
                     ->html(),
 
+                Tables\Columns\TextColumn::make('support_status')
+                    ->label('Support')
+                    ->badge()
+                    ->getStateUsing(fn ($record) => match ($record->support_status) {
+                        'escalated' => '🔴 En attente',
+                        'assigned' => '🟡 En cours',
+                        'resolved' => '🟢 Résolu',
+                        'abandoned' => '⚫ Abandonné',
+                        default => null,
+                    })
+                    ->color(fn ($state) => match (true) {
+                        str_contains($state ?? '', 'attente') => 'danger',
+                        str_contains($state ?? '', 'cours') => 'warning',
+                        str_contains($state ?? '', 'Résolu') => 'success',
+                        default => 'gray',
+                    })
+                    ->sortable(),
+
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Statut')
                     ->colors([
@@ -187,6 +205,26 @@ class AiSessionResource extends Resource
                             ->when($data['from'], fn ($q, $date) => $q->whereDate('created_at', '>=', $date))
                             ->when($data['until'], fn ($q, $date) => $q->whereDate('created_at', '<=', $date));
                     }),
+
+                // Filtres support humain
+                Tables\Filters\Filter::make('needs_support')
+                    ->label('🔴 En attente de support')
+                    ->query(fn (Builder $query) => $query->where('support_status', 'escalated'))
+                    ->toggle(),
+
+                Tables\Filters\Filter::make('in_support')
+                    ->label('🟡 Support en cours')
+                    ->query(fn (Builder $query) => $query->where('support_status', 'assigned'))
+                    ->toggle(),
+
+                Tables\Filters\SelectFilter::make('support_status')
+                    ->label('Statut support')
+                    ->options([
+                        'escalated' => '🔴 En attente',
+                        'assigned' => '🟡 En cours',
+                        'resolved' => '🟢 Résolu',
+                        'abandoned' => '⚫ Abandonné',
+                    ]),
             ])
             ->actions([
                 Tables\Actions\Action::make('view')

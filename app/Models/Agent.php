@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\IndexingMethod;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -56,6 +57,7 @@ class Agent extends Model
         'system_prompt',
         'qdrant_collection',
         'retrieval_mode',
+        'indexing_method',
         'hydration_config',
         'ollama_host',
         'ollama_port',
@@ -91,10 +93,19 @@ class Agent extends Model
         'deployment_mode',
         'is_whitelabel_enabled',
         'whitelabel_config',
+        // Human support columns
+        'human_support_enabled',
+        'escalation_threshold',
+        'escalation_message',
+        'no_admin_message',
+        'support_email',
+        'support_hours',
+        'ai_assistance_config',
     ];
 
     protected $casts = [
         'hydration_config' => 'array',
+        'indexing_method' => IndexingMethod::class,
         'temperature' => 'float',
         'min_rag_score' => 'float',
         'learned_min_score' => 'float',
@@ -108,6 +119,11 @@ class Agent extends Model
         'whitelabel_config' => 'array',
         'vision_ollama_port' => 'integer',
         'chunking_ollama_port' => 'integer',
+        // Human support casts
+        'human_support_enabled' => 'boolean',
+        'escalation_threshold' => 'float',
+        'support_hours' => 'array',
+        'ai_assistance_config' => 'array',
     ];
 
     public function tenant(): BelongsTo
@@ -334,6 +350,108 @@ GUARDRAILS;
     public function getDefaultChunkStrategy(): string
     {
         return $this->default_chunk_strategy ?? 'sentence';
+    }
+
+    /**
+     * Retourne la méthode d'indexation (Q/R Atomique par défaut)
+     */
+    public function getIndexingMethod(): IndexingMethod
+    {
+        return $this->indexing_method ?? IndexingMethod::QR_ATOMIQUE;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS SUPPORT HUMAIN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Utilisateurs assignés au support de cet agent.
+     */
+    public function supportUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'agent_support_users')
+            ->withPivot(['can_close_conversations', 'can_train_ai', 'can_view_analytics', 'notify_on_escalation'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Vérifie si un utilisateur peut gérer le support de cet agent.
+     */
+    public function userCanHandleSupport(User $user): bool
+    {
+        // Super-admin et admin ont accès à tout
+        if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+            return true;
+        }
+
+        // Vérifier si l'utilisateur est assigné à cet agent
+        if ($user->hasRole('support-agent')) {
+            return $this->supportUsers()->where('user_id', $user->id)->exists();
+        }
+
+        return false;
+    }
+
+    /**
+     * Récupère la configuration IMAP pour cet agent.
+     */
+    public function getImapConfig(): ?array
+    {
+        $config = $this->ai_assistance_config ?? [];
+
+        // Les données IMAP sont stockées dans ai_assistance_config
+        if (empty($config['imap_host']) || empty($config['imap_username']) || empty($config['imap_password'])) {
+            return null;
+        }
+
+        return [
+            'host' => $config['imap_host'],
+            'port' => $config['imap_port'] ?? 993,
+            'encryption' => $config['imap_encryption'] ?? 'ssl',
+            'validate_cert' => $config['imap_validate_cert'] ?? true,
+            'username' => $config['imap_username'],
+            'password' => $config['imap_password'],
+            'folder' => $config['imap_folder'] ?? 'INBOX',
+        ];
+    }
+
+    /**
+     * Vérifie si l'agent a une configuration IMAP valide.
+     */
+    public function hasImapConfig(): bool
+    {
+        return $this->getImapConfig() !== null;
+    }
+
+    /**
+     * Récupère la configuration SMTP de l'agent.
+     */
+    public function getSmtpConfig(): ?array
+    {
+        $config = $this->ai_assistance_config ?? [];
+
+        // Les données SMTP sont stockées dans ai_assistance_config
+        if (empty($config['smtp_host']) || empty($config['smtp_username']) || empty($config['smtp_password'])) {
+            return null;
+        }
+
+        return [
+            'host' => $config['smtp_host'],
+            'port' => (int) ($config['smtp_port'] ?? 587),
+            'encryption' => $config['smtp_encryption'] ?? 'tls',
+            'username' => $config['smtp_username'],
+            'password' => $config['smtp_password'],
+            'from_address' => $this->support_email,
+            'from_name' => $config['smtp_from_name'] ?? $this->name,
+        ];
+    }
+
+    /**
+     * Vérifie si l'agent a une configuration SMTP valide.
+     */
+    public function hasSmtpConfig(): bool
+    {
+        return $this->getSmtpConfig() !== null;
     }
 
     // ─────────────────────────────────────────────────────────────────

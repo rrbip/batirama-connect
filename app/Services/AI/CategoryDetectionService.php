@@ -24,6 +24,10 @@ class CategoryDetectionService
     // Score bonus pour les correspondances par mot-clé
     private const KEYWORD_MATCH_BONUS = 0.3;
 
+    // Désactiver le fallback embedding (trop peu fiable sans enrichissement des catégories)
+    // Quand activé (false), si keyword matching échoue, la recherche RAG se fait sans filtre catégorie
+    private const ENABLE_EMBEDDING_FALLBACK = false;
+
     public function __construct(EmbeddingService $embeddingService)
     {
         $this->embeddingService = $embeddingService;
@@ -32,7 +36,7 @@ class CategoryDetectionService
     /**
      * Détecte la/les catégorie(s) pertinente(s) pour une question
      *
-     * @return array{categories: Collection, confidence: float, method: string}
+     * @return array{categories: Collection, confidence: float, method: string, match_details: array}
      */
     public function detect(string $question, ?Agent $agent = null): array
     {
@@ -44,60 +48,79 @@ class CategoryDetectionService
                 'categories' => collect(),
                 'confidence' => 0,
                 'method' => 'none',
+                'match_details' => [],
             ];
         }
 
         // 1. Essayer d'abord par correspondance de mots-clés (rapide)
-        $keywordMatches = $this->detectByKeywords($question, $categories);
+        $keywordResult = $this->detectByKeywords($question, $categories);
 
-        if ($keywordMatches->isNotEmpty()) {
+        if ($keywordResult['matches']->isNotEmpty()) {
             Log::debug('Category detected by keywords', [
                 'question' => Str::limit($question, 50),
-                'categories' => $keywordMatches->pluck('name')->toArray(),
+                'categories' => $keywordResult['matches']->pluck('name')->toArray(),
+                'details' => $keywordResult['details'],
             ]);
 
             return [
-                'categories' => $keywordMatches,
+                'categories' => $keywordResult['matches'],
                 'confidence' => 0.9,
                 'method' => 'keyword',
+                'match_details' => $keywordResult['details'],
             ];
         }
 
-        // 2. Sinon, utiliser la similarité par embedding
-        $embeddingMatches = $this->detectByEmbedding($question, $categories);
+        // 2. Fallback embedding (désactivé par défaut car peu fiable)
+        if (self::ENABLE_EMBEDDING_FALLBACK) {
+            $embeddingMatches = $this->detectByEmbedding($question, $categories);
 
-        if ($embeddingMatches->isNotEmpty()) {
-            Log::debug('Category detected by embedding', [
-                'question' => Str::limit($question, 50),
-                'categories' => $embeddingMatches->map(fn($m) => [
-                    'name' => $m['category']->name,
-                    'score' => round($m['score'], 3),
-                ])->toArray(),
+            if ($embeddingMatches->isNotEmpty()) {
+                Log::debug('Category detected by embedding', [
+                    'question' => Str::limit($question, 50),
+                    'categories' => $embeddingMatches->map(fn($m) => [
+                        'name' => $m['category']->name,
+                        'score' => round($m['score'], 3),
+                    ])->toArray(),
+                ]);
+
+                return [
+                    'categories' => $embeddingMatches->pluck('category'),
+                    'confidence' => $embeddingMatches->first()['score'] ?? 0,
+                    'method' => 'embedding',
+                    'match_details' => $embeddingMatches->map(fn($m) => [
+                        'category' => $m['category']->name,
+                        'type' => 'embedding',
+                        'score' => round($m['score'], 3),
+                    ])->toArray(),
+                ];
+            }
+        } else {
+            // Log pour monitoring : aucune catégorie trouvée par mots-clés
+            Log::info('Category detection: no keyword match, searching without category filter', [
+                'question' => Str::limit($question, 80),
+                'available_categories' => $categories->pluck('name')->take(10)->toArray(),
             ]);
-
-            return [
-                'categories' => $embeddingMatches->pluck('category'),
-                'confidence' => $embeddingMatches->first()['score'] ?? 0,
-                'method' => 'embedding',
-            ];
         }
 
         return [
             'categories' => collect(),
             'confidence' => 0,
             'method' => 'none',
+            'match_details' => [],
         ];
     }
 
     /**
      * Détecte les catégories par correspondance de mots-clés
+     * @return array{matches: Collection, details: array}
      */
-    private function detectByKeywords(string $question, Collection $categories): Collection
+    private function detectByKeywords(string $question, Collection $categories): array
     {
         $questionLower = Str::lower($question);
         $questionWords = preg_split('/\s+/', $questionLower);
 
         $matches = collect();
+        $details = [];
 
         foreach ($categories as $category) {
             $categoryName = Str::lower($category->name);
@@ -106,20 +129,91 @@ class CategoryDetectionService
             // Vérifier si le nom de la catégorie apparaît dans la question
             if (Str::contains($questionLower, $categoryName)) {
                 $matches->push($category);
+                $details[] = [
+                    'category' => $category->name,
+                    'type' => 'exact',
+                    'matched' => $categoryName,
+                    'in_question' => $categoryName,
+                ];
+                continue;
+            }
+
+            // Vérifier si un mot de la question CONTIENT le nom de la catégorie (stemming basique)
+            // Ex: "diagnostiquer" contient "diagnostic"
+            foreach ($questionWords as $word) {
+                if (strlen($categoryName) >= 4 && strlen($word) >= 4) {
+                    // Le mot de la question contient la catégorie
+                    if (Str::contains($word, $categoryName)) {
+                        $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'stemming',
+                            'matched' => $categoryName,
+                            'in_question' => $word,
+                            'rule' => 'word_contains_category',
+                        ];
+                        break;
+                    }
+                    // Ou la catégorie contient le mot (racine commune)
+                    if (strlen($word) >= 5 && Str::contains($categoryName, substr($word, 0, -2))) {
+                        $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'stemming',
+                            'matched' => substr($word, 0, -2),
+                            'in_question' => $word,
+                            'rule' => 'category_contains_root',
+                        ];
+                        break;
+                    }
+                }
+            }
+
+            if ($matches->contains('id', $category->id)) {
                 continue;
             }
 
             // Vérifier les mots individuels de la catégorie
             $categoryWords = preg_split('/[\s\-_]+/', $categoryName);
-            foreach ($categoryWords as $word) {
-                if (strlen($word) >= 4 && in_array($word, $questionWords)) {
-                    $matches->push($category);
-                    break;
+            foreach ($categoryWords as $catWord) {
+                if (strlen($catWord) < 4) {
+                    continue;
+                }
+
+                foreach ($questionWords as $qWord) {
+                    // Match exact
+                    if ($catWord === $qWord) {
+                        $matches->push($category);
+                        $details[] = [
+                            'category' => $category->name,
+                            'type' => 'exact_word',
+                            'matched' => $catWord,
+                            'in_question' => $qWord,
+                        ];
+                        break 2;
+                    }
+                    // Match par racine (le mot de la question commence par le mot catégorie ou inverse)
+                    if (strlen($qWord) >= 4) {
+                        $root = substr($catWord, 0, min(strlen($catWord), 6));
+                        if (Str::startsWith($qWord, $root) || Str::startsWith($catWord, substr($qWord, 0, 6))) {
+                            $matches->push($category);
+                            $details[] = [
+                                'category' => $category->name,
+                                'type' => 'root_match',
+                                'matched' => $root,
+                                'in_question' => $qWord,
+                            ];
+                            break 2;
+                        }
+                    }
                 }
             }
         }
 
-        return $matches->unique('id');
+        return [
+            'matches' => $matches->unique('id'),
+            'details' => $details,
+        ];
     }
 
     /**
@@ -228,7 +322,8 @@ class CategoryDetectionService
     }
 
     /**
-     * Construit un filtre Qdrant pour les catégories détectées
+     * Construit un filtre Qdrant pour les catégories détectées.
+     * Utilise le champ 'category' du format Q/R Atomique.
      */
     public function buildQdrantFilter(Collection $categories): array
     {
@@ -240,7 +335,7 @@ class CategoryDetectionService
 
         return [
             'should' => array_map(fn($name) => [
-                'key' => 'chunk_category',
+                'key' => 'category',
                 'match' => ['value' => $name],
             ], $categoryNames),
         ];

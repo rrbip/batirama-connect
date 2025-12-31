@@ -80,10 +80,10 @@
                     </x-slot>
 
                     <x-slot name="description">
-                        Cette action va supprimer tous les points de la collection Qdrant de l'agent et les recréer à partir des chunks en base de données.
+                        Cette action va supprimer tous les points de la collection Qdrant et les recréer à partir des chunks en base de données.
                     </x-slot>
 
-                    <form wire:submit="rebuildQdrantIndex(Object.fromEntries(new FormData($event.target)))">
+                    <form wire:submit="rebuildQdrantIndex(Object.fromEntries(new FormData($event.target)))" x-on:submit="setTimeout(() => $dispatch('close-modal', { id: 'rebuild-index-modal' }), 100)">
                         <div class="space-y-4">
                             <div>
                                 <label class="fi-fo-field-wrp-label inline-flex items-center gap-x-3" for="rebuild_agent_id">
@@ -96,10 +96,12 @@
                                     class="fi-select-input block w-full rounded-lg border border-gray-300 dark:border-gray-600 py-2 px-3 text-base text-gray-900 dark:text-white bg-white dark:bg-gray-700 transition duration-75 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
                                 >
                                     <option value="" class="text-gray-500">Sélectionner un agent...</option>
-                                    @foreach(\App\Models\Agent::whereNotNull('qdrant_collection')->get() as $agent)
+                                    <option value="all" class="text-gray-900 dark:text-white bg-white dark:bg-gray-700">🔄 Tous les agents</option>
+                                    @foreach(\App\Models\Agent::whereNotNull('qdrant_collection')->where('is_active', true)->get() as $agent)
                                         <option value="{{ $agent->id }}" class="text-gray-900 dark:text-white bg-white dark:bg-gray-700">{{ $agent->name }}</option>
                                     @endforeach
                                 </select>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Sélectionnez un agent ou "Tous les agents" pour reconstruire tous les index.</p>
                             </div>
 
                             <div class="flex justify-end gap-3">

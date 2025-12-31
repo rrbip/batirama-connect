@@ -249,6 +249,37 @@ services:
     networks:
       - ai_network
 
+  # ===========================================
+  # SOKETI - WEBSOCKET SERVER (Support temps réel)
+  # ===========================================
+  # Serveur WebSocket self-hosted, compatible Pusher
+  # Utilisé pour les notifications temps réel du support humain
+  soketi:
+    image: quay.io/soketi/soketi:1.4-16-debian
+    container_name: aim_soketi
+    restart: unless-stopped
+    ports:
+      - "${SOKETI_PORT:-6001}:6001"
+      - "${SOKETI_METRICS_PORT:-9601}:9601"
+    environment:
+      SOKETI_DEBUG: "${SOKETI_DEBUG:-0}"
+      SOKETI_DEFAULT_APP_ID: "${PUSHER_APP_ID:-app-id}"
+      SOKETI_DEFAULT_APP_KEY: "${PUSHER_APP_KEY:-app-key}"
+      SOKETI_DEFAULT_APP_SECRET: "${PUSHER_APP_SECRET:-app-secret}"
+      SOKETI_DEFAULT_APP_ENABLE_CLIENT_MESSAGES: "true"
+      SOKETI_DEFAULT_APP_ENABLED: "true"
+    networks:
+      - ai_network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:6001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 # ===========================================
 # VOLUMES PERSISTANTS
 # ===========================================

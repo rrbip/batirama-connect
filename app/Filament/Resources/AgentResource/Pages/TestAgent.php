@@ -11,6 +11,7 @@ use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Services\AI\DispatcherService;
 use App\Services\AI\OllamaService;
+use App\Services\Support\EscalationService;
 use Filament\Actions;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
@@ -480,8 +481,97 @@ class TestAgent extends Page implements HasForms
         ];
     }
 
+    #[Computed]
+    public function handoffInfo(): array
+    {
+        $record = $this->getRecord();
+        $session = $this->getTestSession();
+
+        return [
+            'enabled' => $record->human_support_enabled ?? false,
+            'threshold' => $record->escalation_threshold ?? 0.3,
+            'support_email' => $record->support_email,
+            'support_agents_count' => $record->supportUsers()->count(),
+            'has_imap' => $record->hasImapConfig(),
+            'has_smtp' => $record->hasSmtpConfig(),
+            'session_escalated' => $session?->isEscalated() ?? false,
+            'session_status' => $session?->support_status,
+            'escalation_reason' => $session?->escalation_reason,
+            'escalated_at' => $session?->escalated_at?->format('d/m H:i'),
+        ];
+    }
+
     public function getTestSession(): ?AiSession
     {
         return $this->testSessionId ? AiSession::find($this->testSessionId) : null;
+    }
+
+    /**
+     * Simule une escalade de la session de test vers le support humain.
+     */
+    public function simulateEscalation(string $reason = 'manual_test'): void
+    {
+        if (!$this->testSessionId) {
+            Notification::make()
+                ->title('Pas de session')
+                ->body('Envoyez d\'abord un message pour créer une session.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        $session = AiSession::find($this->testSessionId);
+
+        if (!$session) {
+            Notification::make()
+                ->title('Session non trouvée')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        if ($session->isEscalated()) {
+            Notification::make()
+                ->title('Déjà escaladée')
+                ->body('Cette session est déjà en escalade.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        try {
+            app(EscalationService::class)->escalate(
+                $session,
+                $reason,
+                0.0, // Score RAG simulé
+                'test@example.com'
+            );
+
+            Notification::make()
+                ->title('Escalade simulée')
+                ->body('La session a été escaladée vers le support humain.')
+                ->success()
+                ->send();
+
+            // Recharger pour mettre à jour l'UI
+            $this->dispatch('$refresh');
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Voir la session dans l'interface de support.
+     */
+    public function viewInSupport(): void
+    {
+        if ($this->testSessionId) {
+            $this->redirect(route('filament.admin.resources.ai-sessions.view', ['record' => $this->testSessionId]));
+        }
     }
 }

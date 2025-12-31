@@ -32,6 +32,7 @@
         'imagemagick' => 'ImageMagick',
         'vision_llm' => 'Vision LLM',
         'html_converter' => 'Convertisseur HTML',
+        'readability' => 'Readability (extraction contenu)',
         'qr_atomique' => 'Q/R Atomique',
     ];
 
@@ -40,7 +41,7 @@
         'pdf_to_images' => ['pdftoppm', 'imagemagick'],
         'images_to_markdown' => ['vision_llm'],
         'image_to_markdown' => ['vision_llm'],
-        'html_to_markdown' => ['html_converter'],
+        'html_to_markdown' => ['html_converter', 'readability'],
         'markdown_to_qr' => ['qr_atomique'],
     ];
 @endphp
@@ -242,37 +243,26 @@
                         @endif
 
                         {{-- Sélection d'outil --}}
-                        @if(!empty($tools))
+                        @if(count($tools) > 1)
                             <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
-                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
+                                <label class="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
                                     <x-heroicon-o-wrench-screwdriver class="w-4 h-4 inline-block mr-1" />
                                     Outil pour cette étape :
-                                </span>
-                                <div class="flex flex-wrap gap-4">
+                                </label>
+                                <select
+                                    id="tool_select_{{ $index }}"
+                                    class="w-full max-w-xs rounded-lg border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white text-sm focus:ring-primary-500 focus:border-primary-500"
+                                    wire:change="updateStepTool({{ $index }}, $event.target.value)"
+                                >
                                     @foreach($tools as $availableTool)
-                                        <label class="inline-flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition {{ $tool === $availableTool ? 'bg-primary-50 dark:bg-primary-900/20 ring-1 ring-primary-300 dark:ring-primary-700' : '' }}">
-                                            <input
-                                                type="radio"
-                                                name="tool_step_{{ $index }}"
-                                                value="{{ $availableTool }}"
-                                                {{ $tool === $availableTool ? 'checked' : '' }}
-                                                class="text-primary-600 focus:ring-primary-500"
-                                                data-step-index="{{ $index }}"
-                                            >
-                                            <span class="text-sm {{ $tool === $availableTool ? 'font-medium text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300' }}">
-                                                {{ $toolLabels[$availableTool] ?? $availableTool }}
-                                            </span>
-                                            @if($tool === $availableTool)
-                                                <x-heroicon-s-check-circle class="w-4 h-4 text-primary-500" />
-                                            @endif
-                                        </label>
+                                        <option value="{{ $availableTool }}" {{ $tool === $availableTool ? 'selected' : '' }}>
+                                            {{ $toolLabels[$availableTool] ?? $availableTool }}
+                                        </option>
                                     @endforeach
-                                </div>
-                                @if(count($tools) === 1)
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2 italic">
-                                        Seul cet outil est disponible pour cette étape.
-                                    </p>
-                                @endif
+                                </select>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                                    Sélectionnez l'outil puis cliquez sur "Relancer" pour réexécuter cette étape.
+                                </p>
                             </div>
                         @endif
 

@@ -195,6 +195,123 @@
                     @endif
                 </div>
             </x-filament::section>
+
+            {{-- Handoff Humain --}}
+            @php $handoffInfo = $this->handoffInfo; @endphp
+            <x-filament::section class="mt-4">
+                <x-slot name="heading">
+                    <div class="flex items-center gap-2">
+                        <x-heroicon-o-user-group class="w-5 h-5" />
+                        Handoff Humain
+                    </div>
+                </x-slot>
+
+                <div class="space-y-2 text-sm">
+                    <div class="flex items-center gap-2">
+                        @if($handoffInfo['enabled'])
+                            <span class="w-2 h-2 bg-success-500 rounded-full"></span>
+                            <span class="text-success-600 dark:text-success-400">Active</span>
+                        @else
+                            <span class="w-2 h-2 bg-gray-400 rounded-full"></span>
+                            <span class="text-gray-500 dark:text-gray-400">Desactive</span>
+                        @endif
+                    </div>
+
+                    @if($handoffInfo['enabled'])
+                        <div class="space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                            <div class="flex justify-between">
+                                <span>Seuil RAG</span>
+                                <span class="font-medium">{{ number_format($handoffInfo['threshold'] * 100, 0) }}%</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>Agents support</span>
+                                <span class="font-medium">{{ $handoffInfo['support_agents_count'] }}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>Email</span>
+                                <span class="font-medium {{ $handoffInfo['has_imap'] && $handoffInfo['has_smtp'] ? 'text-success-600' : 'text-warning-600' }}">
+                                    @if($handoffInfo['has_imap'] && $handoffInfo['has_smtp'])
+                                        Configure
+                                    @elseif($handoffInfo['has_imap'] || $handoffInfo['has_smtp'])
+                                        Partiel
+                                    @else
+                                        Non configure
+                                    @endif
+                                </span>
+                            </div>
+                        </div>
+
+                        {{-- Statut session si escaladee --}}
+                        @if($handoffInfo['session_escalated'])
+                            <div class="mt-3 p-2 rounded-lg {{ match($handoffInfo['session_status']) {
+                                'escalated' => 'bg-danger-50 dark:bg-danger-950 border border-danger-200 dark:border-danger-800',
+                                'assigned' => 'bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800',
+                                'resolved' => 'bg-success-50 dark:bg-success-950 border border-success-200 dark:border-success-800',
+                                default => 'bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700',
+                            } }}">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-xs font-medium {{ match($handoffInfo['session_status']) {
+                                        'escalated' => 'text-danger-700 dark:text-danger-300',
+                                        'assigned' => 'text-warning-700 dark:text-warning-300',
+                                        'resolved' => 'text-success-700 dark:text-success-300',
+                                        default => 'text-gray-700 dark:text-gray-300',
+                                    } }}">
+                                        {{ match($handoffInfo['session_status']) {
+                                            'escalated' => 'En attente',
+                                            'assigned' => 'En cours',
+                                            'resolved' => 'Resolu',
+                                            'abandoned' => 'Abandonne',
+                                            default => $handoffInfo['session_status'],
+                                        } }}
+                                    </span>
+                                    @if($handoffInfo['escalated_at'])
+                                        <span class="text-xs text-gray-500">{{ $handoffInfo['escalated_at'] }}</span>
+                                    @endif
+                                </div>
+                                @if($handoffInfo['escalation_reason'])
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Raison: {{ match($handoffInfo['escalation_reason']) {
+                                            'low_confidence' => 'Score RAG bas',
+                                            'user_request' => 'Demande utilisateur',
+                                            'ai_uncertainty' => 'Incertitude IA',
+                                            'negative_feedback' => 'Feedback negatif',
+                                            'manual_test' => 'Test manuel',
+                                            default => $handoffInfo['escalation_reason'],
+                                        } }}
+                                    </p>
+                                @endif
+                            </div>
+                        @endif
+
+                        {{-- Boutons d'action --}}
+                        <div class="mt-3 flex flex-col gap-2">
+                            @if(!$handoffInfo['session_escalated'])
+                                <button
+                                    wire:click="simulateEscalation('manual_test')"
+                                    type="button"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+                                >
+                                    <x-heroicon-o-hand-raised class="w-4 h-4" />
+                                    Simuler une escalade
+                                </button>
+                            @else
+                                <button
+                                    wire:click="viewInSupport"
+                                    type="button"
+                                    class="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+                                >
+                                    <x-heroicon-o-eye class="w-4 h-4" />
+                                    Voir dans le support
+                                </button>
+                            @endif
+                        </div>
+                    @else
+                        <p class="text-xs text-gray-400 dark:text-gray-500">
+                            Activez le handoff humain dans les parametres de l'agent pour tester l'escalade.
+                        </p>
+                    @endif
+                </div>
+            </x-filament::section>
         </div>
 
         {{-- Zone de chat --}}
@@ -382,6 +499,12 @@
 - Methode de detection: {{ $catDetect['method'] ?? 'N/A' }}
 - Confiance: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%
 - Categories detectees: {{ !empty($catDetect['categories']) ? implode(', ', array_column($catDetect['categories'], 'name')) : 'Aucune' }}
+@if(!empty($catDetect['match_details']))
+- Detail du match:
+@foreach($catDetect['match_details'] as $detail)
+  - [{{ $detail['type'] ?? '?' }}] "{{ $detail['in_question'] ?? '' }}" → "{{ $detail['matched'] ?? '' }}" ({{ $detail['category'] ?? '' }}){{ !empty($detail['rule']) ? ' [' . $detail['rule'] . ']' : '' }}
+@endforeach
+@endif
 - Resultats filtres: {{ $catDetect['filtered_results_count'] ?? 0 }}
 - Resultats totaux: {{ $catDetect['total_results_count'] ?? 0 }}
 - Fallback utilise: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui (pas assez de resultats avec le filtre)' : 'Non' }}
@@ -390,10 +513,18 @@
 @endif
 
 ### Documents RAG ({{ count($documentSources) }} sources)
+@if(($stats['response_type'] ?? '') === 'direct_qr_match')
+Mode: REPONSE DIRECTE Q/R (score > 95%, pas d'appel LLM)
+@endif
 @foreach($documentSources as $doc)
 --- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
-Categorie: {{ $doc['metadata']['chunk_category'] ?? 'Non categorise' }}
-{{ addslashes($doc['content'] ?? '') }}
+Type: {{ $doc['type'] ?? 'unknown' }}
+Categorie: {{ $doc['category'] ?? $doc['metadata']['chunk_category'] ?? 'Non categorise' }}
+Source: {{ $doc['source_doc'] ?? $doc['metadata']['title'] ?? 'N/A' }}
+@if(!empty($doc['question']))
+Question matchee: {{ addslashes($doc['question']) }}
+@endif
+Contenu: {{ addslashes($doc['content'] ?? '') }}
 @endforeach
 
 ### Sources d'apprentissage ({{ count($learnedSources) }} cas)
@@ -403,12 +534,36 @@ Q: {{ addslashes($learned['question'] ?? '') }}
 R: {{ addslashes($learned['answer'] ?? '') }}
 @endforeach
 
+## Handoff Humain
+@php
+    $hAgentHandoff = $agent->human_support_enabled ?? false;
+    $hAgentThreshold = $agent->escalation_threshold ?? 0.3;
+    $hMaxRagScore = $stats['max_rag_score'] ?? null;
+    $hWouldEscalate = $hAgentHandoff && $hMaxRagScore !== null && $hMaxRagScore < $hAgentThreshold;
+@endphp
+- Handoff active: {{ $hAgentHandoff ? 'Oui' : 'Non' }}
+@if($hAgentHandoff)
+- Seuil d'escalade: {{ number_format($hAgentThreshold * 100, 0) }}%
+- Score RAG max: {{ $hMaxRagScore !== null ? number_format($hMaxRagScore * 100, 1) . '%' : 'N/A' }}
+- Escalade declenchee: {{ $hWouldEscalate ? 'OUI - Score RAG insuffisant' : 'Non' }}
+- Agents de support: {{ $agent->supportUsers()->count() }}
+- Email IMAP: {{ $agent->hasImapConfig() ? 'Configure' : 'Non configure' }}
+- Email SMTP: {{ $agent->hasSmtpConfig() ? 'Configure' : 'Non configure' }}
+@if($agent->support_email)
+- Email de support: {{ $agent->support_email }}
+@endif
+@endif
+
 ## Informations techniques
 - Modele: {{ $message['model_used'] ?? 'Non specifie' }}
+- Type de reponse: {{ ($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans appel LLM)' : 'Generation LLM' }}
 - Tokens: {{ $message['tokens'] ?? 'N/A' }}
 - Temps de generation: {{ isset($message['generation_time_ms']) ? number_format($message['generation_time_ms'] / 1000, 1) . 's' : 'N/A' }}
 - Fallback: {{ !empty($message['used_fallback_model']) ? 'Oui' : 'Non' }}
-- Filtrage par categorie: {{ $useCatFilter ? 'Active' : 'Desactive' }}`;
+- Filtrage par categorie: {{ $useCatFilter ? 'Active' : 'Desactive' }}
+@if(isset($stats['direct_qr_threshold']))
+- Seuil reponse directe: {{ $stats['direct_qr_threshold'] * 100 }}%
+@endif`;
                                                 }
                                             }">
                                                 {{-- Bouton d'ouverture --}}
@@ -609,6 +764,41 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                     </div>
                                                                                 @endif
 
+                                                                                {{-- Détails du match --}}
+                                                                                @if(!empty($categoryDetection['match_details']))
+                                                                                    <div>
+                                                                                        <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-2">Détail du matching</p>
+                                                                                        <div class="space-y-2">
+                                                                                            @foreach($categoryDetection['match_details'] as $detail)
+                                                                                                <div class="flex items-center gap-2 text-sm bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded-lg">
+                                                                                                    @php
+                                                                                                        $typeLabel = match($detail['type'] ?? '') {
+                                                                                                            'exact' => ['label' => 'Exact', 'color' => 'green'],
+                                                                                                            'exact_word' => ['label' => 'Mot exact', 'color' => 'green'],
+                                                                                                            'stemming' => ['label' => 'Stemming', 'color' => 'blue'],
+                                                                                                            'root_match' => ['label' => 'Racine', 'color' => 'purple'],
+                                                                                                            'embedding' => ['label' => 'Embedding', 'color' => 'orange'],
+                                                                                                            default => ['label' => $detail['type'] ?? '?', 'color' => 'gray'],
+                                                                                                        };
+                                                                                                    @endphp
+                                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-{{ $typeLabel['color'] }}-100 text-{{ $typeLabel['color'] }}-800 dark:bg-{{ $typeLabel['color'] }}-800 dark:text-{{ $typeLabel['color'] }}-100">
+                                                                                                        {{ $typeLabel['label'] }}
+                                                                                                    </span>
+                                                                                                    <span class="text-gray-600 dark:text-gray-300">
+                                                                                                        "<strong class="text-pink-600 dark:text-pink-400">{{ $detail['in_question'] ?? '' }}</strong>"
+                                                                                                        →
+                                                                                                        "<strong class="text-green-600 dark:text-green-400">{{ $detail['matched'] ?? '' }}</strong>"
+                                                                                                        ({{ $detail['category'] ?? '' }})
+                                                                                                    </span>
+                                                                                                    @if(!empty($detail['rule']))
+                                                                                                        <span class="text-xs text-gray-400">[{{ $detail['rule'] }}]</span>
+                                                                                                    @endif
+                                                                                                </div>
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @endif
+
                                                                                 <div class="grid grid-cols-3 gap-4 pt-3 border-t border-gray-200 dark:border-gray-700">
                                                                                     <div class="text-center">
                                                                                         <p class="text-xs text-gray-500 dark:text-gray-400">Résultats filtrés</p>
@@ -652,23 +842,45 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                 <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
                                                                                     <x-heroicon-o-document-text class="w-5 h-5" />
                                                                                     3. Documents indexes - RAG ({{ count($documentSources) }})
+                                                                                    @if(($stats['response_type'] ?? '') === 'direct_qr_match')
+                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100">
+                                                                                            Réponse directe Q/R
+                                                                                        </span>
+                                                                                    @endif
                                                                                 </span>
                                                                             </summary>
                                                                             <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
                                                                                 @foreach($documentSources as $doc)
+                                                                                    @php
+                                                                                        $docCategory = $doc['category'] ?? $doc['metadata']['chunk_category'] ?? $doc['metadata']['category'] ?? null;
+                                                                                        $docTitle = $doc['source_doc'] ?? $doc['metadata']['title'] ?? $doc['metadata']['filename'] ?? null;
+                                                                                        $docType = $doc['type'] ?? 'unknown';
+                                                                                        $docQuestion = $doc['question'] ?? null;
+                                                                                    @endphp
                                                                                     <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
-                                                                                        <details>
+                                                                                        <details {{ $loop->first ? 'open' : '' }}>
                                                                                             <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
                                                                                                 <span class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-2">
                                                                                                     Document #{{ $doc['index'] ?? $loop->iteration }}
-                                                                                                    @if(isset($doc['metadata']['title']))
-                                                                                                        - {{ \Illuminate\Support\Str::limit($doc['metadata']['title'], 50) }}
-                                                                                                    @elseif(isset($doc['metadata']['filename']))
-                                                                                                        - {{ $doc['metadata']['filename'] }}
+                                                                                                    @if($docTitle)
+                                                                                                        - {{ \Illuminate\Support\Str::limit($docTitle, 50) }}
                                                                                                     @endif
-                                                                                                    @if(isset($doc['metadata']['chunk_category']))
+                                                                                                    @if($docType === 'qa_pair')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100">
+                                                                                                            Q/R
+                                                                                                        </span>
+                                                                                                    @elseif($docType === 'faq')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-800 dark:text-amber-100">
+                                                                                                            FAQ
+                                                                                                        </span>
+                                                                                                    @elseif($docType === 'source_material')
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                                                                                                            Source
+                                                                                                        </span>
+                                                                                                    @endif
+                                                                                                    @if($docCategory)
                                                                                                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800 dark:bg-pink-800 dark:text-pink-100">
-                                                                                                            {{ $doc['metadata']['chunk_category'] }}
+                                                                                                            {{ $docCategory }}
                                                                                                         </span>
                                                                                                     @endif
                                                                                                 </span>
@@ -676,14 +888,23 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                     {{ $doc['score'] ?? 0 }}% pertinent
                                                                                                 </span>
                                                                                             </summary>
-                                                                                            <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600">
-                                                                                                @if(isset($doc['metadata']['summary']))
-                                                                                                    <div class="mb-3 p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700">
-                                                                                                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mb-1">Résumé</p>
-                                                                                                        <p class="text-sm text-blue-800 dark:text-blue-100">{{ $doc['metadata']['summary'] }}</p>
+                                                                                            <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-600 space-y-3">
+                                                                                                @if($docQuestion)
+                                                                                                    <div class="p-2 bg-blue-50 dark:bg-blue-900/30 rounded border border-blue-200 dark:border-blue-700">
+                                                                                                        <p class="text-xs font-semibold text-blue-600 dark:text-blue-300 uppercase tracking-wide mb-1">Question matchée</p>
+                                                                                                        <p class="text-sm text-blue-800 dark:text-blue-100">{{ $docQuestion }}</p>
                                                                                                     </div>
                                                                                                 @endif
-                                                                                                <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                @if(isset($doc['metadata']['summary']))
+                                                                                                    <div class="p-2 bg-purple-50 dark:bg-purple-900/30 rounded border border-purple-200 dark:border-purple-700">
+                                                                                                        <p class="text-xs font-semibold text-purple-600 dark:text-purple-300 uppercase tracking-wide mb-1">Résumé</p>
+                                                                                                        <p class="text-sm text-purple-800 dark:text-purple-100">{{ $doc['metadata']['summary'] }}</p>
+                                                                                                    </div>
+                                                                                                @endif
+                                                                                                <div>
+                                                                                                    <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Contenu / Réponse</p>
+                                                                                                    <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-white dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-600">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                </div>
                                                                                             </div>
                                                                                         </details>
                                                                                     </div>
@@ -733,13 +954,119 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                     </div>
                                                                 @endif
 
-                                                                {{-- 5. Donnees brutes JSON --}}
+                                                                {{-- 5. Handoff Humain --}}
+                                                                @php
+                                                                    $handoffConfig = $context['handoff_config'] ?? null;
+                                                                    $escalationInfo = $context['escalation_info'] ?? null;
+                                                                    $agentHandoff = $agent->human_support_enabled ?? false;
+                                                                    $agentThreshold = $agent->escalation_threshold ?? 0.3;
+                                                                    $maxRagScore = $stats['max_rag_score'] ?? ($escalationInfo['max_rag_score'] ?? null);
+                                                                    $wouldEscalate = $agentHandoff && $maxRagScore !== null && $maxRagScore < $agentThreshold;
+                                                                @endphp
+                                                                <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    <details {{ $wouldEscalate ? 'open' : '' }}>
+                                                                        <summary class="px-4 py-3 cursor-pointer bg-orange-50 dark:bg-orange-950 border-b border-gray-200 dark:border-gray-600 hover:bg-orange-100 dark:hover:bg-orange-900 transition-colors">
+                                                                            <span class="font-semibold text-orange-700 dark:text-orange-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-user-group class="w-5 h-5" />
+                                                                                5. Handoff Humain
+                                                                                @if(!$agentHandoff)
+                                                                                    <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(desactive)</span>
+                                                                                @elseif($wouldEscalate)
+                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-danger-100 text-danger-800 dark:bg-danger-800 dark:text-danger-100 animate-pulse">
+                                                                                        Escalade declenchee
+                                                                                    </span>
+                                                                                @else
+                                                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-success-100 text-success-800 dark:bg-success-800 dark:text-success-100">
+                                                                                        Pas d'escalade
+                                                                                    </span>
+                                                                                @endif
+                                                                            </span>
+                                                                        </summary>
+                                                                        <div class="p-4 bg-gray-50 dark:bg-gray-900 space-y-4">
+                                                                            @if(!$agentHandoff)
+                                                                                <div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                                                                    <x-heroicon-o-information-circle class="w-5 h-5" />
+                                                                                    <span class="text-sm">Le handoff humain n'est pas active pour cet agent.</span>
+                                                                                </div>
+                                                                            @else
+                                                                                {{-- Configuration --}}
+                                                                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                                                                    <div class="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Seuil d'escalade</p>
+                                                                                        <p class="text-lg font-bold text-orange-600 dark:text-orange-400">{{ number_format($agentThreshold * 100, 0) }}%</p>
+                                                                                    </div>
+                                                                                    <div class="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Score RAG max</p>
+                                                                                        <p class="text-lg font-bold {{ $maxRagScore !== null && $maxRagScore < $agentThreshold ? 'text-danger-600 dark:text-danger-400' : 'text-success-600 dark:text-success-400' }}">
+                                                                                            {{ $maxRagScore !== null ? number_format($maxRagScore * 100, 0) . '%' : 'N/A' }}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                    <div class="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Agents support</p>
+                                                                                        <p class="text-lg font-bold text-gray-900 dark:text-white">{{ $agent->supportUsers()->count() }}</p>
+                                                                                    </div>
+                                                                                    <div class="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600">
+                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Email</p>
+                                                                                        <p class="text-lg font-bold {{ $agent->hasImapConfig() && $agent->hasSmtpConfig() ? 'text-success-600' : 'text-warning-600' }}">
+                                                                                            {{ $agent->hasImapConfig() && $agent->hasSmtpConfig() ? 'OK' : 'Partiel' }}
+                                                                                        </p>
+                                                                                    </div>
+                                                                                </div>
+
+                                                                                {{-- Decision d'escalade --}}
+                                                                                @if($wouldEscalate)
+                                                                                    <div class="p-4 bg-danger-50 dark:bg-danger-900/30 rounded-lg border border-danger-200 dark:border-danger-700">
+                                                                                        <div class="flex items-start gap-3">
+                                                                                            <x-heroicon-o-exclamation-triangle class="w-6 h-6 text-danger-500 flex-shrink-0" />
+                                                                                            <div>
+                                                                                                <p class="font-semibold text-danger-700 dark:text-danger-300">Escalade declenchee</p>
+                                                                                                <p class="text-sm text-danger-600 dark:text-danger-400 mt-1">
+                                                                                                    Le score RAG maximum ({{ number_format($maxRagScore * 100, 0) }}%) est inferieur au seuil d'escalade ({{ number_format($agentThreshold * 100, 0) }}%).
+                                                                                                    En production, cette conversation serait transferee au support humain.
+                                                                                                </p>
+                                                                                                <p class="text-xs text-danger-500 dark:text-danger-500 mt-2">
+                                                                                                    Raison: Score RAG insuffisant ({{ number_format($maxRagScore * 100, 1) }}% &lt; {{ number_format($agentThreshold * 100, 0) }}%)
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @else
+                                                                                    <div class="p-4 bg-success-50 dark:bg-success-900/30 rounded-lg border border-success-200 dark:border-success-700">
+                                                                                        <div class="flex items-start gap-3">
+                                                                                            <x-heroicon-o-check-circle class="w-6 h-6 text-success-500 flex-shrink-0" />
+                                                                                            <div>
+                                                                                                <p class="font-semibold text-success-700 dark:text-success-300">Pas d'escalade necessaire</p>
+                                                                                                <p class="text-sm text-success-600 dark:text-success-400 mt-1">
+                                                                                                    @if($maxRagScore !== null)
+                                                                                                        Le score RAG ({{ number_format($maxRagScore * 100, 0) }}%) est superieur au seuil ({{ number_format($agentThreshold * 100, 0) }}%).
+                                                                                                    @else
+                                                                                                        L'IA a repondu avec suffisamment de confiance.
+                                                                                                    @endif
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @endif
+
+                                                                                {{-- Email support --}}
+                                                                                @if($agent->support_email)
+                                                                                    <div class="text-sm">
+                                                                                        <span class="text-gray-500 dark:text-gray-400">Email de support:</span>
+                                                                                        <span class="font-medium text-gray-900 dark:text-white ml-2">{{ $agent->support_email }}</span>
+                                                                                    </div>
+                                                                                @endif
+                                                                            @endif
+                                                                        </div>
+                                                                    </details>
+                                                                </div>
+
+                                                                {{-- 6. Donnees brutes JSON --}}
                                                                 <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
                                                                     <details>
                                                                         <summary class="px-4 py-3 cursor-pointer bg-gray-100 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                                                                             <span class="font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-2">
                                                                                 <x-heroicon-o-code-bracket class="w-5 h-5" />
-                                                                                5. Donnees brutes (JSON)
+                                                                                6. Donnees brutes (JSON)
                                                                             </span>
                                                                         </summary>
                                                                         <div class="p-4 bg-gray-950">
@@ -748,13 +1075,13 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                     </details>
                                                                 </div>
 
-                                                                {{-- 6. Rapport pour analyse --}}
+                                                                {{-- 7. Rapport pour analyse --}}
                                                                 <div class="bg-white dark:bg-gray-800 rounded-lg border-2 border-indigo-300 dark:border-indigo-600 overflow-hidden">
                                                                     <details>
                                                                         <summary class="px-4 py-3 cursor-pointer bg-indigo-50 dark:bg-indigo-950 border-b border-gray-200 dark:border-gray-600 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors">
                                                                             <span class="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
                                                                                 <x-heroicon-o-clipboard-document class="w-5 h-5" />
-                                                                                6. Rapport pour analyse (copier pour Claude)
+                                                                                7. Rapport pour analyse (copier pour Claude)
                                                                             </span>
                                                                         </summary>
                                                                         <div class="p-4 bg-gray-50 dark:bg-gray-900">

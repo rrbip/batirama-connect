@@ -21,7 +21,8 @@ class RagService
         private HydrationService $hydrationService,
         private PromptBuilder $promptBuilder,
         private LearningService $learningService,
-        private CategoryDetectionService $categoryDetectionService
+        private CategoryDetectionService $categoryDetectionService,
+        private IndexingStrategyService $indexingStrategyService
     ) {}
 
     /**
@@ -45,7 +46,13 @@ class RagService
         $ragResults = $retrieval['results'];
         $categoryDetection = $retrieval['category_detection'];
 
-        // 3. Hydratation SQL si configurée
+        // 3. Vérifier si on a une réponse Q/R directe (score > 0.95)
+        $directQr = $this->findDirectQrResponse($ragResults);
+        if ($directQr !== null) {
+            return $this->buildDirectQrResponse($directQr, $agent, $categoryDetection);
+        }
+
+        // 4. Hydratation SQL si configurée
         if ($agent->usesHydration() && !empty($ragResults)) {
             $ragResults = $this->hydrationService->hydrate(
                 $ragResults,
@@ -53,19 +60,19 @@ class RagService
             );
         }
 
-        // 4. Recherche itérative si activée et résultats insuffisants
+        // 5. Recherche itérative si activée et résultats insuffisants
         if ($agent->allow_iterative_search && count($ragResults) < 3) {
             $additionalResults = $this->iterativeSearch($agent, $userMessage, $ragResults);
             $ragResults = array_merge($ragResults, $additionalResults);
         }
 
-        // 5. Tronquer si nécessaire pour respecter le contexte
+        // 6. Tronquer si nécessaire pour respecter le contexte
         $ragResults = $this->promptBuilder->truncateToTokenLimit(
             $ragResults,
             $agent->getContextTokenLimit()
         );
 
-        // 6. Construire le prompt avec TOUT le contexte et générer la réponse
+        // 7. Construire le prompt avec TOUT le contexte et générer la réponse
         $ollama = OllamaService::forAgent($agent);
 
         $messages = $this->promptBuilder->buildChatMessages(
@@ -82,7 +89,7 @@ class RagService
             'fallback_model' => $agent->fallback_model,
         ]);
 
-        // 7. Construire le contexte complet pour sauvegarde (validation humaine)
+        // 8. Construire le contexte complet pour sauvegarde (validation humaine)
         $fullContext = $this->buildFullContext(
             agent: $agent,
             messages: $messages,
@@ -92,7 +99,7 @@ class RagService
             categoryDetection: $categoryDetection
         );
 
-        // 8. Ajouter les métadonnées à la réponse
+        // 9. Ajouter les métadonnées à la réponse
         $response = new LLMResponse(
             content: $response->content,
             model: $response->model,
@@ -157,13 +164,17 @@ class RagService
                 'message_id' => $r['message_id'] ?? null,
             ])->values()->toArray(),
 
-            // Sources: Documents RAG
+            // Sources: Documents RAG (format Q/R Atomique)
             'document_sources' => collect($ragResults)->map(fn ($r, $i) => [
                 'index' => $i + 1,
                 'id' => $r['id'] ?? null,
                 'score' => round(($r['score'] ?? 0) * 100, 1),
-                'content' => $r['payload']['content'] ?? $r['content'] ?? '',
-                'metadata' => array_diff_key($r['payload'] ?? [], ['content' => true]),
+                'type' => $r['payload']['type'] ?? 'unknown',
+                'content' => $r['payload']['display_text'] ?? $r['content'] ?? '',
+                'question' => $r['payload']['question'] ?? null,
+                'category' => $r['payload']['category'] ?? null,
+                'source_doc' => $r['payload']['source_doc'] ?? null,
+                'metadata' => array_diff_key($r['payload'] ?? [], ['display_text' => true, 'question' => true]),
             ])->values()->toArray(),
 
             // Détection de catégorie pour le filtrage RAG
@@ -181,6 +192,84 @@ class RagService
                 'use_category_filtering' => $agent->use_category_filtering ?? false,
             ],
         ];
+    }
+
+    /**
+     * Cherche une réponse Q/R directe parmi les résultats (score > 0.95).
+     */
+    private function findDirectQrResponse(array $ragResults): ?array
+    {
+        foreach ($ragResults as $result) {
+            if ($this->indexingStrategyService->isDirectQrResult($result)) {
+                return $this->indexingStrategyService->extractDirectAnswer($result);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Construit une réponse directe depuis un Q/R match (sans appel LLM).
+     */
+    private function buildDirectQrResponse(array $qr, Agent $agent, ?array $categoryDetection): LLMResponse
+    {
+        $answer = $qr['answer'];
+
+        Log::info('RagService: Direct Q/R response used', [
+            'agent' => $agent->slug,
+            'question_matched' => $qr['question'],
+            'score' => $qr['score'],
+            'source' => $qr['source'],
+            'is_faq' => $qr['is_faq'],
+        ]);
+
+        // Construire le contexte complet pour le rapport d'analyse
+        $fullContext = [
+            'system_prompt_sent' => '',
+            'conversation_history' => [],
+            'learned_sources' => [],
+            'document_sources' => [
+                [
+                    'index' => 1,
+                    'id' => $qr['point_id'] ?? null,
+                    'score' => round(($qr['score'] ?? 0) * 100, 1),
+                    'type' => $qr['is_faq'] ? 'faq' : 'qa_pair',
+                    'content' => $qr['answer'],
+                    'question' => $qr['question'],
+                    'category' => $qr['category'],
+                    'source_doc' => $qr['source'],
+                ],
+            ],
+            'category_detection' => $categoryDetection,
+            'stats' => [
+                'learned_count' => 0,
+                'document_count' => 1,
+                'history_count' => 0,
+                'context_window_size' => $agent->context_window_size,
+                'agent_slug' => $agent->slug,
+                'agent_model' => 'direct_qr_match',
+                'temperature' => 0,
+                'use_category_filtering' => $agent->use_category_filtering ?? false,
+                'response_type' => 'direct_qr_match',
+                'direct_qr_threshold' => IndexingStrategyService::DIRECT_QR_THRESHOLD,
+            ],
+        ];
+
+        return new LLMResponse(
+            content: $answer,
+            model: 'direct_qr_match',
+            tokensPrompt: 0,
+            tokensCompletion: 0,
+            generationTimeMs: 0,
+            raw: [
+                'direct_qr' => true,
+                'matched_question' => $qr['question'],
+                'score' => $qr['score'],
+                'source' => $qr['source'],
+                'category' => $qr['category'],
+                'is_faq' => $qr['is_faq'],
+                'context' => $fullContext,
+            ]
+        );
     }
 
     /**
@@ -322,7 +411,8 @@ class RagService
                 'agent' => $agent->slug,
                 'results_count' => count($results),
                 'results_scores' => collect($results)->pluck('score')->toArray(),
-                'results_categories' => collect($results)->pluck('payload.chunk_category')->filter()->toArray(),
+                'results_types' => collect($results)->pluck('payload.type')->filter()->toArray(),
+                'results_categories' => collect($results)->pluck('payload.category')->filter()->toArray(),
             ]);
 
             return [

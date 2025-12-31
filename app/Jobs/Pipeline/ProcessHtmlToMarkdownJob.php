@@ -6,6 +6,8 @@ namespace App\Jobs\Pipeline;
 
 use App\Models\Document;
 use App\Services\Pipeline\PipelineOrchestratorService;
+use fivefilters\Readability\Readability;
+use fivefilters\Readability\Configuration;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -63,8 +65,13 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
                 Log::info("Saved original HTML to storage", ['path' => $htmlStoragePath]);
             }
 
-            // Convert to Markdown
-            $markdown = $this->convertToMarkdown($html);
+            // Get selected tool from pipeline config
+            $pipelineSteps = $document->pipeline_steps['steps'] ?? [];
+            $currentStep = $pipelineSteps[$this->stepIndex] ?? [];
+            $tool = $currentStep['tool_used'] ?? 'html_converter';
+
+            // Convert to Markdown using selected tool
+            $markdown = $this->convertToMarkdown($html, $tool, $document);
 
             // Store markdown
             $outputPath = "pipeline/{$document->uuid}/markdown.md";
@@ -176,9 +183,86 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
     }
 
     /**
-     * Convert HTML to Markdown
+     * Convert HTML to Markdown using the specified tool
      */
-    protected function convertToMarkdown(string $html): string
+    protected function convertToMarkdown(string $html, string $tool, Document $document): string
+    {
+        Log::info("Converting HTML to Markdown", [
+            'document_id' => $document->id,
+            'tool' => $tool,
+        ]);
+
+        if ($tool === 'readability') {
+            return $this->convertWithReadability($html, $document);
+        }
+
+        // Default: html_converter
+        return $this->convertWithHtmlConverter($html);
+    }
+
+    /**
+     * Convert HTML to Markdown using Readability (content extraction)
+     */
+    protected function convertWithReadability(string $html, Document $document): string
+    {
+        try {
+            $configuration = new Configuration();
+            $configuration->setFixRelativeURLs(true);
+            $configuration->setOriginalURL($document->source_url ?? '');
+            $configuration->setSummonCthulhu(false); // Don't include debug info
+
+            $readability = new Readability($configuration);
+            $readability->parse($html);
+
+            // Get the extracted content (already cleaned HTML)
+            $contentHtml = $readability->getContent();
+
+            if (empty($contentHtml)) {
+                Log::warning("Readability returned empty content, falling back to html_converter", [
+                    'document_id' => $document->id,
+                ]);
+                return $this->convertWithHtmlConverter($html);
+            }
+
+            // Convert the clean HTML to Markdown
+            $converter = new HtmlConverter([
+                'strip_tags' => true,
+                'hard_break' => true,
+                'header_style' => 'atx',
+            ]);
+
+            $markdown = $converter->convert($contentHtml);
+
+            // Add title if available
+            $title = $readability->getTitle();
+            if (!empty($title)) {
+                $markdown = "# {$title}\n\n" . $markdown;
+            }
+
+            // Clean up markdown
+            $markdown = $this->cleanMarkdown($markdown);
+
+            Log::info("Readability extraction successful", [
+                'document_id' => $document->id,
+                'title' => $title,
+                'content_length' => strlen($markdown),
+            ]);
+
+            return $markdown;
+
+        } catch (Throwable $e) {
+            Log::warning("Readability failed, falling back to html_converter", [
+                'document_id' => $document->id,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->convertWithHtmlConverter($html);
+        }
+    }
+
+    /**
+     * Convert HTML to Markdown using basic HTML converter
+     */
+    protected function convertWithHtmlConverter(string $html): string
     {
         // Clean HTML first
         $html = $this->cleanHtml($html);
@@ -210,11 +294,22 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         $html = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $html);
         $html = preg_replace('/<style\b[^>]*>(.*?)<\/style>/is', '', $html);
 
-        // Remove nav, header, footer, aside
-        $html = preg_replace('/<nav\b[^>]*>(.*?)<\/nav>/is', '', $html);
-        $html = preg_replace('/<header\b[^>]*>(.*?)<\/header>/is', '', $html);
-        $html = preg_replace('/<footer\b[^>]*>(.*?)<\/footer>/is', '', $html);
-        $html = preg_replace('/<aside\b[^>]*>(.*?)<\/aside>/is', '', $html);
+        // Remove nav, header, footer, aside (can be nested, so run multiple times)
+        for ($i = 0; $i < 3; $i++) {
+            $html = preg_replace('/<nav\b[^>]*>(.*?)<\/nav>/is', '', $html);
+            $html = preg_replace('/<header\b[^>]*>(.*?)<\/header>/is', '', $html);
+            $html = preg_replace('/<footer\b[^>]*>(.*?)<\/footer>/is', '', $html);
+            $html = preg_replace('/<aside\b[^>]*>(.*?)<\/aside>/is', '', $html);
+        }
+
+        // Remove common navigation classes/ids
+        $html = preg_replace('/<[^>]*(class|id)=["\'][^"\']*\b(nav|menu|sidebar|breadcrumb|footer|header|toolbar|topbar|bottombar)[^"\']*["\'][^>]*>(.*?)<\/[^>]+>/is', '', $html);
+
+        // Remove form elements (login forms, search boxes, etc.)
+        $html = preg_replace('/<form\b[^>]*>(.*?)<\/form>/is', '', $html);
+
+        // Remove button elements
+        $html = preg_replace('/<button\b[^>]*>(.*?)<\/button>/is', '', $html);
 
         // Remove empty header tags (h1-h6 with no content or just whitespace)
         $html = preg_replace('/<h([1-6])\b[^>]*>\s*<\/h\1>/is', '', $html);
@@ -222,29 +317,83 @@ class ProcessHtmlToMarkdownJob implements ShouldQueue
         // Remove comments
         $html = preg_replace('/<!--.*?-->/s', '', $html);
 
+        // Remove noscript content
+        $html = preg_replace('/<noscript\b[^>]*>(.*?)<\/noscript>/is', '', $html);
+
+        // Remove iframe
+        $html = preg_replace('/<iframe\b[^>]*>(.*?)<\/iframe>/is', '', $html);
+
         return $html;
     }
 
     /**
      * Clean up generated markdown
+     * Removes images, navigation patterns, and cleans up formatting
+     * while preserving headings, paragraphs, and lists
      */
     protected function cleanMarkdown(string $markdown): string
     {
-        // Step 1: Fix headers that are not on their own line FIRST
+        // ===========================================
+        // 1. Remove images (markdown format)
+        // ===========================================
+        // Remove images with alt text: ![alt text](url)
+        $markdown = preg_replace('/!\[[^\]]*\]\([^)]+\)/', '', $markdown);
+        // Remove images without alt text: ![](url)
+        $markdown = preg_replace('/!\[\]\([^)]+\)/', '', $markdown);
+        // Remove reference-style images: ![alt][ref]
+        $markdown = preg_replace('/!\[[^\]]*\]\[[^\]]*\]/', '', $markdown);
+
+        // ===========================================
+        // 2. Remove navigation-like patterns
+        // ===========================================
+        // Remove lines that are just links (navigation items)
+        // e.g., "[Home](/) [About](/about)"
+        $markdown = preg_replace('/^\s*(\[[^\]]+\]\([^)]+\)\s*)+$/m', '', $markdown);
+
+        // Remove standalone "button" links on their own line (CTAs)
+        // e.g., "[Demander une démo](/demo)" or "[Essai gratuit](url)"
+        $ctaPatterns = [
+            'demo', 'démo', 'essai', 'contact', 'inscription', 'register',
+            'sign up', 'login', 'connexion', 'télécharger', 'download',
+            'acheter', 'buy', 'commander', 'order', 'devis', 'quote',
+        ];
+        $ctaRegex = '/^\s*\[[^\]]*(' . implode('|', $ctaPatterns) . ')[^\]]*\]\([^)]+\)\s*$/im';
+        $markdown = preg_replace($ctaRegex, '', $markdown);
+
+        // Remove breadcrumb-like patterns: "Home > Category > Page" or "Home / Category / Page"
+        $markdown = preg_replace('/^[^#\n]*([>\/]\s*[^#\n>\/]+){2,}\s*$/m', '', $markdown);
+
+        // Remove lines with just social media links
+        $socialPatterns = ['facebook', 'twitter', 'linkedin', 'instagram', 'youtube', 'tiktok', 'pinterest'];
+        $socialRegex = '/^\s*\[[^\]]*(' . implode('|', $socialPatterns) . ')[^\]]*\]\([^)]+\)\s*$/im';
+        $markdown = preg_replace($socialRegex, '', $markdown);
+
+        // ===========================================
+        // 3. Clean up short/empty lines
+        // ===========================================
+        // Remove lines that are just punctuation or very short (< 3 chars excluding whitespace)
+        $markdown = preg_replace('/^[\s\-\*\_\.\,\;\:\!\?\|]+$/m', '', $markdown);
+
+        // Remove lines that are just numbers (often from pagination)
+        $markdown = preg_replace('/^\s*\d+\s*$/m', '', $markdown);
+
+        // ===========================================
+        // 4. Fix headers formatting
+        // ===========================================
+        // Fix headers that are not on their own line
         // e.g., "Some text# Header" -> "Some text\n\n# Header"
-        // This is critical for MarkdownChunkerService to detect headers
         $markdown = preg_replace('/([^\n])(#{1,6}\s)/m', "$1\n\n$2", $markdown);
 
-        // Step 2: Ensure headers have a blank line before them (if preceded by just one newline)
-        // e.g., "text\n# Header" -> "text\n\n# Header"
+        // Ensure headers have a blank line before them
         $markdown = preg_replace('/([^\n])\n(#{1,6}\s)/m', "$1\n\n$2", $markdown);
 
-        // Step 3: NOW remove empty headers (lines that are just #, ##, etc. without text)
-        // Must run AFTER header separation so isolated "# " on their own line are caught
-        // Pattern matches: start of line, 1-6 #, optional whitespace, end of line
+        // Remove empty headers (lines that are just #, ##, etc. without text)
         $markdown = preg_replace('/^#{1,6}\s*$/m', '', $markdown);
 
-        // Step 4: Remove excessive blank lines (more than 2 newlines -> 2 newlines)
+        // ===========================================
+        // 5. Final cleanup
+        // ===========================================
+        // Remove excessive blank lines (more than 2 newlines -> 2 newlines)
         $markdown = preg_replace('/\n{3,}/', "\n\n", $markdown);
 
         // Trim whitespace

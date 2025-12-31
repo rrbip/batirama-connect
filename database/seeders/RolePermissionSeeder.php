@@ -48,6 +48,12 @@ class RolePermissionSeeder extends Seeder
             // API
             ['name' => 'Accès API', 'slug' => 'api.access', 'group_name' => 'api'],
             ['name' => 'Gérer les webhooks', 'slug' => 'webhooks.manage', 'group_name' => 'api'],
+
+            // Support Humain
+            ['name' => 'Gérer le support', 'slug' => 'support.manage', 'group_name' => 'support'],
+            ['name' => 'Répondre au support', 'slug' => 'support.respond', 'group_name' => 'support'],
+            ['name' => 'Voir les sessions support', 'slug' => 'support.view', 'group_name' => 'support'],
+            ['name' => 'Former l\'IA', 'slug' => 'support.train', 'group_name' => 'support'],
         ];
 
         foreach ($permissions as $perm) {
@@ -99,6 +105,13 @@ class RolePermissionSeeder extends Seeder
                 'description' => 'Accès API uniquement (marque blanche)',
                 'is_system' => true,
                 'permissions' => ['api.access'],
+            ],
+            [
+                'name' => 'Agent de Support',
+                'slug' => 'support-agent',
+                'description' => 'Gestion du support humain pour les agents IA',
+                'is_system' => true,
+                'permissions' => ['support.*', 'ai-sessions.view', 'ai-sessions.validate', 'ai-sessions.learn', 'agents.view'],
             ],
         ];
 

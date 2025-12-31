@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Builder;
 
 class AiSession extends Model
 {
@@ -64,6 +65,19 @@ class AiSession extends Model
         'commission_rate',
         'commission_amount',
         'commission_status',
+        // Support/Handoff columns
+        'support_status',
+        'escalation_reason',
+        'escalated_at',
+        'support_agent_id',
+        'assigned_at',
+        'user_email',
+        'resolved_at',
+        'resolution_type',
+        'resolution_notes',
+        'support_access_token',
+        'support_token_expires_at',
+        'support_metadata',
     ];
 
     protected $casts = [
@@ -81,6 +95,12 @@ class AiSession extends Model
         'final_amount' => 'decimal:2',
         'commission_rate' => 'decimal:2',
         'commission_amount' => 'decimal:2',
+        // Support casts
+        'escalated_at' => 'datetime',
+        'assigned_at' => 'datetime',
+        'resolved_at' => 'datetime',
+        'support_token_expires_at' => 'datetime',
+        'support_metadata' => 'array',
     ];
 
     public function agent(): BelongsTo
@@ -211,5 +231,179 @@ class AiSession extends Model
         }
 
         return $branding;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // RELATIONS SUPPORT HUMAIN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Agent de support assigné à cette session.
+     */
+    public function supportAgent(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'support_agent_id');
+    }
+
+    /**
+     * Messages de support (chat/email avec l'agent humain).
+     */
+    public function supportMessages(): HasMany
+    {
+        return $this->hasMany(SupportMessage::class, 'session_id');
+    }
+
+    /**
+     * Pièces jointes de support.
+     */
+    public function supportAttachments(): HasMany
+    {
+        return $this->hasMany(SupportAttachment::class, 'session_id');
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MÉTHODES SUPPORT HUMAIN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si cette session a été escaladée.
+     */
+    public function isEscalated(): bool
+    {
+        return $this->support_status !== null;
+    }
+
+    /**
+     * Vérifie si la session est en attente d'un agent.
+     */
+    public function isAwaitingSupport(): bool
+    {
+        return $this->support_status === 'escalated';
+    }
+
+    /**
+     * Vérifie si un agent a pris en charge la session.
+     */
+    public function isBeingHandled(): bool
+    {
+        return $this->support_status === 'assigned';
+    }
+
+    /**
+     * Vérifie si la session est résolue.
+     */
+    public function isResolved(): bool
+    {
+        return $this->support_status === 'resolved';
+    }
+
+    /**
+     * Escalade la session vers le support humain.
+     */
+    public function escalate(string $reason, ?float $maxRagScore = null): self
+    {
+        $this->update([
+            'support_status' => 'escalated',
+            'escalation_reason' => $reason,
+            'escalated_at' => now(),
+            'support_metadata' => array_merge($this->support_metadata ?? [], [
+                'max_rag_score' => $maxRagScore,
+                'escalated_by' => 'system',
+            ]),
+        ]);
+
+        return $this;
+    }
+
+    /**
+     * Assigne un agent de support à cette session.
+     */
+    public function assignToAgent(User $agent): self
+    {
+        $this->update([
+            'support_status' => 'assigned',
+            'support_agent_id' => $agent->id,
+            'assigned_at' => now(),
+        ]);
+
+        return $this;
+    }
+
+    /**
+     * Marque la session comme résolue.
+     */
+    public function resolve(string $type, ?string $notes = null): self
+    {
+        $this->update([
+            'support_status' => 'resolved',
+            'resolved_at' => now(),
+            'resolution_type' => $type,
+            'resolution_notes' => $notes,
+        ]);
+
+        return $this;
+    }
+
+    /**
+     * Génère un token d'accès pour les réponses par email.
+     */
+    public function generateSupportAccessToken(int $expiresInHours = 72): string
+    {
+        $token = Str::random(64);
+
+        $this->update([
+            'support_access_token' => $token,
+            'support_token_expires_at' => now()->addHours($expiresInHours),
+        ]);
+
+        return $token;
+    }
+
+    /**
+     * Vérifie si le token d'accès est valide.
+     */
+    public function isAccessTokenValid(string $token): bool
+    {
+        return $this->support_access_token === $token
+            && $this->support_token_expires_at
+            && $this->support_token_expires_at->isFuture();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // SCOPES SUPPORT HUMAIN
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Sessions escaladées en attente d'un agent.
+     */
+    public function scopeAwaitingSupport(Builder $query): Builder
+    {
+        return $query->where('support_status', 'escalated');
+    }
+
+    /**
+     * Sessions assignées à un agent spécifique.
+     */
+    public function scopeAssignedTo(Builder $query, User $agent): Builder
+    {
+        return $query->where('support_agent_id', $agent->id)
+            ->where('support_status', 'assigned');
+    }
+
+    /**
+     * Sessions de support non résolues.
+     */
+    public function scopeUnresolvedSupport(Builder $query): Builder
+    {
+        return $query->whereIn('support_status', ['escalated', 'assigned']);
+    }
+
+    /**
+     * Sessions de support pour un agent IA spécifique.
+     */
+    public function scopeForAgentSupport(Builder $query, int $agentId): Builder
+    {
+        return $query->where('agent_id', $agentId)
+            ->whereNotNull('support_status');
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\AI;
 
+use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -66,7 +67,7 @@ class LearningService
     }
 
     /**
-     * Indexe une réponse validée dans Qdrant
+     * Indexe une réponse validée dans Qdrant (learned_responses + collection agent)
      */
     public function indexLearnedResponse(
         string $question,
@@ -84,6 +85,7 @@ class LearningService
 
         $pointId = Str::uuid()->toString();
 
+        // 1. Indexer dans learned_responses
         $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
             [
                 'id' => $pointId,
@@ -101,15 +103,122 @@ class LearningService
         ]);
 
         if ($result) {
-            Log::info('Learned response indexed', [
+            Log::info('Learned response indexed in learned_responses', [
                 'message_id' => $messageId,
                 'agent' => $agentSlug,
             ]);
+
+            // 2. Double indexation : indexer aussi dans la collection de l'agent
+            $agent = Agent::find($agentId);
+            if ($agent) {
+                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId);
+            }
         } else {
             Log::error('Failed to upsert learned response to Qdrant', [
                 'message_id' => $messageId,
                 'agent' => $agentSlug,
             ]);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Indexe une FAQ dans la collection de l'agent avec type=qa_pair.
+     * Permet aux FAQ d'être trouvées lors des recherches RAG normales.
+     */
+    public function indexFaqInAgentCollection(
+        Agent $agent,
+        string $question,
+        string $answer,
+        ?int $messageId = null
+    ): ?string {
+        if (empty($agent->qdrant_collection)) {
+            Log::warning('LearningService: Agent has no Qdrant collection', [
+                'agent' => $agent->slug,
+            ]);
+            return null;
+        }
+
+        $embedding = $this->embeddingService->embed($question);
+        $pointId = Str::uuid()->toString();
+
+        $result = $this->qdrantService->upsert($agent->qdrant_collection, [[
+            'id' => $pointId,
+            'vector' => $embedding,
+            'payload' => [
+                'type' => 'qa_pair',
+                'category' => 'FAQ',
+                'display_text' => $answer,
+                'question' => $question,
+                'source_doc' => 'FAQ Validée',
+                'parent_context' => '',
+                'chunk_id' => null,
+                'document_id' => null,
+                'agent_id' => $agent->id,
+                'is_faq' => true,
+                'message_id' => $messageId,
+                'indexed_at' => now()->toIso8601String(),
+            ],
+        ]]);
+
+        if ($result) {
+            Log::info('LearningService: FAQ indexed in agent collection', [
+                'agent' => $agent->slug,
+                'collection' => $agent->qdrant_collection,
+                'point_id' => $pointId,
+                'message_id' => $messageId,
+            ]);
+            return $pointId;
+        }
+
+        Log::error('LearningService: Failed to index FAQ in agent collection', [
+            'agent' => $agent->slug,
+        ]);
+        return null;
+    }
+
+    /**
+     * Ajoute une FAQ manuelle (double indexation).
+     */
+    public function addManualFaq(
+        Agent $agent,
+        string $question,
+        string $answer,
+        int $userId
+    ): bool {
+        // S'assurer que la collection learned_responses existe
+        $this->ensureCollectionExists();
+
+        // Générer l'embedding de la question
+        $vector = $this->embeddingService->embed($question);
+        $pointId = Str::uuid()->toString();
+
+        // 1. Indexer dans learned_responses
+        $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
+            [
+                'id' => $pointId,
+                'vector' => $vector,
+                'payload' => [
+                    'agent_id' => $agent->id,
+                    'agent_slug' => $agent->slug,
+                    'message_id' => null,
+                    'question' => $question,
+                    'answer' => $answer,
+                    'validated_by' => $userId,
+                    'validated_at' => now()->toIso8601String(),
+                    'source' => 'manual',
+                ],
+            ]
+        ]);
+
+        if ($result) {
+            Log::info('Manual FAQ indexed in learned_responses', [
+                'agent' => $agent->slug,
+            ]);
+
+            // 2. Double indexation : indexer aussi dans la collection de l'agent
+            $this->indexFaqInAgentCollection($agent, $question, $answer, null);
         }
 
         return $result;

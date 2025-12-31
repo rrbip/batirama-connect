@@ -14,7 +14,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Ramsey\Uuid\Uuid;
+use Illuminate\Support\Str;
 
 class IndexDocumentChunksJob implements ShouldQueue
 {
@@ -75,6 +75,10 @@ class IndexDocumentChunksJob implements ShouldQueue
         }
     }
 
+    /**
+     * Indexe les chunks au format Q/R Atomique.
+     * Crée N points Q/R (un par question/réponse) + 1 point source par chunk.
+     */
     private function indexChunks(
         $chunks,
         EmbeddingService $embeddingService,
@@ -93,57 +97,30 @@ class IndexDocumentChunksJob implements ShouldQueue
         // S'assurer que la collection existe
         $qdrantService->ensureCollectionExists($collection);
 
-        $points = [];
+        $allPoints = [];
         $chunkPointMapping = [];
+        $indexedChunks = 0;
+        $skippedChunks = 0;
 
         foreach ($chunks as $chunk) {
-            try {
-                // Inclure la catégorie dans le texte pour améliorer la recherche sémantique
-                $textToEmbed = $chunk->content;
-                if ($chunk->category) {
-                    $textToEmbed = "[{$chunk->category->name}] " . $textToEmbed;
-                }
-                $vector = $embeddingService->embed($textToEmbed);
-
-                $pointId = Uuid::uuid5(
-                    Uuid::NAMESPACE_DNS,
-                    sprintf('document:%s:chunk:%d', $this->document->uuid, $chunk->chunk_index)
-                )->toString();
-
-                // Construire le payload avec les nouvelles métadonnées LLM
-                $payload = [
-                    'content' => $chunk->content,
-                    'document_id' => $this->document->id,
-                    'document_uuid' => $this->document->uuid,
-                    'document_title' => $this->document->title ?? $this->document->original_name,
+            // Vérifier que le chunk a des knowledge_units (format Q/R Atomique)
+            if (empty($chunk->knowledge_units)) {
+                Log::debug('IndexDocumentChunksJob: Chunk without knowledge_units, skipping', [
+                    'chunk_id' => $chunk->id,
                     'chunk_index' => $chunk->chunk_index,
-                    'category' => $this->document->category,
-                    'source_type' => 'document',
-                    'indexed_at' => now()->toIso8601String(),
-                ];
+                ]);
+                $skippedChunks++;
+                continue;
+            }
 
-                // Ajouter les métadonnées LLM si disponibles
-                if (!empty($chunk->summary)) {
-                    $payload['summary'] = $chunk->summary;
-                }
-                if (!empty($chunk->keywords)) {
-                    $payload['keywords'] = $chunk->keywords;
-                }
-                if ($chunk->category) {
-                    $payload['chunk_category'] = $chunk->category->name;
-                    $payload['chunk_category_id'] = $chunk->category_id;
-                }
-
-                $points[] = [
-                    'id' => $pointId,
-                    'vector' => $vector,
-                    'payload' => $payload,
-                ];
-
-                $chunkPointMapping[$chunk->id] = $pointId;
+            try {
+                $pointsData = $this->buildQrAtomiquePoints($chunk, $embeddingService, $agent);
+                $allPoints = array_merge($allPoints, $pointsData['points']);
+                $chunkPointMapping[$chunk->id] = $pointsData['point_ids'];
+                $indexedChunks++;
 
             } catch (\Exception $e) {
-                Log::warning('Failed to embed chunk', [
+                Log::warning('Failed to build Q/R Atomique points for chunk', [
                     'document_id' => $this->document->id,
                     'chunk_index' => $chunk->chunk_index,
                     'error' => $e->getMessage(),
@@ -151,12 +128,23 @@ class IndexDocumentChunksJob implements ShouldQueue
             }
         }
 
-        if (empty($points)) {
-            throw new \RuntimeException("Aucun embedding généré");
+        if ($skippedChunks > 0) {
+            Log::warning('IndexDocumentChunksJob: Some chunks skipped (no knowledge_units)', [
+                'document_id' => $this->document->id,
+                'skipped' => $skippedChunks,
+                'indexed' => $indexedChunks,
+            ]);
+        }
+
+        if (empty($allPoints)) {
+            Log::warning('IndexDocumentChunksJob: No points to index', [
+                'document_id' => $this->document->id,
+            ]);
+            return;
         }
 
         // Upsert en batch
-        foreach (array_chunk($points, 50) as $batch) {
+        foreach (array_chunk($allPoints, 50) as $batch) {
             $success = $qdrantService->upsert($collection, $batch);
 
             if (!$success) {
@@ -164,22 +152,108 @@ class IndexDocumentChunksJob implements ShouldQueue
             }
         }
 
-        // Mettre à jour les chunks
+        // Mettre à jour les chunks avec les IDs des points
         foreach ($chunks as $chunk) {
             if (isset($chunkPointMapping[$chunk->id])) {
                 $chunk->update([
-                    'qdrant_point_id' => $chunkPointMapping[$chunk->id],
+                    'qdrant_point_ids' => $chunkPointMapping[$chunk->id],
+                    'qdrant_points_count' => count($chunkPointMapping[$chunk->id]),
                     'is_indexed' => true,
                     'indexed_at' => now(),
                 ]);
             }
         }
 
-        Log::info('Chunks indexed in Qdrant', [
+        Log::info('Chunks indexed in Qdrant (Q/R Atomique format)', [
             'document_id' => $this->document->id,
-            'points_count' => count($points),
+            'points_count' => count($allPoints),
+            'chunks_indexed' => $indexedChunks,
             'collection' => $collection,
         ]);
+    }
+
+    /**
+     * Construit les points Q/R Atomique pour un chunk.
+     * @return array{points: array, point_ids: array}
+     */
+    private function buildQrAtomiquePoints(
+        DocumentChunk $chunk,
+        EmbeddingService $embeddingService,
+        $agent
+    ): array {
+        $points = [];
+        $pointIds = [];
+
+        $documentTitle = $this->document->title ?? $this->document->original_name ?? 'Document';
+        $category = $chunk->category?->name ?? 'Non catégorisé';
+        $parentContext = $chunk->parent_context ?? '';
+
+        // 1. Créer les points Q/R (un par question/réponse)
+        foreach ($chunk->knowledge_units as $index => $unit) {
+            $question = $unit['question'] ?? null;
+            $answer = $unit['answer'] ?? null;
+
+            if (!$question || !$answer) {
+                continue;
+            }
+
+            $pointId = Str::uuid()->toString();
+            $pointIds[] = $pointId;
+
+            // Embedding de la question
+            $vector = $embeddingService->embed($question);
+
+            $points[] = [
+                'id' => $pointId,
+                'vector' => $vector,
+                'payload' => [
+                    'type' => 'qa_pair',
+                    'category' => $category,
+                    'display_text' => $answer,
+                    'question' => $question,
+                    'source_doc' => $documentTitle,
+                    'parent_context' => $parentContext,
+                    'chunk_id' => $chunk->id,
+                    'document_id' => $this->document->id,
+                    'agent_id' => $agent->id,
+                    'indexed_at' => now()->toIso8601String(),
+                ],
+            ];
+        }
+
+        // 2. Créer le point source (résumé + contenu)
+        $summary = $chunk->summary ?? '';
+        $content = $chunk->content ?? '';
+        $sourceText = trim($summary . "\n\n" . $content);
+
+        if (!empty($sourceText)) {
+            $pointId = Str::uuid()->toString();
+            $pointIds[] = $pointId;
+
+            $vector = $embeddingService->embed($sourceText);
+
+            $points[] = [
+                'id' => $pointId,
+                'vector' => $vector,
+                'payload' => [
+                    'type' => 'source_material',
+                    'category' => $category,
+                    'display_text' => $content,
+                    'summary' => $summary,
+                    'source_doc' => $documentTitle,
+                    'parent_context' => $parentContext,
+                    'chunk_id' => $chunk->id,
+                    'document_id' => $this->document->id,
+                    'agent_id' => $agent->id,
+                    'indexed_at' => now()->toIso8601String(),
+                ],
+            ];
+        }
+
+        return [
+            'points' => $points,
+            'point_ids' => $pointIds,
+        ];
     }
 
     public function failed(\Throwable $exception): void

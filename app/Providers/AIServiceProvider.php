@@ -8,6 +8,7 @@ use App\Services\AI\CategoryDetectionService;
 use App\Services\AI\DispatcherService;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\HydrationService;
+use App\Services\AI\IndexingStrategyService;
 use App\Services\AI\LearningService;
 use App\Services\AI\OllamaService;
 use App\Services\AI\PromptBuilder;
@@ -54,6 +55,8 @@ class AIServiceProvider extends ServiceProvider
             );
         });
 
+        $this->app->singleton(IndexingStrategyService::class);
+
         $this->app->singleton(RagService::class, function ($app) {
             return new RagService(
                 $app->make(EmbeddingService::class),
@@ -62,7 +65,8 @@ class AIServiceProvider extends ServiceProvider
                 $app->make(HydrationService::class),
                 $app->make(PromptBuilder::class),
                 $app->make(LearningService::class),
-                $app->make(CategoryDetectionService::class)
+                $app->make(CategoryDetectionService::class),
+                $app->make(IndexingStrategyService::class)
             );
         });
 
