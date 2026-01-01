@@ -50,16 +50,21 @@ class SessionEscalated implements ShouldBroadcastNow
      */
     public function broadcastWith(): array
     {
+        $agent = $this->session->agent;
+
         return [
             'session_id' => $this->session->id,
             'session_uuid' => $this->session->uuid,
             'agent_id' => $this->session->agent_id,
-            'agent_name' => $this->session->agent?->name,
+            'agent_name' => $agent?->name,
             'user_name' => $this->session->user?->name ?? 'Visiteur',
             'user_email' => $this->session->user_email,
             'escalation_reason' => $this->session->escalation_reason,
             'escalated_at' => $this->session->escalated_at?->toISOString(),
             'message_count' => $this->session->message_count,
+            // Mode asynchrone (email) si hors horaires ou aucun agent connecté
+            'async_mode' => $agent?->shouldUseAsyncSupport() ?? true,
+            'within_support_hours' => $agent?->isWithinSupportHours() ?? false,
         ];
     }
 }

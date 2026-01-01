@@ -975,7 +975,8 @@
                 currentFile: null,
                 uploadedAttachment: null,
                 isHumanSupportActive: false,  // True when escalated/assigned - hide AI typing
-                userEmail: null  // User email (if provided)
+                userEmail: null,  // User email (if provided)
+                asyncMode: false  // True when outside support hours or no agents connected - show email form
             };
 
             // DOM Elements
@@ -1031,13 +1032,17 @@
             // EMAIL COLLECTION FORM
             // ═══════════════════════════════════════════════════════════════
 
-            // Show email collection form (only if no email set)
+            // Show email collection form (only if in async mode and no email set)
             function showEmailForm() {
                 if (state.userEmail) {
                     console.log('📧 Email already set:', state.userEmail);
                     return;
                 }
-                console.log('📧 Showing email collection form');
+                if (!state.asyncMode) {
+                    console.log('📧 Not in async mode (support agents available) - no email form needed');
+                    return;
+                }
+                console.log('📧 Showing email collection form (async mode)');
                 elements.emailFormOverlay.classList.add('visible');
                 elements.emailInput.focus();
             }
@@ -1251,8 +1256,13 @@
                             state.userEmail = historyResponse.data.user_email;
                             console.log('📧 User email from session:', state.userEmail);
                         }
-                        // Si escaladé sans email, montrer le formulaire
-                        if (historyResponse.data.support_status === 'escalated' && !historyResponse.data.user_email) {
+                        // Capturer le mode async (hors horaires ou pas d'agents connectés)
+                        if (historyResponse.data.async_mode !== undefined) {
+                            state.asyncMode = historyResponse.data.async_mode;
+                            console.log('📧 Async mode:', state.asyncMode, '(within hours:', historyResponse.data.within_support_hours, ')');
+                        }
+                        // Si escaladé en mode async sans email, montrer le formulaire
+                        if (historyResponse.data.support_status === 'escalated' && historyResponse.data.async_mode && !historyResponse.data.user_email) {
                             setTimeout(showEmailForm, 500);
                         }
                     } else {
@@ -1338,10 +1348,23 @@
                         console.log('🚨 Session escalated:', data);
                         state.isHumanSupportActive = true;
                         hideTyping(); // Cacher immédiatement le typing indicator
-                        addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra prochainement.');
+
+                        // Mettre à jour le mode async depuis l'événement
+                        if (data.async_mode !== undefined) {
+                            state.asyncMode = data.async_mode;
+                            console.log('📧 Async mode from event:', state.asyncMode, '(within hours:', data.within_support_hours, ')');
+                        }
+
+                        // Message différent selon le mode
+                        if (state.asyncMode) {
+                            addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra dès que possible.');
+                        } else {
+                            addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller va vous répondre.');
+                        }
                         scrollToBottom();
-                        // Afficher le formulaire de collecte d'email si non renseigné
-                        if (!state.userEmail) {
+
+                        // Afficher le formulaire de collecte d'email si mode async et pas d'email
+                        if (state.asyncMode && !state.userEmail) {
                             setTimeout(showEmailForm, 1000); // Délai pour laisser le message s'afficher
                         }
                     })

@@ -565,6 +565,62 @@ HANDOFF;
         return $this->getSmtpConfig() !== null;
     }
 
+    /**
+     * Vérifie si on est dans les horaires de support configurés.
+     *
+     * Si aucune plage n'est définie, retourne true (support 24/7).
+     * Les horaires sont au format: [['day' => 'monday', 'start' => '09:00', 'end' => '18:00'], ...]
+     */
+    public function isWithinSupportHours(?\DateTimeInterface $at = null): bool
+    {
+        $hours = $this->support_hours;
+
+        // Si pas d'horaires définis, support 24/7
+        if (empty($hours) || !is_array($hours)) {
+            return true;
+        }
+
+        $now = $at ?? now();
+        $currentDay = strtolower($now->format('l')); // 'monday', 'tuesday', etc.
+        $currentTime = $now->format('H:i');
+
+        foreach ($hours as $slot) {
+            if (!isset($slot['day'], $slot['start'], $slot['end'])) {
+                continue;
+            }
+
+            if (strtolower($slot['day']) === $currentDay) {
+                // Vérifier si l'heure actuelle est dans la plage
+                if ($currentTime >= $slot['start'] && $currentTime <= $slot['end']) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si le mode support asynchrone (email) doit être utilisé.
+     *
+     * Retourne true si:
+     * - On est en dehors des horaires de support
+     * - OU aucun agent n'est connecté (à implémenter avec Soketi)
+     */
+    public function shouldUseAsyncSupport(): bool
+    {
+        // En dehors des horaires = mode async
+        if (!$this->isWithinSupportHours()) {
+            return true;
+        }
+
+        // TODO: Vérifier avec Soketi si des agents sont connectés
+        // Pour l'instant, on suppose qu'il y a des agents en ligne pendant les heures
+        // Quand Soketi sera implémenté, ajouter: return !$this->hasConnectedAgents();
+
+        return false;
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // RELATIONS WHITELABEL
     // ─────────────────────────────────────────────────────────────────

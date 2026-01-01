@@ -344,6 +344,8 @@ class PublicChatController extends Controller
 
         $history = $this->dispatcherService->getSessionHistory($session);
 
+        $agent = $session->agent;
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -351,6 +353,9 @@ class PublicChatController extends Controller
                 'messages' => $history,
                 'support_status' => $session->support_status,
                 'user_email' => $session->user_email,
+                // Mode asynchrone (email) si hors horaires ou aucun agent connecté
+                'async_mode' => $agent?->shouldUseAsyncSupport() ?? true,
+                'within_support_hours' => $agent?->isWithinSupportHours() ?? false,
             ],
         ]);
     }
