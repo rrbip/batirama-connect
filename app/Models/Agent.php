@@ -388,37 +388,51 @@ GUARDRAILS;
 
 ## ⚠️ RÈGLE CRITIQUE : TRANSFERT VERS UN HUMAIN
 
-**IMPORTANT : Tu DOIS ajouter le marqueur `[HANDOFF_NEEDED]` à la FIN de ta réponse dans les cas suivants :**
+**ATTENTION : C'est TOI (l'assistant IA) qui doit ajouter le marqueur, PAS l'utilisateur !**
+
+Quand tu détectes une des conditions ci-dessous, TU DOIS terminer ta réponse par le marqueur `[HANDOFF_NEEDED]` sur une ligne séparée à la fin de TON message.
 
 ### CAS 1 : DEMANDE EXPLICITE DE CONTACT HUMAIN (PRIORITÉ ABSOLUE)
-Si l'utilisateur exprime le désir de parler à un humain, tu DOIS ajouter `[HANDOFF_NEEDED]`.
-Expressions à détecter (liste non exhaustive) :
-- "parler à un humain" / "parler à quelqu'un"
+Si l'utilisateur veut parler à un humain/conseiller/support, TU ajoutes immédiatement le marqueur.
+Expressions à détecter :
+- "parler à un humain" / "parler à quelqu'un" / "parler au support"
 - "je peux parler à..." / "puis-je parler à..."
-- "un conseiller" / "un expert" / "une personne"
+- "un conseiller" / "un expert" / "une personne" / "un humain"
 - "contacter" / "joindre" / "appeler"
-- "pas un robot" / "pas une IA" / "vrai personne"
+- "pas un robot" / "pas une IA"
 
 ### CAS 2 : CONTEXTE INSUFFISANT
-Tu n'as pas assez d'informations dans le contexte documentaire pour répondre correctement.
+Tu n'as pas assez d'informations dans le contexte documentaire.
 
 ### CAS 3 : QUESTION COMPLEXE
-La demande nécessite une expertise humaine (devis personnalisé, cas particulier, réclamation, situation urgente).
+Devis personnalisé, cas particulier, réclamation, situation urgente.
 
 ### CAS 4 : INCERTITUDE
 Tu n'es pas sûr de ta réponse (confiance < 60%).
 
 ### CAS 5 : HORS PÉRIMÈTRE
-La question ne correspond pas à ton domaine de compétence.
+La question ne correspond pas à ton domaine.
 
-**FORMAT DE RÉPONSE :**
-1. Réponds brièvement à la question ou explique la situation
-2. TERMINE OBLIGATOIREMENT par le marqueur `[HANDOFF_NEEDED]` sur une nouvelle ligne
+**FORMAT OBLIGATOIRE :**
+1. Écris une courte réponse rassurante
+2. TERMINE par `[HANDOFF_NEEDED]` sur une nouvelle ligne
 
-**EXEMPLE pour demande explicite :**
+**EXEMPLES CORRECTS :**
+
+Exemple 1 (demande explicite) :
 "Bien sûr, je vais vous mettre en relation avec un conseiller qui pourra vous aider personnellement.
 
 [HANDOFF_NEEDED]"
+
+Exemple 2 (contexte insuffisant) :
+"Je n'ai pas cette information précise dans ma base de connaissances. Un conseiller pourra mieux vous renseigner.
+
+[HANDOFF_NEEDED]"
+
+**⛔ NE JAMAIS FAIRE :**
+- Ne dis JAMAIS à l'utilisateur d'ajouter le marqueur lui-même
+- Ne mentionne JAMAIS le marqueur [HANDOFF_NEEDED] dans ta réponse visible
+- C'est TOI qui l'ajoutes silencieusement à la fin
 
 HANDOFF;
     }

@@ -439,11 +439,28 @@
                                                 if ($handoffEnabled) {
                                                     $handoffText .= "\n- Seuil d'escalade configure: " . number_format($escalationThreshold * 100, 0) . "%";
                                                     $handoffText .= "\n- Score RAG maximum obtenu: " . ($maxRagScore > 0 ? number_format($maxRagScore * 100, 1) . '%' : 'Aucun document trouve');
-                                                    $handoffText .= "\n- Decision d'escalade: " . ($wouldEscalate ? 'OUI - Score RAG insuffisant (< seuil)' : ($maxRagScore == 0 ? 'OUI - Aucune source trouvee' : 'NON - Score suffisant'));
+                                                    $handoffText .= "\n- Decision d'escalade (score RAG): " . ($wouldEscalate ? 'OUI - Score RAG insuffisant (< seuil)' : ($maxRagScore == 0 ? 'OUI - Aucune source trouvee' : 'NON - Score suffisant'));
                                                     $handoffText .= "\n- Agents de support configures: " . ($agentForHandoff?->supportUsers()->count() ?? 0);
                                                     if ($agentForHandoff?->support_email) {
                                                         $handoffText .= "\n- Email de support: " . $agentForHandoff->support_email;
                                                     }
+                                                }
+
+                                                // Statut réel d'escalade de la session
+                                                $handoffText .= "\n\n### Statut reel de la session";
+                                                $handoffText .= "\n- Session escaladee: " . ($session->isEscalated() ? 'OUI' : 'NON');
+                                                if ($session->isEscalated()) {
+                                                    $reasonLabel = match($session->escalation_reason) {
+                                                        'low_confidence' => 'Score RAG bas (automatique)',
+                                                        'user_request' => 'Demande utilisateur (bouton)',
+                                                        'user_explicit_request' => 'Detection automatique de demande humain dans le message',
+                                                        'ai_handoff_request' => 'IA a ajoute le marqueur [HANDOFF_NEEDED]',
+                                                        'ai_uncertainty' => 'Incertitude IA',
+                                                        'negative_feedback' => 'Feedback negatif utilisateur',
+                                                        default => $session->escalation_reason ?? 'Inconnu'
+                                                    };
+                                                    $handoffText .= "\n- Raison de l'escalade: " . $reasonLabel;
+                                                    $handoffText .= "\n- Escalade declenchee le: " . ($session->escalated_at ? $session->escalated_at->format('d/m/Y H:i:s') : 'N/A');
                                                 }
                                                 $reportParts[] = $handoffText;
 
@@ -818,6 +835,39 @@
                                                                                                 <li class="flex items-center gap-2">
                                                                                                     <span class="text-gray-600 dark:text-gray-400">Agents support:</span>
                                                                                                     <span class="font-medium">{{ $agentForHandoff?->supportUsers()->count() ?? 0 }}</span>
+                                                                                                </li>
+                                                                                            @endif
+                                                                                        </ul>
+                                                                                    </div>
+
+                                                                                    {{-- Statut réel d'escalade --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">📋 Statut réel de la session</h4>
+                                                                                    <div class="p-3 rounded-lg {{ $session->isEscalated() ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700' : 'bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700' }}">
+                                                                                        <ul class="text-sm space-y-1">
+                                                                                            <li class="flex items-center gap-2">
+                                                                                                <span class="text-gray-600 dark:text-gray-400">Session escaladée:</span>
+                                                                                                <span class="font-bold {{ $session->isEscalated() ? 'text-orange-600 dark:text-orange-400' : 'text-gray-600 dark:text-gray-400' }}">
+                                                                                                    {{ $session->isEscalated() ? 'OUI' : 'NON' }}
+                                                                                                </span>
+                                                                                            </li>
+                                                                                            @if($session->isEscalated())
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Déclencheur:</span>
+                                                                                                    <span class="font-medium text-orange-700 dark:text-orange-300">
+                                                                                                        {{ match($session->escalation_reason) {
+                                                                                                            'low_confidence' => '📊 Score RAG bas (automatique)',
+                                                                                                            'user_request' => '👆 Demande utilisateur (bouton)',
+                                                                                                            'user_explicit_request' => '🔍 Détection automatique (message utilisateur)',
+                                                                                                            'ai_handoff_request' => '🤖 IA a ajouté [HANDOFF_NEEDED]',
+                                                                                                            'ai_uncertainty' => '❓ Incertitude IA',
+                                                                                                            'negative_feedback' => '👎 Feedback négatif',
+                                                                                                            default => $session->escalation_reason ?? 'Inconnu'
+                                                                                                        } }}
+                                                                                                    </span>
+                                                                                                </li>
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Escalade le:</span>
+                                                                                                    <span class="font-medium">{{ $session->escalated_at?->format('d/m/Y H:i:s') ?? 'N/A' }}</span>
                                                                                                 </li>
                                                                                             @endif
                                                                                         </ul>
