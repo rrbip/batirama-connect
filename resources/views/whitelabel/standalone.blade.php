@@ -929,6 +929,7 @@
                         });
 
                         var messageId = response.data.message_id;
+                        var timeoutMs = 300000; // 5 minutes (same as job timeout)
 
                         // Use WebSocket if Echo available, otherwise fallback to polling
                         if (echo) {
@@ -936,7 +937,7 @@
                                 var timeout = setTimeout(function() {
                                     echo.leave('chat.message.' + messageId);
                                     reject(new Error('Délai d\'attente dépassé'));
-                                }, 120000); // 2 minutes timeout
+                                }, timeoutMs);
 
                                 echo.channel('chat.message.' + messageId)
                                     .listen('.completed', function(data) {
@@ -958,7 +959,7 @@
                         } else {
                             // Fallback to polling if WebSocket not available
                             var pollUrl = '/messages/' + messageId + '/status';
-                            var maxAttempts = 120;
+                            var maxAttempts = 300; // 5 minutes (1 poll/second)
                             var attempt = 0;
 
                             while (attempt < maxAttempts) {
