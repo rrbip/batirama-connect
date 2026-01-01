@@ -8,6 +8,19 @@
         'frontendScheme' => config('broadcasting.connections.pusher.frontend.scheme'),
         'cluster' => config('broadcasting.connections.pusher.options.cluster', 'mt1'),
     ];
+
+    // Récupérer les IDs des agents pour lesquels l'utilisateur peut gérer le support
+    $supportAgentIds = [];
+    $user = auth()->user();
+    if ($user) {
+        if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+            // Super-admin et admin peuvent gérer tous les agents
+            $supportAgentIds = \App\Models\Agent::where('human_support_enabled', true)->pluck('id')->toArray();
+        } elseif ($user->hasRole('support-agent')) {
+            // Agent de support: uniquement les agents assignés
+            $supportAgentIds = $user->supportAgents()->where('human_support_enabled', true)->pluck('agents.id')->toArray();
+        }
+    }
 @endphp
 
 <style>
@@ -128,6 +141,7 @@
     window.__globalEscalationListenerInitialized = true;
 
     var soketiConfig = @json($soketiConfig);
+    var supportAgentIds = @json($supportAgentIds);
 
     // Fallback to window.location if frontend config not set
     soketiConfig.frontendHost = soketiConfig.frontendHost || window.location.hostname;
@@ -162,6 +176,7 @@
         if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
             console.log('🔔 Global Escalation Listener: Reusing existing Echo instance');
             subscribeToEscalations();
+            subscribeToPresenceChannels();
             return;
         }
 
@@ -192,6 +207,7 @@
             window.Echo.connector.pusher.connection.bind('connected', function() {
                 console.log('✅ Global Escalation: CONNECTED to Soketi!');
                 subscribeToEscalations();
+                subscribeToPresenceChannels();
             });
 
             window.Echo.connector.pusher.connection.bind('error', function(err) {
@@ -217,6 +233,64 @@
                 showBrowserNotification(data);
             });
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PRESENCE CHANNELS - Track agent availability
+    // ═══════════════════════════════════════════════════════════════
+    // When user connects: joins presence channels for all agents they can handle
+    // When user disconnects (logout, browser close): Soketi auto-removes from all channels
+    var presenceChannels = [];
+
+    function subscribeToPresenceChannels() {
+        if (!supportAgentIds || supportAgentIds.length === 0) {
+            console.log('👥 No agents to track presence for');
+            return;
+        }
+
+        if (!window.Echo.join) {
+            console.warn('👥 Echo.join not available (presence channels require authentication)');
+            return;
+        }
+
+        console.log('👥 Joining presence channels for ' + supportAgentIds.length + ' agent(s)');
+
+        supportAgentIds.forEach(function(agentId) {
+            var channelName = 'presence-agent.' + agentId + '.support';
+
+            try {
+                var channel = window.Echo.join(channelName)
+                    .here(function(members) {
+                        console.log('👥 [Agent ' + agentId + '] Connected agents:', members.length, members.map(function(m) { return m.name; }));
+                    })
+                    .joining(function(member) {
+                        console.log('👥 [Agent ' + agentId + '] Agent joined:', member.name);
+                    })
+                    .leaving(function(member) {
+                        console.log('👥 [Agent ' + agentId + '] Agent left:', member.name);
+                    })
+                    .error(function(error) {
+                        console.warn('👥 [Agent ' + agentId + '] Presence error:', error);
+                    });
+
+                presenceChannels.push({ agentId: agentId, channel: channel });
+            } catch (e) {
+                console.error('👥 Failed to join presence channel for agent ' + agentId + ':', e);
+            }
+        });
+
+        console.log('✅ Presence channels joined for agents:', supportAgentIds);
+    }
+
+    // Cleanup on page unload (for extra safety, though Soketi handles this)
+    window.addEventListener('beforeunload', function() {
+        presenceChannels.forEach(function(pc) {
+            try {
+                window.Echo.leave('presence-agent.' + pc.agentId + '.support');
+            } catch (e) {
+                // Ignore errors during cleanup
+            }
+        });
+    });
 
     function showEscalationToast(data) {
         var container = document.getElementById('escalation-toast-container');

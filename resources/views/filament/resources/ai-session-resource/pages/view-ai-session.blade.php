@@ -1401,34 +1401,8 @@
 
             console.log('✅ WebSocket listeners registered for session:', sessionUuid);
 
-            // ═══════════════════════════════════════════════════════════════
-            // CANAL DE PRÉSENCE AGENT DE SUPPORT
-            // ═══════════════════════════════════════════════════════════════
-            var agentId = @json($session->agent_id);
-
-            if (agentId && window.Echo.join) {
-                var presenceChannelName = 'presence-agent.' + agentId + '.support';
-                console.log('👥 Joining presence channel:', presenceChannelName);
-
-                window.Echo.join(presenceChannelName)
-                    .here(function(members) {
-                        console.log('👥 Presence: Current members:', members);
-                        console.log('👥 Presence: ' + members.length + ' agent(s) connected');
-                    })
-                    .joining(function(member) {
-                        console.log('👥 Presence: Agent joined:', member);
-                    })
-                    .leaving(function(member) {
-                        console.log('👥 Presence: Agent left:', member);
-                    })
-                    .error(function(error) {
-                        console.warn('👥 Presence channel error:', error);
-                    });
-
-                console.log('✅ Presence channel joined for agent:', agentId);
-            } else {
-                console.warn('👥 Presence channel not available (Echo.join not defined or no agentId)');
-            }
+            // Note: La présence des agents est gérée globalement dans global-escalation-listener.blade.php
+            // Quand un admin se connecte à l'app, il rejoint automatiquement les canaux de présence
 
             // ═══════════════════════════════════════════════════════════════
             // ÉCOUTE GLOBALE DES ESCALADES (notifications admin)

@@ -87,6 +87,16 @@ class User extends Authenticatable implements FilamentUser
         return $this->belongsToMany(Role::class, 'user_roles');
     }
 
+    /**
+     * Agents IA pour lesquels cet utilisateur est agent de support.
+     */
+    public function supportAgents(): BelongsToMany
+    {
+        return $this->belongsToMany(Agent::class, 'agent_support_users')
+            ->withPivot(['can_close_conversations', 'can_train_ai', 'can_view_analytics', 'notify_on_escalation'])
+            ->withTimestamps();
+    }
+
     public function aiSessions(): HasMany
     {
         return $this->hasMany(AiSession::class);
