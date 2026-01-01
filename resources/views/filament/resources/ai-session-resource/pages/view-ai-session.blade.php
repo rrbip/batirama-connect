@@ -53,6 +53,8 @@
                                 {{ match($session->escalation_reason) {
                                     'low_confidence' => 'Score RAG bas',
                                     'user_request' => 'Demande utilisateur',
+                                    'user_explicit_request' => 'Demande explicite',
+                                    'ai_handoff_request' => 'Demande IA',
                                     'ai_uncertainty' => 'Incertitude IA',
                                     'negative_feedback' => 'Feedback négatif',
                                     default => $session->escalation_reason ?? '-'
@@ -378,87 +380,97 @@
                                                 $escalationThreshold = $agentForHandoff?->escalation_threshold ?? 0.3;
                                                 $wouldEscalate = $handoffEnabled && $maxRagScore < $escalationThreshold && $maxRagScore > 0;
                                             @endphp
+                                            @php
+                                                // Préparer le rapport complet en PHP pour éviter les problèmes d'échappement JS
+                                                $reportParts = [];
+                                                $reportParts[] = "# Rapport d'analyse IA\n\n## Question utilisateur\n" . $userQuestion;
+                                                $reportParts[] = "\n\n## Reponse de l'IA\n" . $aiResponse;
+                                                $reportParts[] = "\n\n## Contexte fourni a l'IA\n\n### Prompt systeme\n" . $systemPrompt;
+
+                                                // Historique
+                                                $historyText = "\n\n### Historique de conversation (" . count($conversationHistory) . " messages)";
+                                                foreach ($conversationHistory as $historyMsg) {
+                                                    $historyText .= "\n[" . ($historyMsg['role'] ?? 'unknown') . "] " . ($historyMsg['content'] ?? '');
+                                                }
+                                                $reportParts[] = $historyText;
+
+                                                // Filtrage catégorie
+                                                $catText = "\n\n### Filtrage par categorie";
+                                                if (!($stats['use_category_filtering'] ?? false)) {
+                                                    $catText .= "\n- Statut: Desactive pour cet agent";
+                                                } elseif ($catDetect) {
+                                                    $catText .= "\n- Methode de detection: " . ($catDetect['method'] ?? 'N/A');
+                                                    $catText .= "\n- Confiance: " . round(($catDetect['confidence'] ?? 0) * 100) . "%";
+                                                    $catText .= "\n- Categories detectees: " . (!empty($catDetect['categories']) ? implode(', ', array_map(fn($c) => $c['name'] ?? $c, $catDetect['categories'])) : 'Aucune');
+                                                    $catText .= "\n- Resultats filtres: " . ($catDetect['filtered_results_count'] ?? 0);
+                                                    $catText .= "\n- Resultats totaux: " . ($catDetect['total_results_count'] ?? 0);
+                                                    $catText .= "\n- Fallback utilise: " . (($catDetect['used_fallback'] ?? false) ? 'Oui' : 'Non');
+                                                } else {
+                                                    $catText .= "\n- Statut: Active mais aucune categorie detectee";
+                                                }
+                                                $reportParts[] = $catText;
+
+                                                // Documents RAG
+                                                $docsText = "\n\n### Documents RAG (" . count($documentSources) . " sources)";
+                                                foreach ($documentSources as $idx => $doc) {
+                                                    $docsText .= "\n--- Document #" . ($doc['index'] ?? ($idx + 1)) . " (" . ($doc['score'] ?? 0) . "% pertinent) ---";
+                                                    $docsText .= "\nType: " . ($doc['type'] ?? 'unknown');
+                                                    $docsText .= "\nCategorie: " . ($doc['category'] ?? 'Non categorise');
+                                                    $docsText .= "\nSource: " . ($doc['source_doc'] ?? 'N/A');
+                                                    if (!empty($doc['question'])) {
+                                                        $docsText .= "\nQuestion matchee: " . ($doc['question'] ?? '');
+                                                    }
+                                                    $docsText .= "\nContenu: " . ($doc['content'] ?? '[VIDE]');
+                                                }
+                                                $reportParts[] = $docsText;
+
+                                                // Sources apprises
+                                                $learnedText = "\n\n### Sources d'apprentissage (" . count($learnedSources) . " cas)";
+                                                foreach ($learnedSources as $idx => $learned) {
+                                                    $learnedText .= "\n--- Cas #" . ($learned['index'] ?? ($idx + 1)) . " (" . ($learned['score'] ?? 0) . "% similaire) ---";
+                                                    $learnedText .= "\nQ: " . ($learned['question'] ?? '');
+                                                    $learnedText .= "\nR: " . ($learned['answer'] ?? '');
+                                                }
+                                                $reportParts[] = $learnedText;
+
+                                                // Évaluation Handoff
+                                                $handoffText = "\n\n## Evaluation Handoff Humain";
+                                                $handoffText .= "\n- Handoff active: " . ($handoffEnabled ? 'Oui' : 'Non');
+                                                if ($handoffEnabled) {
+                                                    $handoffText .= "\n- Seuil d'escalade configure: " . number_format($escalationThreshold * 100, 0) . "%";
+                                                    $handoffText .= "\n- Score RAG maximum obtenu: " . ($maxRagScore > 0 ? number_format($maxRagScore * 100, 1) . '%' : 'Aucun document trouve');
+                                                    $handoffText .= "\n- Decision d'escalade: " . ($wouldEscalate ? 'OUI - Score RAG insuffisant (< seuil)' : ($maxRagScore == 0 ? 'OUI - Aucune source trouvee' : 'NON - Score suffisant'));
+                                                    $handoffText .= "\n- Agents de support configures: " . ($agentForHandoff?->supportUsers()->count() ?? 0);
+                                                    if ($agentForHandoff?->support_email) {
+                                                        $handoffText .= "\n- Email de support: " . $agentForHandoff->support_email;
+                                                    }
+                                                }
+                                                $reportParts[] = $handoffText;
+
+                                                // Infos techniques
+                                                $techText = "\n\n## Informations techniques";
+                                                $techText .= "\n- Agent: " . ($stats['agent_slug'] ?? 'N/A');
+                                                $techText .= "\n- Modele: " . ($stats['agent_model'] ?? 'N/A');
+                                                $techText .= "\n- Temperature: " . ($stats['temperature'] ?? 'N/A');
+                                                $techText .= "\n- Fenetre contexte: " . ($stats['context_window_size'] ?? 0) . " messages";
+                                                $techText .= "\n- Filtrage categorie: " . (($stats['use_category_filtering'] ?? false) ? 'Active' : 'Desactive');
+                                                $techText .= "\n- Type de reponse: " . (($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans appel LLM)' : 'Generation LLM');
+                                                $reportParts[] = $techText;
+
+                                                $fullReport = implode('', $reportParts);
+                                            @endphp
                                             <div x-data="{
                                                 openContext: false,
                                                 copied: false,
+                                                reportContent: @js($fullReport),
                                                 copyReport() {
-                                                    const report = this.generateReport();
-                                                    navigator.clipboard.writeText(report).then(() => {
+                                                    navigator.clipboard.writeText(this.reportContent).then(() => {
                                                         this.copied = true;
                                                         setTimeout(() => this.copied = false, 2000);
+                                                    }).catch(err => {
+                                                        console.error('Failed to copy report:', err);
+                                                        alert('Erreur lors de la copie. Veuillez réessayer.');
                                                     });
-                                                },
-                                                generateReport() {
-                                                    return `# Rapport d'analyse IA
-
-## Question utilisateur
-{{ addslashes($userQuestion) }}
-
-## Reponse de l'IA
-{{ addslashes($aiResponse) }}
-
-## Contexte fourni a l'IA
-
-### Prompt systeme
-{{ addslashes($systemPrompt) }}
-
-### Historique de conversation ({{ count($conversationHistory) }} messages)
-@foreach($conversationHistory as $historyMsg)
-[{{ $historyMsg['role'] ?? 'unknown' }}] {{ addslashes($historyMsg['content'] ?? '') }}
-@endforeach
-
-### Filtrage par categorie
-@if(!($stats['use_category_filtering'] ?? false))
-- Statut: Desactive pour cet agent
-@elseif($catDetect)
-- Methode de detection: {{ $catDetect['method'] ?? 'N/A' }}
-- Confiance: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%
-- Categories detectees: {{ !empty($catDetect['categories']) ? implode(', ', array_map(fn($c) => $c['name'] ?? $c, $catDetect['categories'])) : 'Aucune' }}
-- Resultats filtres: {{ $catDetect['filtered_results_count'] ?? 0 }}
-- Resultats totaux: {{ $catDetect['total_results_count'] ?? 0 }}
-- Fallback utilise: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui' : 'Non' }}
-@else
-- Statut: Active mais aucune categorie detectee
-@endif
-
-### Documents RAG ({{ count($documentSources) }} sources)
-@foreach($documentSources as $doc)
---- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
-Type: {{ $doc['type'] ?? 'unknown' }}
-Categorie: {{ $doc['category'] ?? 'Non categorise' }}
-Source: {{ $doc['source_doc'] ?? 'N/A' }}
-@if(!empty($doc['question']))
-Question matchee: {{ addslashes($doc['question'] ?? '') }}
-@endif
-Contenu: {{ addslashes($doc['content'] ?? '[VIDE]') }}
-@endforeach
-
-### Sources d'apprentissage ({{ count($learnedSources) }} cas)
-@foreach($learnedSources as $learned)
---- Cas #{{ $learned['index'] ?? $loop->iteration }} ({{ $learned['score'] ?? 0 }}% similaire) ---
-Q: {{ addslashes($learned['question'] ?? '') }}
-R: {{ addslashes($learned['answer'] ?? '') }}
-@endforeach
-
-## Evaluation Handoff Humain
-- Handoff active: {{ $handoffEnabled ? 'Oui' : 'Non' }}
-@if($handoffEnabled)
-- Seuil d'escalade configure: {{ number_format($escalationThreshold * 100, 0) }}%
-- Score RAG maximum obtenu: {{ $maxRagScore > 0 ? number_format($maxRagScore * 100, 1) . '%' : 'Aucun document trouve' }}
-- Decision d'escalade: {{ $wouldEscalate ? 'OUI - Score RAG insuffisant (< seuil)' : ($maxRagScore == 0 ? 'OUI - Aucune source trouvee' : 'NON - Score suffisant') }}
-- Agents de support configures: {{ $agentForHandoff?->supportUsers()->count() ?? 0 }}
-@if($agentForHandoff?->support_email)
-- Email de support: {{ $agentForHandoff->support_email }}
-@endif
-@endif
-
-## Informations techniques
-- Agent: {{ $stats['agent_slug'] ?? 'N/A' }}
-- Modele: {{ $stats['agent_model'] ?? 'N/A' }}
-- Temperature: {{ $stats['temperature'] ?? 'N/A' }}
-- Fenetre contexte: {{ $stats['context_window_size'] ?? 0 }} messages
-- Filtrage categorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Active' : 'Desactive' }}
-- Type de reponse: {{ ($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans appel LLM)' : 'Generation LLM' }}`;
                                                 }
                                             }">
                                                 <button

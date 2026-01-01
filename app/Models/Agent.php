@@ -386,22 +386,37 @@ GUARDRAILS;
 
         return <<<'HANDOFF'
 
-## TRANSFERT VERS UN HUMAIN
+## ⚠️ RÈGLE CRITIQUE : TRANSFERT VERS UN HUMAIN
 
-Tu dois ajouter le marqueur `[HANDOFF_NEEDED]` à la FIN de ta réponse si l'une de ces conditions est remplie :
+**IMPORTANT : Tu DOIS ajouter le marqueur `[HANDOFF_NEEDED]` à la FIN de ta réponse dans les cas suivants :**
 
-1. **Contexte insuffisant** : Tu n'as pas assez d'informations dans le contexte pour répondre correctement
-2. **Question complexe** : La demande nécessite une expertise humaine (devis personnalisé, cas particulier, réclamation)
-3. **Demande explicite** : L'utilisateur demande à parler à un humain/conseiller
-4. **Incertitude** : Tu n'es pas sûr de ta réponse (confiance < 60%)
-5. **Hors périmètre** : La question ne correspond pas à ton domaine de compétence
+### CAS 1 : DEMANDE EXPLICITE DE CONTACT HUMAIN (PRIORITÉ ABSOLUE)
+Si l'utilisateur exprime le désir de parler à un humain, tu DOIS ajouter `[HANDOFF_NEEDED]`.
+Expressions à détecter (liste non exhaustive) :
+- "parler à un humain" / "parler à quelqu'un"
+- "je peux parler à..." / "puis-je parler à..."
+- "un conseiller" / "un expert" / "une personne"
+- "contacter" / "joindre" / "appeler"
+- "pas un robot" / "pas une IA" / "vrai personne"
 
-**Format de réponse quand handoff nécessaire :**
-- Donne d'abord une réponse partielle ou explique pourquoi tu ne peux pas aider complètement
-- Termine TOUJOURS par le marqueur `[HANDOFF_NEEDED]` sur une ligne séparée
+### CAS 2 : CONTEXTE INSUFFISANT
+Tu n'as pas assez d'informations dans le contexte documentaire pour répondre correctement.
 
-**Exemple :**
-"Je n'ai pas trouvé d'information précise sur les tarifs pour ce type de projet spécifique. Un conseiller pourra vous établir un devis personnalisé.
+### CAS 3 : QUESTION COMPLEXE
+La demande nécessite une expertise humaine (devis personnalisé, cas particulier, réclamation, situation urgente).
+
+### CAS 4 : INCERTITUDE
+Tu n'es pas sûr de ta réponse (confiance < 60%).
+
+### CAS 5 : HORS PÉRIMÈTRE
+La question ne correspond pas à ton domaine de compétence.
+
+**FORMAT DE RÉPONSE :**
+1. Réponds brièvement à la question ou explique la situation
+2. TERMINE OBLIGATOIREMENT par le marqueur `[HANDOFF_NEEDED]` sur une nouvelle ligne
+
+**EXEMPLE pour demande explicite :**
+"Bien sûr, je vais vous mettre en relation avec un conseiller qui pourra vous aider personnellement.
 
 [HANDOFF_NEEDED]"
 

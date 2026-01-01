@@ -77,9 +77,12 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Exécuter le RAG complet (embedding, recherche, LLM)
             $response = $ragService->query($agent, $this->userContent, $session);
 
-            // Vérifier si l'IA demande un handoff humain
+            // Vérifier si l'IA demande un handoff humain (via marqueur)
             $needsHandoff = $this->checkHandoffMarker($response->content);
             $cleanContent = $this->removeHandoffMarker($response->content);
+
+            // Backup: Vérifier si l'utilisateur demande explicitement un humain
+            $userRequestsHuman = $this->checkUserRequestsHuman($this->userContent);
 
             // Mettre à jour le message avec la réponse (sans le marqueur)
             $this->message->markAsCompleted(
@@ -95,9 +98,19 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Incrémenter le compteur de messages de la session
             $session->increment('message_count');
 
-            // Si handoff demandé par l'IA, déclencher l'escalade
-            if ($needsHandoff && $agent->human_support_enabled) {
-                $this->triggerEscalation($session, 'ai_handoff_request');
+            // Déclencher l'escalade si:
+            // 1. L'IA a ajouté le marqueur [HANDOFF_NEEDED]
+            // 2. OU l'utilisateur a explicitement demandé un humain
+            if ($agent->human_support_enabled && ($needsHandoff || $userRequestsHuman)) {
+                $reason = $needsHandoff ? 'ai_handoff_request' : 'user_explicit_request';
+                $this->triggerEscalation($session, $reason);
+
+                Log::info('ProcessAiMessageJob: Handoff triggered', [
+                    'session_id' => $session->id,
+                    'reason' => $reason,
+                    'ai_marker' => $needsHandoff,
+                    'user_request' => $userRequestsHuman,
+                ]);
             }
 
             Log::info('ProcessAiMessageJob: Completed successfully', [
@@ -209,6 +222,72 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
         $content = preg_replace('/\n*\[HANDOFF_NEEDED\]\n*/', '', $content);
 
         return trim($content);
+    }
+
+    /**
+     * Vérifie si l'utilisateur demande explicitement à parler à un humain
+     * Backup en cas où l'IA n'ajoute pas le marqueur [HANDOFF_NEEDED]
+     */
+    private function checkUserRequestsHuman(string $userContent): bool
+    {
+        $content = mb_strtolower($userContent);
+
+        // Patterns explicites de demande de contact humain
+        $patterns = [
+            // Demandes directes
+            'parler à un humain',
+            'parler a un humain',
+            'parler à quelqu\'un',
+            'parler a quelqu\'un',
+            'parler avec un humain',
+            'parler avec quelqu\'un',
+            'je veux parler',
+            'je voudrais parler',
+            'puis-je parler',
+            'puis je parler',
+            'je peux parler',
+            'est-ce que je peux parler',
+            'est ce que je peux parler',
+
+            // Demandes de conseiller/expert
+            'un conseiller',
+            'un expert',
+            'une personne',
+            'un humain',
+            'un agent',
+            'quelqu\'un de',
+            'quelqu\'un qui',
+
+            // Refus de l'IA
+            'pas un robot',
+            'pas une ia',
+            'pas une intelligence artificielle',
+            'vrai personne',
+            'vraie personne',
+            'personne réelle',
+            'personne reelle',
+
+            // Contact
+            'contacter quelqu\'un',
+            'joindre quelqu\'un',
+            'être rappelé',
+            'etre rappelé',
+            'etre rappele',
+            'me rappeler',
+            'appeler',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (str_contains($content, $pattern)) {
+                Log::debug('ProcessAiMessageJob: User explicit handoff request detected', [
+                    'pattern' => $pattern,
+                    'content_preview' => substr($userContent, 0, 100),
+                ]);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
