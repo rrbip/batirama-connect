@@ -27,11 +27,15 @@ class AiMessageFailed implements ShouldBroadcast
 
     /**
      * Canal de diffusion public basé sur l'UUID du message.
+     * Broadcast aussi sur le canal session pour l'admin.
      */
     public function broadcastOn(): array
     {
+        $session = $this->message->session;
+
         return [
             new Channel("chat.message.{$this->message->uuid}"),
+            new Channel("chat.session.{$session->uuid}"),
         ];
     }
 

@@ -12,10 +12,10 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * Événement broadcasté quand un message IA est complété.
- * Utilisé pour le chat public (sans authentification).
+ * Événement broadcasté quand un message utilisateur est reçu.
+ * Permet à l'admin de voir le message immédiatement.
  */
-class AiMessageCompleted implements ShouldBroadcast
+class UserMessageReceived implements ShouldBroadcast
 {
     use Dispatchable;
     use InteractsWithSockets;
@@ -26,16 +26,14 @@ class AiMessageCompleted implements ShouldBroadcast
     ) {}
 
     /**
-     * Canal de diffusion public basé sur l'UUID du message.
-     * Sécurisé car l'UUID n'est connu que du client qui a envoyé le message.
-     * Broadcast aussi sur le canal session pour l'admin.
+     * Canal de diffusion basé sur l'UUID de la session.
+     * L'admin s'abonne au canal de session pour voir tous les messages.
      */
     public function broadcastOn(): array
     {
         $session = $this->message->session;
 
         return [
-            new Channel("chat.message.{$this->message->uuid}"),
             new Channel("chat.session.{$session->uuid}"),
         ];
     }
@@ -45,7 +43,7 @@ class AiMessageCompleted implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'completed';
+        return 'user.message';
     }
 
     /**
@@ -55,12 +53,9 @@ class AiMessageCompleted implements ShouldBroadcast
     {
         return [
             'message_id' => $this->message->uuid,
-            'status' => 'completed',
+            'session_id' => $this->message->session->uuid,
+            'role' => 'user',
             'content' => $this->message->content,
-            'model' => $this->message->model_used,
-            'generation_time_ms' => $this->message->generation_time_ms,
-            'tokens_prompt' => $this->message->tokens_prompt,
-            'tokens_completion' => $this->message->tokens_completion,
             'created_at' => $this->message->created_at?->toISOString(),
         ];
     }

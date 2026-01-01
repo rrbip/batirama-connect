@@ -6,6 +6,7 @@ namespace App\Services\AI;
 
 use App\DTOs\AI\LLMResponse;
 use App\DTOs\AI\RagResult;
+use App\Events\Chat\UserMessageReceived;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
@@ -541,6 +542,12 @@ class RagService
 
         // Mettre à jour le compteur de messages
         $session->increment('message_count');
+
+        // Broadcast l'événement si c'est un message utilisateur
+        // Permet à l'admin de voir le message immédiatement
+        if ($role === 'user') {
+            event(new UserMessageReceived($message));
+        }
 
         return $message;
     }

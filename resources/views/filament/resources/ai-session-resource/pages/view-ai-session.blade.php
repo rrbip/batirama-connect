@@ -1123,6 +1123,39 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 console.groupEnd();
             };
             console.log('💡 Tapez soketiStatus() pour voir l\'état');
+
+            // ═══════════════════════════════════════════════════════════════
+            // ÉCOUTE DES MESSAGES EN TEMPS RÉEL
+            // ═══════════════════════════════════════════════════════════════
+            var sessionUuid = @json($session->uuid);
+            var channelName = 'chat.session.' + sessionUuid;
+
+            console.log('📡 Subscribing to channel:', channelName);
+
+            // S'abonner au canal de la session pour les messages en temps réel
+            window.Echo.channel(channelName)
+                .listen('.user.message', function(data) {
+                    console.log('📨 User message received via WebSocket:', data);
+                    // Rafraîchir le composant Livewire pour afficher le nouveau message
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refresh');
+                    }
+                })
+                .listen('.completed', function(data) {
+                    console.log('🤖 AI response received via WebSocket:', data);
+                    // Rafraîchir le composant Livewire pour afficher la réponse IA
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refresh');
+                    }
+                })
+                .listen('.failed', function(data) {
+                    console.log('❌ AI message failed via WebSocket:', data);
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refresh');
+                    }
+                });
+
+            console.log('✅ WebSocket listeners registered for session:', sessionUuid);
         })();
     </script>
     @endpush
