@@ -340,7 +340,90 @@
                                                 $learnedSources = $context['learned_sources'] ?? [];
                                                 $totalSources = count($documentSources) + count($learnedSources);
                                             @endphp
-                                            <div x-data="{ openContext: false }">
+                                            @php
+                                                // Préparer les données pour le rapport
+                                                $userQuestion = '';
+                                                $aiResponse = $message['content'] ?? '';
+                                                $systemPrompt = $context['system_prompt_sent'] ?? '';
+                                                $conversationHistory = $context['conversation_history'] ?? [];
+                                                $stats = $context['stats'] ?? [];
+                                                $catDetect = $context['category_detection'] ?? null;
+
+                                                // Trouver la question utilisateur (message précédent)
+                                                if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
+                                                    $userQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
+                                                }
+                                            @endphp
+                                            <div x-data="{
+                                                openContext: false,
+                                                copied: false,
+                                                copyReport() {
+                                                    const report = this.generateReport();
+                                                    navigator.clipboard.writeText(report).then(() => {
+                                                        this.copied = true;
+                                                        setTimeout(() => this.copied = false, 2000);
+                                                    });
+                                                },
+                                                generateReport() {
+                                                    return `# Rapport d'analyse IA
+
+## Question utilisateur
+{{ addslashes($userQuestion) }}
+
+## Reponse de l'IA
+{{ addslashes($aiResponse) }}
+
+## Contexte fourni a l'IA
+
+### Prompt systeme
+{{ addslashes($systemPrompt) }}
+
+### Historique de conversation ({{ count($conversationHistory) }} messages)
+@foreach($conversationHistory as $historyMsg)
+[{{ $historyMsg['role'] ?? 'unknown' }}] {{ addslashes($historyMsg['content'] ?? '') }}
+@endforeach
+
+### Filtrage par categorie
+@if(!($stats['use_category_filtering'] ?? false))
+- Statut: Desactive pour cet agent
+@elseif($catDetect)
+- Methode de detection: {{ $catDetect['method'] ?? 'N/A' }}
+- Confiance: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%
+- Categories detectees: {{ !empty($catDetect['categories']) ? implode(', ', array_map(fn($c) => $c['name'] ?? $c, $catDetect['categories'])) : 'Aucune' }}
+- Resultats filtres: {{ $catDetect['filtered_results_count'] ?? 0 }}
+- Resultats totaux: {{ $catDetect['total_results_count'] ?? 0 }}
+- Fallback utilise: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui' : 'Non' }}
+@else
+- Statut: Active mais aucune categorie detectee
+@endif
+
+### Documents RAG ({{ count($documentSources) }} sources)
+@foreach($documentSources as $doc)
+--- Document #{{ $doc['index'] ?? $loop->iteration }} ({{ $doc['score'] ?? 0 }}% pertinent) ---
+Type: {{ $doc['type'] ?? 'unknown' }}
+Categorie: {{ $doc['category'] ?? 'Non categorise' }}
+Source: {{ $doc['source_doc'] ?? 'N/A' }}
+@if(!empty($doc['question']))
+Question matchee: {{ addslashes($doc['question'] ?? '') }}
+@endif
+Contenu: {{ addslashes($doc['content'] ?? '[VIDE]') }}
+@endforeach
+
+### Sources d'apprentissage ({{ count($learnedSources) }} cas)
+@foreach($learnedSources as $learned)
+--- Cas #{{ $learned['index'] ?? $loop->iteration }} ({{ $learned['score'] ?? 0 }}% similaire) ---
+Q: {{ addslashes($learned['question'] ?? '') }}
+R: {{ addslashes($learned['answer'] ?? '') }}
+@endforeach
+
+## Informations techniques
+- Agent: {{ $stats['agent_slug'] ?? 'N/A' }}
+- Modele: {{ $stats['agent_model'] ?? 'N/A' }}
+- Temperature: {{ $stats['temperature'] ?? 'N/A' }}
+- Fenetre contexte: {{ $stats['context_window_size'] ?? 0 }} messages
+- Filtrage categorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Active' : 'Desactive' }}`;
+                                                }
+                                            }">
                                                 <button
                                                     type="button"
                                                     @click="openContext = true"
@@ -562,6 +645,87 @@
                                                                 @if(empty($documentSources) && empty($learnedSources) && empty($context['system_prompt_sent']))
                                                                     <p class="text-gray-500 text-center py-8">Aucune donnée de contexte RAG disponible</p>
                                                                 @endif
+
+                                                                {{-- Rapport pour analyse --}}
+                                                                <div class="border-2 border-indigo-300 dark:border-indigo-600 rounded-lg overflow-hidden">
+                                                                    <div class="bg-indigo-50 dark:bg-indigo-950 px-4 py-3 border-b border-indigo-200 dark:border-indigo-700">
+                                                                        <h3 class="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-clipboard-document class="w-5 h-5" />
+                                                                            Rapport pour analyse (copier pour Claude)
+                                                                        </h3>
+                                                                    </div>
+                                                                    <div class="p-4 bg-gray-50 dark:bg-gray-900">
+                                                                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                                                                            Cliquez sur le bouton ci-dessous pour copier un rapport complet que vous pouvez envoyer à Claude ou un autre LLM pour analyser pourquoi l'IA n'a pas bien répondu.
+                                                                        </p>
+                                                                        <div class="flex items-center gap-3 mb-4">
+                                                                            <button
+                                                                                @click="copyReport()"
+                                                                                type="button"
+                                                                                class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                                                                            >
+                                                                                <template x-if="!copied">
+                                                                                    <span class="flex items-center gap-2">
+                                                                                        <x-heroicon-o-clipboard-document class="w-4 h-4" />
+                                                                                        Copier le rapport complet
+                                                                                    </span>
+                                                                                </template>
+                                                                                <template x-if="copied">
+                                                                                    <span class="flex items-center gap-2">
+                                                                                        <x-heroicon-o-check class="w-4 h-4" />
+                                                                                        Copié !
+                                                                                    </span>
+                                                                                </template>
+                                                                            </button>
+                                                                        </div>
+
+                                                                        {{-- Aperçu du rapport en lecture humaine --}}
+                                                                        <details class="mt-4">
+                                                                            <summary class="text-sm text-indigo-600 dark:text-indigo-400 cursor-pointer hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
+                                                                                Voir l'aperçu du rapport
+                                                                            </summary>
+                                                                            <div class="mt-3 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-96 overflow-y-auto">
+                                                                                <div class="prose prose-sm dark:prose-invert max-w-none">
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mb-2">Question utilisateur</h4>
+                                                                                    <p class="text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-2 rounded">{{ $userQuestion ?: '(Non disponible)' }}</p>
+
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Réponse de l'IA</h4>
+                                                                                    <p class="text-gray-600 dark:text-gray-400 bg-green-50 dark:bg-green-900/20 p-2 rounded">{{ \Illuminate\Support\Str::limit($aiResponse, 300) }}</p>
+
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Résumé du contexte</h4>
+                                                                                    <ul class="text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1">
+                                                                                        <li>{{ count($documentSources) }} documents RAG</li>
+                                                                                        <li>{{ count($learnedSources) }} sources apprises</li>
+                                                                                        <li>{{ count($conversationHistory) }} messages d'historique</li>
+                                                                                        <li>Modèle: {{ $stats['agent_model'] ?? 'N/A' }}</li>
+                                                                                        <li>Filtrage catégorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Activé' : 'Désactivé' }}</li>
+                                                                                        @if($catDetect)
+                                                                                            <li>Confiance détection: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%</li>
+                                                                                        @endif
+                                                                                    </ul>
+
+                                                                                    @if(!empty($documentSources))
+                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Documents RAG (aperçu)</h4>
+                                                                                        @foreach(array_slice($documentSources, 0, 3) as $doc)
+                                                                                            <div class="text-xs p-2 mb-2 rounded {{ empty(trim($doc['content'] ?? '')) ? 'bg-red-50 dark:bg-red-900/20 border border-red-200' : 'bg-gray-100 dark:bg-gray-700' }}">
+                                                                                                <strong>#{{ $doc['index'] ?? $loop->iteration }}</strong> ({{ $doc['score'] ?? 0 }}%)
+                                                                                                - {{ $doc['type'] ?? 'unknown' }}
+                                                                                                @if(empty(trim($doc['content'] ?? '')))
+                                                                                                    <span class="text-red-600 dark:text-red-400">[CONTENU VIDE]</span>
+                                                                                                @else
+                                                                                                    : {{ \Illuminate\Support\Str::limit($doc['content'] ?? '', 100) }}
+                                                                                                @endif
+                                                                                            </div>
+                                                                                        @endforeach
+                                                                                        @if(count($documentSources) > 3)
+                                                                                            <p class="text-xs text-gray-500">... et {{ count($documentSources) - 3 }} autres documents</p>
+                                                                                        @endif
+                                                                                    @endif
+                                                                                </div>
+                                                                            </div>
+                                                                        </details>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
