@@ -117,6 +117,9 @@ class PublicLinksManager extends Component implements HasForms, HasTable
                     ->label('Générer un lien')
                     ->icon('heroicon-o-plus')
                     ->color('primary')
+                    ->modalHeading('Générer un nouveau lien')
+                    ->modalSubmitActionLabel('Générer')
+                    ->modalWidth('md')
                     ->form([
                         TextInput::make('client_email')
                             ->label('Email client (optionnel)')
