@@ -29,16 +29,37 @@ class AiMessageCompleted implements ShouldBroadcastNow
     /**
      * Canal de diffusion public basé sur l'UUID du message.
      * Sécurisé car l'UUID n'est connu que du client qui a envoyé le message.
-     * Broadcast aussi sur le canal session pour l'admin.
+     *
+     * IMPORTANT: Quand le support humain est actif (escalated/assigned),
+     * on ne broadcast PAS au standalone pour éviter que l'utilisateur
+     * voie les réponses non validées.
      */
     public function broadcastOn(): array
     {
         $session = $this->message->session;
+        $channels = [];
 
-        return [
-            new Channel("chat.message.{$this->message->uuid}"),
-            new Channel("chat.session.{$session->uuid}"),
-        ];
+        // Canal pour l'admin (toujours inclus)
+        $channels[] = new Channel("chat.session.{$session->uuid}");
+
+        // Canal pour le standalone (seulement si PAS en mode support humain)
+        // Quand support humain actif, l'admin doit valider avant que l'utilisateur voie
+        if (!$this->isHumanSupportActive()) {
+            $channels[] = new Channel("chat.message.{$this->message->uuid}");
+        }
+
+        return $channels;
+    }
+
+    /**
+     * Vérifie si le support humain est actif sur cette session
+     */
+    private function isHumanSupportActive(): bool
+    {
+        $session = $this->message->session;
+
+        // Support actif si la session est escaladée ou assignée
+        return in_array($session->support_status, ['escalated', 'assigned']);
     }
 
     /**
@@ -63,6 +84,7 @@ class AiMessageCompleted implements ShouldBroadcastNow
             'tokens_prompt' => $this->message->tokens_prompt,
             'tokens_completion' => $this->message->tokens_completion,
             'created_at' => $this->message->created_at?->toISOString(),
+            'needs_validation' => $this->isHumanSupportActive(),
         ];
     }
 }

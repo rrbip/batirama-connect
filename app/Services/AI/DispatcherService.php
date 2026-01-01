@@ -199,18 +199,56 @@ class DispatcherService
 
     /**
      * Récupère l'historique d'une session
+     * Inclut les messages IA et les messages de support (système, agent)
      */
     public function getSessionHistory(AiSession $session, int $limit = 50): array
     {
-        return $session->messages()
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+
+        // Messages IA (filtrer les non-validés si support humain actif)
+        $aiMessagesQuery = $session->messages();
+
+        if ($isHumanSupportActive) {
+            $aiMessagesQuery->where(function ($query) {
+                $query->where('role', 'user')
+                      ->orWhere(function ($q) {
+                          $q->where('role', 'assistant')
+                            ->whereIn('validation_status', ['validated', 'learned']);
+                      });
+            });
+        }
+
+        $aiMessages = $aiMessagesQuery
             ->orderBy('created_at', 'asc')
             ->orderBy('id', 'asc')
             ->take($limit)
             ->get()
             ->map(fn($msg) => [
                 'role' => $msg->role,
+                'content' => $msg->corrected_content ?? $msg->content,
+                'created_at' => $msg->created_at,
+            ]);
+
+        // Messages de support (agent, system)
+        $supportMessages = $session->supportMessages()
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(fn($msg) => [
+                'role' => $msg->sender_type === 'agent' ? 'support' : 'system',
                 'content' => $msg->content,
-                'created_at' => $msg->created_at->toIso8601String(),
+                'sender_name' => $msg->sender?->name ?? null,
+                'created_at' => $msg->created_at,
+            ]);
+
+        // Fusionner et trier par date
+        return $aiMessages->concat($supportMessages)
+            ->sortBy('created_at')
+            ->values()
+            ->map(fn($msg) => [
+                'role' => $msg['role'],
+                'content' => $msg['content'],
+                'sender_name' => $msg['sender_name'] ?? null,
+                'created_at' => $msg['created_at']->toIso8601String(),
             ])
             ->toArray();
     }

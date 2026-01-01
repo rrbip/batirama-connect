@@ -213,6 +213,7 @@ class WidgetController extends Controller
 
     /**
      * Récupère l'historique des messages d'une session.
+     * Inclut les messages IA et les messages de support (système, agent).
      */
     public function getMessages(Request $request, string $sessionId): JsonResponse
     {
@@ -230,20 +231,60 @@ class WidgetController extends Controller
             ], 404);
         }
 
-        $messages = $session->messages()
-            ->orderBy('created_at', 'asc')
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+
+        // Messages IA (filtrer les non-validés si support humain actif)
+        $aiMessages = $session->messages()
+            ->when($isHumanSupportActive, function ($query) {
+                // Si support actif, n'afficher que:
+                // - Messages user
+                // - Messages assistant validés ou appris
+                $query->where(function ($q) {
+                    $q->where('role', 'user')
+                      ->orWhere(function ($q2) {
+                          $q2->where('role', 'assistant')
+                             ->whereIn('validation_status', ['validated', 'learned']);
+                      });
+                });
+            })
             ->get()
             ->map(fn ($msg) => [
                 'message_id' => $msg->uuid,
                 'role' => $msg->role,
-                'content' => $msg->content,
+                'content' => $msg->corrected_content ?? $msg->content,
                 'sources' => $msg->metadata['sources'] ?? [],
-                'created_at' => $msg->created_at->toIso8601String(),
+                'created_at' => $msg->created_at,
+                'type' => 'ai',
+            ]);
+
+        // Messages de support (agent, system)
+        $supportMessages = $session->supportMessages()
+            ->get()
+            ->map(fn ($msg) => [
+                'message_id' => $msg->uuid,
+                'role' => $msg->sender_type === 'agent' ? 'support' : 'system',
+                'content' => $msg->content,
+                'sender_name' => $msg->sender?->name ?? null,
+                'created_at' => $msg->created_at,
+                'type' => 'support',
+            ]);
+
+        // Fusionner et trier par date
+        $allMessages = $aiMessages->concat($supportMessages)
+            ->sortBy('created_at')
+            ->values()
+            ->map(fn ($msg) => [
+                'message_id' => $msg['message_id'],
+                'role' => $msg['role'],
+                'content' => $msg['content'],
+                'sender_name' => $msg['sender_name'] ?? null,
+                'sources' => $msg['sources'] ?? [],
+                'created_at' => $msg['created_at']->toIso8601String(),
             ]);
 
         return response()->json([
             'session_id' => $session->uuid,
-            'messages' => $messages,
+            'messages' => $allMessages,
         ]);
     }
 

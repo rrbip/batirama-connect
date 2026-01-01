@@ -1019,7 +1019,7 @@
                         var historyResponse = await apiRequest('GET', '/c/' + CONFIG.token + '/history');
                         if (historyResponse.data.messages) {
                             historyResponse.data.messages.forEach(function(msg) {
-                                addMessage(msg);
+                                loadMessageByRole(msg);
                             });
                         }
                     } else {
@@ -1031,7 +1031,7 @@
 
                         if (sessionResponse.messages) {
                             sessionResponse.messages.forEach(function(msg) {
-                                addMessage(msg);
+                                loadMessageByRole(msg);
                             });
                         }
                     }
@@ -1098,6 +1098,17 @@
                         console.log('🚨 Session escalated:', data);
                         addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra prochainement.');
                         scrollToBottom();
+                    })
+                    // Listen for validated AI messages (after admin approval in human support mode)
+                    .listen('.message.validated', function(data) {
+                        console.log('✅ AI message validated:', data);
+                        // Afficher la réponse IA validée (ou corrigée)
+                        addMessage({
+                            role: 'assistant',
+                            content: data.content,
+                            created_at: data.created_at
+                        });
+                        scrollToBottom();
                     });
 
                 console.log('✅ Session channel subscribed');
@@ -1110,6 +1121,15 @@
                 messageDiv.className = 'system-message';
                 messageDiv.innerHTML = '<div class="system-message-content">' + escapeHtml(content) + '</div>';
                 container.appendChild(messageDiv);
+            }
+
+            // Load message by role (used when loading history)
+            function loadMessageByRole(msg) {
+                if (msg.role === 'system') {
+                    addSystemMessage(msg.content);
+                } else {
+                    addMessage(msg);
+                }
             }
 
             // Create session for widget mode (called on first message)

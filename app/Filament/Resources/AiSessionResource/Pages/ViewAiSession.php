@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\AiSessionResource\Pages;
 
+use App\Events\Chat\AiMessageValidated;
 use App\Filament\Resources\AiSessionResource;
 use App\Models\AiMessage;
 use App\Models\SupportMessage;
@@ -403,6 +404,13 @@ class ViewAiSession extends ViewRecord
         try {
             app(LearningService::class)->validate($message, auth()->id());
 
+            // Broadcast au standalone si support humain actif
+            // pour que l'utilisateur voie maintenant la réponse validée
+            $message->refresh();
+            if ($this->record->isEscalated()) {
+                broadcast(new AiMessageValidated($message));
+            }
+
             Notification::make()
                 ->title('Réponse validée')
                 ->body('La réponse a été marquée comme correcte.')
@@ -469,6 +477,13 @@ class ViewAiSession extends ViewRecord
             );
 
             if ($result) {
+                // Broadcast au standalone si support humain actif
+                // pour que l'utilisateur voie la réponse corrigée
+                $message->refresh();
+                if ($this->record->isEscalated()) {
+                    broadcast(new AiMessageValidated($message));
+                }
+
                 Notification::make()
                     ->title('Correction enregistrée')
                     ->body('La réponse corrigée a été indexée pour l\'apprentissage.')
