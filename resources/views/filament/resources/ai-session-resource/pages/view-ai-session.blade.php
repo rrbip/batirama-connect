@@ -334,15 +334,93 @@
 
                                         {{-- Bouton contexte RAG --}}
                                         @if(!empty($message['rag_context']))
-                                            <button
-                                                type="button"
-                                                x-data
-                                                x-on:click="$dispatch('open-modal', { id: 'context-modal-{{ $message['id'] }}' })"
-                                                class="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                                            >
-                                                <x-heroicon-o-document-magnifying-glass class="w-3 h-3" />
-                                                Voir le contexte
-                                            </button>
+                                            @php
+                                                $context = $message['rag_context'];
+                                                $documentSources = $context['document_sources'] ?? [];
+                                                $learnedSources = $context['learned_sources'] ?? [];
+                                                $totalSources = count($documentSources) + count($learnedSources);
+                                            @endphp
+                                            <div x-data="{ openContext: false }">
+                                                <button
+                                                    type="button"
+                                                    @click="openContext = true"
+                                                    class="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                                >
+                                                    <x-heroicon-o-document-magnifying-glass class="w-3 h-3" />
+                                                    Voir le contexte ({{ $totalSources }})
+                                                </button>
+
+                                                {{-- Modal contexte RAG --}}
+                                                <template x-teleport="body">
+                                                    <div
+                                                        x-show="openContext"
+                                                        x-transition:enter="transition ease-out duration-200"
+                                                        x-transition:enter-start="opacity-0"
+                                                        x-transition:enter-end="opacity-100"
+                                                        x-transition:leave="transition ease-in duration-150"
+                                                        x-transition:leave-start="opacity-100"
+                                                        x-transition:leave-end="opacity-0"
+                                                        class="fixed inset-0 z-50 overflow-hidden"
+                                                        style="display: none;"
+                                                    >
+                                                        <div class="absolute inset-0 bg-black/50" @click="openContext = false"></div>
+                                                        <div class="absolute inset-4 md:inset-8 lg:inset-12 bg-white dark:bg-gray-900 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+                                                            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                                                                <div>
+                                                                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Contexte RAG</h2>
+                                                                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ $totalSources }} source(s)</p>
+                                                                </div>
+                                                                <button @click="openContext = false" class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                                                                    <x-heroicon-o-x-mark class="w-6 h-6" />
+                                                                </button>
+                                                            </div>
+                                                            <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                                                                @if(!empty($documentSources))
+                                                                    <div class="space-y-3">
+                                                                        <h3 class="font-semibold text-gray-700 dark:text-gray-300">Documents RAG ({{ count($documentSources) }})</h3>
+                                                                        @foreach($documentSources as $doc)
+                                                                            @php
+                                                                                $hasEmptyContent = empty(trim($doc['content'] ?? ''));
+                                                                            @endphp
+                                                                            <div class="border {{ $hasEmptyContent ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700' }} rounded-lg p-3">
+                                                                                <div class="flex justify-between items-start mb-2">
+                                                                                    <span class="font-medium text-sm">{{ $doc['source_doc'] ?? $doc['metadata']['title'] ?? 'Document #' . ($doc['index'] ?? $loop->iteration) }}</span>
+                                                                                    <span class="text-xs px-2 py-0.5 rounded {{ $hasEmptyContent ? 'bg-red-100 text-red-700' : 'bg-cyan-100 text-cyan-700' }}">{{ $doc['score'] ?? 0 }}%</span>
+                                                                                </div>
+                                                                                @if($hasEmptyContent)
+                                                                                    <div class="p-2 bg-red-50 dark:bg-red-900/30 rounded text-red-600 dark:text-red-300 text-sm">
+                                                                                        <x-heroicon-o-exclamation-triangle class="w-4 h-4 inline" />
+                                                                                        Contenu vide - problème d'indexation
+                                                                                    </div>
+                                                                                @else
+                                                                                    <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">{{ $doc['content'] }}</pre>
+                                                                                @endif
+                                                                            </div>
+                                                                        @endforeach
+                                                                    </div>
+                                                                @endif
+                                                                @if(!empty($learnedSources))
+                                                                    <div class="space-y-3">
+                                                                        <h3 class="font-semibold text-gray-700 dark:text-gray-300">Sources apprises ({{ count($learnedSources) }})</h3>
+                                                                        @foreach($learnedSources as $learned)
+                                                                            <div class="border border-amber-200 dark:border-amber-700 rounded-lg p-3 bg-amber-50 dark:bg-amber-900/20">
+                                                                                <div class="flex justify-between items-start mb-2">
+                                                                                    <span class="font-medium text-sm">Q: {{ \Illuminate\Support\Str::limit($learned['question'] ?? '', 60) }}</span>
+                                                                                    <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">{{ $learned['score'] ?? 0 }}%</span>
+                                                                                </div>
+                                                                                <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">{{ $learned['answer'] ?? '' }}</pre>
+                                                                            </div>
+                                                                        @endforeach
+                                                                    </div>
+                                                                @endif
+                                                                @if(empty($documentSources) && empty($learnedSources))
+                                                                    <p class="text-gray-500 text-center py-8">Aucune source RAG disponible</p>
+                                                                @endif
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
                                         @endif
                                     </div>
                                 </div>

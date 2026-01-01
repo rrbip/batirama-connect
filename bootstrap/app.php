@@ -37,5 +37,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Ensure API routes always return JSON responses
+        $exceptions->shouldRenderJsonWhen(function ($request, $e) {
+            // Return JSON for API routes or when Accept header requests JSON
+            return $request->is('api/*') || $request->expectsJson();
+        });
     })->create();

@@ -15,10 +15,23 @@ class LLMServiceFactory
 {
     /**
      * Crée le service LLM approprié pour un agent.
+     *
+     * Falls back to Ollama if:
+     * - The configured provider requires an API key but none is set
+     * - The provider is not supported
      */
     public static function forAgent(Agent $agent): OllamaService|GeminiService
     {
         $provider = $agent->getLLMProvider();
+
+        // Check if provider requires API key and if it's available
+        if ($provider->requiresApiKey() && empty($agent->llm_api_key)) {
+            \Illuminate\Support\Facades\Log::warning('LLMServiceFactory: API key missing for provider, falling back to Ollama', [
+                'agent' => $agent->slug,
+                'provider' => $provider->value,
+            ]);
+            return OllamaService::forAgent($agent);
+        }
 
         return match ($provider) {
             LLMProvider::GEMINI => GeminiService::forAgent($agent),
