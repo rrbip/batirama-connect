@@ -716,11 +716,11 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                 <div class="prose prose-sm dark:prose-invert max-w-none">
                                                                                     {{-- Question utilisateur --}}
                                                                                     <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mb-2">📝 Question utilisateur</h4>
-                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-3 rounded whitespace-pre-wrap">{{ $userQuestion ?: '(Non disponible)' }}</div>
+                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded whitespace-pre-wrap">{{ $userQuestion ?: '(Non disponible)' }}</div>
 
                                                                                     {{-- Réponse IA complète --}}
                                                                                     <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🤖 Réponse de l'IA</h4>
-                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-green-50 dark:bg-green-900/20 p-3 rounded whitespace-pre-wrap">{{ $aiResponse ?: '(Non disponible)' }}</div>
+                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded whitespace-pre-wrap">{{ $aiResponse ?: '(Non disponible)' }}</div>
 
                                                                                     {{-- Prompt système --}}
                                                                                     @if(!empty($systemPrompt))
@@ -731,9 +731,9 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                     {{-- Historique de conversation --}}
                                                                                     @if(!empty($conversationHistory))
                                                                                         <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">💬 Historique de conversation ({{ count($conversationHistory) }} messages)</h4>
-                                                                                        <div class="bg-gray-50 dark:bg-gray-700/50 p-3 rounded space-y-2 max-h-64 overflow-y-auto">
+                                                                                        <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded space-y-2 max-h-64 overflow-y-auto">
                                                                                             @foreach($conversationHistory as $histMsg)
-                                                                                                <div class="text-xs border-l-2 {{ ($histMsg['role'] ?? '') === 'user' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-green-500 bg-green-50 dark:bg-green-900/20' }} pl-3 py-2 rounded-r">
+                                                                                                <div class="text-xs border-l-2 {{ ($histMsg['role'] ?? '') === 'user' ? 'border-blue-500' : 'border-green-500' }} bg-white dark:bg-gray-800 pl-3 py-2 rounded-r">
                                                                                                     <span class="font-bold {{ ($histMsg['role'] ?? '') === 'user' ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400' }}">
                                                                                                         [{{ $histMsg['role'] ?? 'unknown' }}]
                                                                                                     </span>
@@ -745,7 +745,7 @@ R: {{ addslashes($learned['answer'] ?? '') }}
 
                                                                                     {{-- Filtrage par catégorie --}}
                                                                                     <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🏷️ Filtrage par catégorie</h4>
-                                                                                    <div class="bg-purple-50 dark:bg-purple-900/20 p-3 rounded text-sm">
+                                                                                    <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm">
                                                                                         @if(!($stats['use_category_filtering'] ?? false))
                                                                                             <p class="text-gray-600 dark:text-gray-400">Statut: <strong>Désactivé</strong> pour cet agent</p>
                                                                                         @elseif($catDetect)
