@@ -626,7 +626,14 @@
 
             // Initialize Echo for WebSocket
             var echo = null;
-            if (typeof Echo !== 'undefined' && CONFIG.soketi.key) {
+            console.log('🔌 Soketi Config:', CONFIG.soketi);
+            console.log('🔌 Echo available:', typeof Echo !== 'undefined');
+            console.log('🔌 Pusher available:', typeof Pusher !== 'undefined');
+
+            if (typeof Echo !== 'undefined' && CONFIG.soketi.key && CONFIG.soketi.key !== 'app-key') {
+                // Enable Pusher logging for debugging
+                Pusher.logToConsole = true;
+
                 echo = new Echo({
                     broadcaster: 'pusher',
                     key: CONFIG.soketi.key,
@@ -639,6 +646,23 @@
                     enabledTransports: ['ws', 'wss'],
                     cluster: CONFIG.soketi.cluster
                 });
+
+                // Log connection state
+                echo.connector.pusher.connection.bind('connected', function() {
+                    console.log('✅ Soketi WebSocket CONNECTED');
+                });
+
+                echo.connector.pusher.connection.bind('disconnected', function() {
+                    console.log('❌ Soketi WebSocket DISCONNECTED');
+                });
+
+                echo.connector.pusher.connection.bind('error', function(err) {
+                    console.error('❌ Soketi WebSocket ERROR:', err);
+                });
+
+                console.log('🔌 Soketi WebSocket initialized');
+            } else {
+                console.warn('⚠️ Soketi WebSocket not configured. Key:', CONFIG.soketi.key);
             }
 
             // State
