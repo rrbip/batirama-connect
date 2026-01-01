@@ -26,6 +26,7 @@
 
         html, body {
             height: 100%;
+            overflow: hidden;
         }
 
         body {
@@ -33,22 +34,16 @@
             font-size: 14px;
             line-height: 1.5;
             color: var(--text-color);
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
+            background: var(--bg-color);
+            height: 100vh;
+            margin: 0;
+            padding: 0;
         }
 
         .chat-wrapper {
             width: 100%;
-            max-width: 480px;
-            height: calc(100vh - 40px);
-            max-height: 700px;
+            height: 100vh;
             background: var(--bg-color);
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             display: flex;
             flex-direction: column;
             overflow: hidden;
