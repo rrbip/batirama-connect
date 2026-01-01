@@ -24,6 +24,24 @@ class ViewAiSession extends ViewRecord
     protected static string $view = 'filament.resources.ai-session-resource.pages.view-ai-session';
 
     // ─────────────────────────────────────────────────────────────────
+    // WEBSOCKET LISTENERS
+    // ─────────────────────────────────────────────────────────────────
+
+    #[On('refreshMessages')]
+    public function refreshMessages(): void
+    {
+        // Force refresh of the record and its messages
+        $this->record->refresh();
+        $this->record->load('messages', 'supportMessages');
+    }
+
+    #[On('refreshSession')]
+    public function refreshSession(): void
+    {
+        $this->record->refresh();
+    }
+
+    // ─────────────────────────────────────────────────────────────────
     // PROPRIÉTÉS SUPPORT HUMAIN
     // ─────────────────────────────────────────────────────────────────
 

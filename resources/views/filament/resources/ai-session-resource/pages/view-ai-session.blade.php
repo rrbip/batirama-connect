@@ -999,4 +999,56 @@ R: {{ addslashes($learned['answer'] ?? '') }}
             </x-filament::section>
         </div>
     </div>
+
+    {{-- WebSocket Soketi for real-time updates --}}
+    @push('scripts')
+    <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const sessionUuid = @json($session->uuid);
+            const soketiConfig = {
+                key: @json(config('broadcasting.connections.pusher.key')),
+                host: @json(config('broadcasting.connections.pusher.options.host')),
+                port: @json(config('broadcasting.connections.pusher.options.port')),
+                scheme: @json(config('broadcasting.connections.pusher.options.scheme', 'http')),
+                cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
+            };
+
+            if (typeof Echo !== 'undefined' && soketiConfig.key) {
+                const echo = new Echo({
+                    broadcaster: 'pusher',
+                    key: soketiConfig.key,
+                    wsHost: soketiConfig.host,
+                    wsPort: soketiConfig.port,
+                    wssPort: soketiConfig.port,
+                    forceTLS: soketiConfig.scheme === 'https',
+                    encrypted: soketiConfig.scheme === 'https',
+                    disableStats: true,
+                    enabledTransports: ['ws', 'wss'],
+                    cluster: soketiConfig.cluster
+                });
+
+                // Listen for new messages on this session
+                echo.private('session.' + sessionUuid)
+                    .listen('.message.new', function(data) {
+                        console.log('New message received:', data);
+                        // Refresh Livewire component
+                        Livewire.dispatch('refreshMessages');
+                    });
+
+                // Listen for session updates
+                echo.private('session.' + sessionUuid)
+                    .listen('.session.updated', function(data) {
+                        console.log('Session updated:', data);
+                        Livewire.dispatch('refreshSession');
+                    });
+
+                console.log('Soketi WebSocket connected for session:', sessionUuid);
+            } else {
+                console.warn('Soketi WebSocket not configured');
+            }
+        });
+    </script>
+    @endpush
 </x-filament-panels::page>
