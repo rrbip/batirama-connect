@@ -892,18 +892,42 @@
                     var response;
 
                     if (CONFIG.tokenMode) {
-                        // Legacy mode - use /c/{token}/message
+                        // Legacy mode - use /c/{token}/message with async polling
                         response = await apiRequest('POST', '/c/' + CONFIG.token + '/message', {
                             message: content || 'Fichier joint',
                             attachments: attachments,
-                            async: false
+                            async: true
                         });
 
-                        addMessage({
-                            role: 'assistant',
-                            content: response.data.response,
-                            created_at: new Date().toISOString()
-                        });
+                        // Poll for result
+                        var messageId = response.data.message_id;
+                        var pollUrl = '/messages/' + messageId + '/status';
+                        var maxAttempts = 120; // 2 minutes max
+                        var attempt = 0;
+
+                        while (attempt < maxAttempts) {
+                            await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+                            attempt++;
+
+                            var statusResponse = await apiRequest('GET', pollUrl);
+                            var status = statusResponse.data.status;
+
+                            if (status === 'completed') {
+                                addMessage({
+                                    role: 'assistant',
+                                    content: statusResponse.data.content,
+                                    created_at: new Date().toISOString()
+                                });
+                                break;
+                            } else if (status === 'failed') {
+                                throw new Error(statusResponse.data.error || 'Erreur lors du traitement');
+                            }
+                            // Continue polling for pending/processing status
+                        }
+
+                        if (attempt >= maxAttempts) {
+                            throw new Error('Délai d\'attente dépassé');
+                        }
                     } else {
                         // Whitelabel mode
                         response = await apiRequest('POST', '/whitelabel/sessions/' + state.session.session_id + '/messages', {
