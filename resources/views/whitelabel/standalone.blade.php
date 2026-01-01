@@ -617,9 +617,10 @@
                 // Soketi WebSocket config
                 soketi: {
                     key: @json(config('broadcasting.connections.pusher.key')),
-                    host: @json(config('broadcasting.connections.pusher.options.host')),
-                    port: @json(config('broadcasting.connections.pusher.options.port')),
-                    scheme: @json(config('broadcasting.connections.pusher.options.scheme', 'http')),
+                    // Frontend config - use same domain via Caddy reverse proxy
+                    frontendHost: @json(config('broadcasting.connections.pusher.frontend.host')) || window.location.hostname,
+                    frontendPort: @json(config('broadcasting.connections.pusher.frontend.port')) || (window.location.protocol === 'https:' ? 443 : 80),
+                    frontendScheme: @json(config('broadcasting.connections.pusher.frontend.scheme')) || window.location.protocol.replace(':', ''),
                     cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
                 }
             };
@@ -627,6 +628,9 @@
             // Initialize Echo for WebSocket
             var echo = null;
             console.log('🔌 Soketi Config:', CONFIG.soketi);
+            console.log('🔌 Using host:', CONFIG.soketi.frontendHost);
+            console.log('🔌 Using port:', CONFIG.soketi.frontendPort);
+            console.log('🔌 Using scheme:', CONFIG.soketi.frontendScheme);
             console.log('🔌 Echo available:', typeof Echo !== 'undefined');
             console.log('🔌 Pusher available:', typeof Pusher !== 'undefined');
 
@@ -634,14 +638,15 @@
                 // Enable Pusher logging for debugging
                 Pusher.logToConsole = true;
 
+                var useTLS = CONFIG.soketi.frontendScheme === 'https';
                 echo = new Echo({
                     broadcaster: 'pusher',
                     key: CONFIG.soketi.key,
-                    wsHost: CONFIG.soketi.host,
-                    wsPort: CONFIG.soketi.port,
-                    wssPort: CONFIG.soketi.port,
-                    forceTLS: CONFIG.soketi.scheme === 'https',
-                    encrypted: CONFIG.soketi.scheme === 'https',
+                    wsHost: CONFIG.soketi.frontendHost,
+                    wsPort: useTLS ? 443 : CONFIG.soketi.frontendPort,
+                    wssPort: useTLS ? 443 : CONFIG.soketi.frontendPort,
+                    forceTLS: useTLS,
+                    encrypted: useTLS,
                     disableStats: true,
                     enabledTransports: ['ws', 'wss'],
                     cluster: CONFIG.soketi.cluster

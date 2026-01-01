@@ -1009,13 +1009,17 @@ R: {{ addslashes($learned['answer'] ?? '') }}
             const sessionUuid = @json($session->uuid);
             const soketiConfig = {
                 key: @json(config('broadcasting.connections.pusher.key')),
-                host: @json(config('broadcasting.connections.pusher.options.host')),
-                port: @json(config('broadcasting.connections.pusher.options.port')),
-                scheme: @json(config('broadcasting.connections.pusher.options.scheme', 'http')),
+                // Frontend config - use same domain via Caddy reverse proxy
+                frontendHost: @json(config('broadcasting.connections.pusher.frontend.host')) || window.location.hostname,
+                frontendPort: @json(config('broadcasting.connections.pusher.frontend.port')) || (window.location.protocol === 'https:' ? 443 : 80),
+                frontendScheme: @json(config('broadcasting.connections.pusher.frontend.scheme')) || window.location.protocol.replace(':', ''),
                 cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
             };
 
             console.log('🔌 Soketi Config:', soketiConfig);
+            console.log('🔌 Using host:', soketiConfig.frontendHost);
+            console.log('🔌 Using port:', soketiConfig.frontendPort);
+            console.log('🔌 Using scheme:', soketiConfig.frontendScheme);
             console.log('🔌 Session UUID:', sessionUuid);
             console.log('🔌 Echo available:', typeof Echo !== 'undefined');
             console.log('🔌 Pusher available:', typeof Pusher !== 'undefined');
@@ -1024,14 +1028,15 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 // Enable Pusher logging for debugging
                 Pusher.logToConsole = true;
 
+                const useTLS = soketiConfig.frontendScheme === 'https';
                 const echo = new Echo({
                     broadcaster: 'pusher',
                     key: soketiConfig.key,
-                    wsHost: soketiConfig.host,
-                    wsPort: soketiConfig.port,
-                    wssPort: soketiConfig.port,
-                    forceTLS: soketiConfig.scheme === 'https',
-                    encrypted: soketiConfig.scheme === 'https',
+                    wsHost: soketiConfig.frontendHost,
+                    wsPort: useTLS ? 443 : soketiConfig.frontendPort,
+                    wssPort: useTLS ? 443 : soketiConfig.frontendPort,
+                    forceTLS: useTLS,
+                    encrypted: useTLS,
                     disableStats: true,
                     enabledTransports: ['ws', 'wss'],
                     cluster: soketiConfig.cluster
@@ -1050,18 +1055,11 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                     console.error('❌ Soketi WebSocket ERROR:', err);
                 });
 
-                // Listen for new messages on this session
-                echo.private('session.' + sessionUuid)
-                    .listen('.message.new', function(data) {
+                // Listen for new messages on this session (public channel for chat)
+                echo.channel('chat.message.' + sessionUuid)
+                    .listen('.completed', function(data) {
                         console.log('📨 New message received:', data);
                         Livewire.dispatch('refreshMessages');
-                    });
-
-                // Listen for session updates
-                echo.private('session.' + sessionUuid)
-                    .listen('.session.updated', function(data) {
-                        console.log('🔄 Session updated:', data);
-                        Livewire.dispatch('refreshSession');
                     });
 
                 console.log('🔌 Soketi WebSocket initialized for session:', sessionUuid);

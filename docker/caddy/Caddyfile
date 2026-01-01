@@ -61,6 +61,24 @@
     }
     header @static Cache-Control "public, max-age=31536000, immutable"
 
+    # ===========================================
+    # SOKETI WEBSOCKET REVERSE PROXY
+    # ===========================================
+    # Route /app/* vers Soketi pour les connexions WebSocket
+    # Permet d'utiliser le même domaine et SSL que le site
+    @websocket {
+        path /app/*
+        path /apps/*
+    }
+    handle @websocket {
+        reverse_proxy soketi:6001 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
     # Routes nécessitant un timeout étendu (Livewire, API IA)
     @longrunning {
         path /livewire/*

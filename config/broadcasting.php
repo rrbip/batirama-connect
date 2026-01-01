@@ -32,16 +32,25 @@ return [
 
         'pusher' => [
             'driver' => 'pusher',
-            'key' => env('PUSHER_APP_KEY', 'app-key'),
-            'secret' => env('PUSHER_APP_SECRET', 'app-secret'),
-            'app_id' => env('PUSHER_APP_ID', 'app-id'),
+            'key' => env('PUSHER_APP_KEY', 'batirama-key'),
+            'secret' => env('PUSHER_APP_SECRET', 'batirama-secret'),
+            'app_id' => env('PUSHER_APP_ID', 'batirama-app'),
             'options' => [
                 'cluster' => env('PUSHER_APP_CLUSTER', 'mt1'),
                 'useTLS' => env('PUSHER_SCHEME', 'http') === 'https',
+                // Host interne pour communication Laravel -> Soketi (dans Docker)
                 'host' => env('PUSHER_HOST', 'soketi'),
                 'port' => env('PUSHER_PORT', 6001),
                 'scheme' => env('PUSHER_SCHEME', 'http'),
                 'encrypted' => false,
+            ],
+            // Configuration frontend (navigateur -> Soketi via Caddy reverse proxy)
+            // Si vide, utilise le même domaine/port que le site (recommandé)
+            'frontend' => [
+                'host' => env('SOKETI_FRONTEND_HOST', ''),
+                'port' => env('SOKETI_FRONTEND_PORT', ''),
+                'scheme' => env('SOKETI_FRONTEND_SCHEME', ''),
+                'path' => '', // WebSocket via /app/* sur même domaine
             ],
             'client_options' => [
                 // Guzzle client options
