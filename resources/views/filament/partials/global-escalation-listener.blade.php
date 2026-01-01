@@ -1,16 +1,12 @@
 {{-- Global WebSocket Listener for Support Escalations --}}
 @php
+    // Configuration identique à view-ai-session pour la compatibilité production
     $soketiConfig = [
-        'host' => config('broadcasting.connections.pusher.options.host', 'localhost'),
-        'port' => config('broadcasting.connections.pusher.options.port', 6001),
         'key' => config('broadcasting.connections.pusher.key'),
+        'frontendHost' => config('broadcasting.connections.pusher.frontend.host'),
+        'frontendPort' => config('broadcasting.connections.pusher.frontend.port'),
+        'frontendScheme' => config('broadcasting.connections.pusher.frontend.scheme'),
         'cluster' => config('broadcasting.connections.pusher.options.cluster', 'mt1'),
-        'forceTLS' => config('broadcasting.connections.pusher.options.useTLS', false),
-        'wsHost' => config('broadcasting.connections.pusher.options.host', 'localhost'),
-        'wsPort' => config('broadcasting.connections.pusher.options.port', 6001),
-        'wssPort' => config('broadcasting.connections.pusher.options.port', 6001),
-        'disableStats' => true,
-        'enabledTransports' => ['ws', 'wss'],
     ];
 @endphp
 
@@ -120,19 +116,31 @@
 
 <div id="escalation-toast-container"></div>
 
-<script src="https://js.pusher.com/8.2.0/pusher.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
 <script>
 (function() {
     // Avoid duplicate initialization
     if (window.__globalEscalationListenerInitialized) {
+        console.log('🔔 Global Escalation Listener: Already initialized, skipping');
         return;
     }
     window.__globalEscalationListenerInitialized = true;
 
     var soketiConfig = @json($soketiConfig);
 
-    console.log('🔔 Global Escalation Listener: Initializing...');
+    // Fallback to window.location if frontend config not set
+    soketiConfig.frontendHost = soketiConfig.frontendHost || window.location.hostname;
+    soketiConfig.frontendPort = soketiConfig.frontendPort || (window.location.protocol === 'https:' ? 443 : 80);
+    soketiConfig.frontendScheme = soketiConfig.frontendScheme || window.location.protocol.replace(':', '');
+
+    console.group('🔔 GLOBAL ESCALATION LISTENER');
+    console.log('📋 Config:', JSON.stringify(soketiConfig, null, 2));
+    console.log('🔑 Key:', soketiConfig.key || '(empty)');
+    console.log('🏠 Host:', soketiConfig.frontendHost);
+    console.log('🚪 Port:', soketiConfig.frontendPort);
+    console.log('🔒 Scheme:', soketiConfig.frontendScheme);
+    console.groupEnd();
 
     // Wait for page to be ready
     document.addEventListener('DOMContentLoaded', function() {
@@ -157,15 +165,17 @@
             return;
         }
 
-        // Create new Echo instance
+        // Create new Echo instance (same config as view-ai-session)
         try {
+            var useTLS = soketiConfig.frontendScheme === 'https';
             var echoConfig = {
                 broadcaster: 'pusher',
                 key: soketiConfig.key,
-                wsHost: soketiConfig.wsHost,
-                wsPort: soketiConfig.wsPort,
-                wssPort: soketiConfig.wssPort,
-                forceTLS: soketiConfig.forceTLS,
+                wsHost: soketiConfig.frontendHost,
+                wsPort: useTLS ? 443 : soketiConfig.frontendPort,
+                wssPort: useTLS ? 443 : soketiConfig.frontendPort,
+                forceTLS: useTLS,
+                encrypted: useTLS,
                 disableStats: true,
                 enabledTransports: ['ws', 'wss'],
                 cluster: soketiConfig.cluster
@@ -175,17 +185,25 @@
 
             window.Echo = new Echo(echoConfig);
 
+            window.Echo.connector.pusher.connection.bind('connecting', function() {
+                console.log('🔄 Global Escalation: CONNECTING...');
+            });
+
             window.Echo.connector.pusher.connection.bind('connected', function() {
-                console.log('✅ Global Escalation Listener: Connected to Soketi');
+                console.log('✅ Global Escalation: CONNECTED to Soketi!');
                 subscribeToEscalations();
             });
 
             window.Echo.connector.pusher.connection.bind('error', function(err) {
-                console.error('❌ Global Escalation Listener: Connection error', err);
+                console.error('❌ Global Escalation: Connection error', err);
+            });
+
+            window.Echo.connector.pusher.connection.bind('unavailable', function() {
+                console.warn('⚠️ Global Escalation: WebSocket unavailable');
             });
 
         } catch (e) {
-            console.error('❌ Global Escalation Listener: Failed to initialize Echo', e);
+            console.error('❌ Global Escalation: Failed to initialize Echo', e);
         }
     }
 
