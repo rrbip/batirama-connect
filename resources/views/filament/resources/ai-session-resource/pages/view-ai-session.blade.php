@@ -713,19 +713,19 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                 📄 Lire le rapport complet
                                                                             </summary>
                                                                             <div class="mt-3 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-[80vh] overflow-y-auto">
-                                                                                <div class="prose prose-sm dark:prose-invert max-w-none">
+                                                                                <div class="space-y-4">
                                                                                     {{-- Question utilisateur --}}
                                                                                     <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mb-2">📝 Question utilisateur</h4>
-                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded whitespace-pre-wrap">{{ $userQuestion ?: '(Non disponible)' }}</div>
+                                                                                    <pre class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm font-sans" style="white-space: pre-wrap; word-wrap: break-word;">{{ $userQuestion ?: '(Non disponible)' }}</pre>
 
                                                                                     {{-- Réponse IA complète --}}
                                                                                     <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🤖 Réponse de l'IA</h4>
-                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded whitespace-pre-wrap">{{ $aiResponse ?: '(Non disponible)' }}</div>
+                                                                                    <pre class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm font-sans" style="white-space: pre-wrap; word-wrap: break-word;">{{ $aiResponse ?: '(Non disponible)' }}</pre>
 
                                                                                     {{-- Prompt système --}}
                                                                                     @if(!empty($systemPrompt))
                                                                                         <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">⚙️ Prompt système</h4>
-                                                                                        <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded text-xs whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $systemPrompt }}</div>
+                                                                                        <pre class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded text-xs font-sans max-h-48 overflow-y-auto" style="white-space: pre-wrap; word-wrap: break-word;">{{ $systemPrompt }}</pre>
                                                                                     @endif
 
                                                                                     {{-- Historique de conversation --}}
@@ -737,7 +737,7 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                     <span class="font-bold {{ ($histMsg['role'] ?? '') === 'user' ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400' }}">
                                                                                                         [{{ $histMsg['role'] ?? 'unknown' }}]
                                                                                                     </span>
-                                                                                                    <div class="mt-1 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ $histMsg['content'] ?? '' }}</div>
+                                                                                                    <pre class="mt-1 text-gray-700 dark:text-gray-300 text-xs font-sans" style="white-space: pre-wrap; word-wrap: break-word;">{{ $histMsg['content'] ?? '' }}</pre>
                                                                                                 </div>
                                                                                             @endforeach
                                                                                         </div>
