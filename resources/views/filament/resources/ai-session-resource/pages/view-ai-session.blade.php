@@ -1015,20 +1015,20 @@
                                         {{-- Formulaire d'apprentissage --}}
                                         <div x-show="showLearnForm" x-cloak class="mt-3 pt-3 border-t border-success-200 dark:border-success-700 space-y-3">
                                             <div>
-                                                <label class="block text-xs font-medium text-success-700 dark:text-success-300 mb-1">Question (du client)</label>
+                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question (du client)</label>
                                                 <textarea
                                                     x-model="learnQuestion"
                                                     rows="2"
-                                                    class="w-full rounded-lg border-success-300 dark:border-success-700 dark:bg-success-900 text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
                                                     placeholder="Question du client..."
                                                 ></textarea>
                                             </div>
                                             <div>
-                                                <label class="block text-xs font-medium text-success-700 dark:text-success-300 mb-1">Réponse (à enseigner)</label>
+                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Réponse (à enseigner)</label>
                                                 <textarea
                                                     x-model="learnAnswer"
                                                     rows="3"
-                                                    class="w-full rounded-lg border-success-300 dark:border-success-700 dark:bg-success-900 text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
                                                     placeholder="Réponse à enseigner à l'IA..."
                                                 ></textarea>
                                             </div>
