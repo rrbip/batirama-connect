@@ -80,6 +80,9 @@ class LearningService
         // S'assurer que la collection existe
         $this->ensureCollectionExists();
 
+        // Supprimer les anciens points pour ce message_id (évite les doublons lors des corrections)
+        $this->deleteExistingPointsForMessage($messageId, $agentId);
+
         // Générer l'embedding de la question
         $vector = $this->embeddingService->embed($question);
 
@@ -330,6 +333,37 @@ class LearningService
             'total_learned' => $total,
             'collection' => $collection,
         ];
+    }
+
+    /**
+     * Supprime les points existants pour un message_id donné (évite les doublons lors des corrections)
+     * Supprime à la fois dans learned_responses et dans la collection de l'agent
+     */
+    private function deleteExistingPointsForMessage(int $messageId, int $agentId): void
+    {
+        // Supprimer dans learned_responses
+        $filter = [
+            'must' => [
+                ['key' => 'message_id', 'match' => ['value' => $messageId]]
+            ]
+        ];
+
+        $deleted = $this->qdrantService->deleteByFilter(self::LEARNED_RESPONSES_COLLECTION, $filter);
+        if ($deleted) {
+            Log::info('Deleted existing learned_response point for message', ['message_id' => $messageId]);
+        }
+
+        // Supprimer dans la collection de l'agent (si elle existe)
+        $agent = Agent::find($agentId);
+        if ($agent && !empty($agent->qdrant_collection)) {
+            $deleted = $this->qdrantService->deleteByFilter($agent->qdrant_collection, $filter);
+            if ($deleted) {
+                Log::info('Deleted existing FAQ point in agent collection', [
+                    'message_id' => $messageId,
+                    'collection' => $agent->qdrant_collection,
+                ]);
+            }
+        }
     }
 
     /**
