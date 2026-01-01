@@ -187,6 +187,34 @@
             text-align: left;
         }
 
+        /* Support agent messages - green background */
+        .message.support .message-avatar {
+            background: #059669;
+            color: white;
+        }
+
+        .message.support .message-bubble {
+            background: #d1fae5;
+            border: 1px solid #a7f3d0;
+        }
+
+        /* System messages - centered gray bar */
+        .system-message {
+            display: flex;
+            justify-content: center;
+            padding: 12px 16px;
+        }
+
+        .system-message-content {
+            background: #f3f4f6;
+            color: #6b7280;
+            font-size: 13px;
+            padding: 8px 16px;
+            border-radius: 16px;
+            text-align: center;
+            max-width: 80%;
+        }
+
         /* Welcome Message */
         .welcome-section {
             text-align: center;
@@ -899,17 +927,32 @@
                 elements.welcomeSection.style.display = 'none';
 
                 var messageEl = document.createElement('div');
-                messageEl.className = 'message ' + message.role;
+                // Map 'support' to 'assistant' class but with support modifier
+                var roleClass = message.role === 'support' ? 'assistant support' : message.role;
+                messageEl.className = 'message ' + roleClass;
 
                 var logoUrl = CONFIG.branding.logo_url || '';
-                var avatarContent = message.role === 'user'
-                    ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>'
-                    : (logoUrl ? '<img src="' + escapeHtml(logoUrl) + '" alt="">' : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>');
+                var avatarContent;
+
+                if (message.role === 'user') {
+                    avatarContent = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+                } else if (message.role === 'support') {
+                    // Support agent icon (person with headset)
+                    avatarContent = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>';
+                } else {
+                    avatarContent = logoUrl ? '<img src="' + escapeHtml(logoUrl) + '" alt="">' : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>';
+                }
+
+                // Build time and sender info
+                var timeInfo = formatTime(message.created_at || new Date());
+                if (message.role === 'support' && message.sender_name) {
+                    timeInfo = message.sender_name + ' · ' + timeInfo;
+                }
 
                 messageEl.innerHTML = '<div class="message-avatar">' + avatarContent + '</div>' +
                     '<div class="message-content">' +
                     '<div class="message-bubble">' + escapeHtml(message.content) + '</div>' +
-                    '<div class="message-time">' + formatTime(message.created_at || new Date()) + '</div>' +
+                    '<div class="message-time">' + timeInfo + '</div>' +
                     '</div>';
 
                 elements.messagesContainer.insertBefore(messageEl, elements.typingIndicator);
@@ -999,11 +1042,74 @@
                     // Scroll to bottom after loading history
                     setTimeout(scrollToBottom, 100);
 
+                    // Subscribe to session channel for support events
+                    subscribeToSessionChannel();
+
                 } catch (error) {
                     console.error('Init error:', error);
                     elements.loadingOverlay.querySelector('.loading-text').textContent = 'Erreur de connexion';
                     showError(error.message);
                 }
+            }
+
+            // Subscribe to session WebSocket channel for support events
+            function subscribeToSessionChannel() {
+                if (!state.session || !state.session.session_id) {
+                    console.warn('Cannot subscribe to session channel: no session');
+                    return;
+                }
+
+                if (!isWebSocketAvailable()) {
+                    console.warn('WebSocket not available, support messages will use polling');
+                    return;
+                }
+
+                var sessionUuid = state.session.uuid || state.session.session_id;
+                var channelName = 'chat.session.' + sessionUuid;
+
+                console.log('📡 Subscribing to session channel:', channelName);
+
+                window.Echo.channel(channelName)
+                    // Listen for support agent messages
+                    .listen('.message.new', function(data) {
+                        console.log('📨 Support message received:', data);
+                        if (data.message && data.message.sender_type === 'agent') {
+                            addMessage({
+                                role: 'support',
+                                content: data.message.content,
+                                sender_name: data.message.sender_name || 'Agent Support',
+                                created_at: data.message.created_at
+                            });
+                            scrollToBottom();
+                        } else if (data.message && data.message.sender_type === 'system') {
+                            addSystemMessage(data.message.content);
+                            scrollToBottom();
+                        }
+                    })
+                    // Listen for session assignment (admin took over)
+                    .listen('.session.assigned', function(data) {
+                        console.log('👤 Session assigned to agent:', data);
+                        var agentName = data.support_agent ? data.support_agent.name : 'Un conseiller';
+                        addSystemMessage(agentName + ' a pris en charge votre demande.');
+                        scrollToBottom();
+                    })
+                    // Listen for escalation (confirmation)
+                    .listen('.session.escalated', function(data) {
+                        console.log('🚨 Session escalated:', data);
+                        addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra prochainement.');
+                        scrollToBottom();
+                    });
+
+                console.log('✅ Session channel subscribed');
+            }
+
+            // Add system message to chat
+            function addSystemMessage(content) {
+                var container = elements.messagesContainer;
+                var messageDiv = document.createElement('div');
+                messageDiv.className = 'system-message';
+                messageDiv.innerHTML = '<div class="system-message-content">' + escapeHtml(content) + '</div>';
+                container.appendChild(messageDiv);
             }
 
             // Create session for widget mode (called on first message)

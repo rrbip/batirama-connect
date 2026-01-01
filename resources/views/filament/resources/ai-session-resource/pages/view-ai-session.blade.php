@@ -1073,6 +1073,73 @@
 
     {{-- WebSocket Soketi for real-time updates --}}
     @push('scripts')
+    <style>
+        /* Escalation Toast Notification */
+        .escalation-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+
+        .escalation-toast.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .escalation-toast-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+            cursor: pointer;
+            min-width: 300px;
+            max-width: 400px;
+        }
+
+        .escalation-toast-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .escalation-toast-text {
+            flex-grow: 1;
+        }
+
+        .escalation-toast-text strong {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+
+        .escalation-toast-text span {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .escalation-toast-link {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            text-decoration: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            flex-shrink: 0;
+            transition: background 0.2s;
+        }
+
+        .escalation-toast-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+    </style>
     <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
     <script>
@@ -1224,9 +1291,100 @@
                     if (typeof Livewire !== 'undefined') {
                         Livewire.dispatch('refreshMessages');
                     }
+                })
+                .listen('.message.new', function(data) {
+                    console.log('💬 Support message received via WebSocket:', data);
+                    // Rafraîchir pour afficher le nouveau message de support
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refreshMessages');
+                    }
+                })
+                .listen('.session.assigned', function(data) {
+                    console.log('👤 Session assigned via WebSocket:', data);
+                    // Rafraîchir pour mettre à jour le statut
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refreshSession');
+                        Livewire.dispatch('refreshMessages');
+                    }
+                })
+                .listen('.session.escalated', function(data) {
+                    console.log('🚨 Session escalated via WebSocket:', data);
+                    // Rafraîchir pour mettre à jour le statut
+                    if (typeof Livewire !== 'undefined') {
+                        Livewire.dispatch('refreshSession');
+                    }
                 });
 
             console.log('✅ WebSocket listeners registered for session:', sessionUuid);
+
+            // ═══════════════════════════════════════════════════════════════
+            // ÉCOUTE GLOBALE DES ESCALADES (notifications admin)
+            // ═══════════════════════════════════════════════════════════════
+            window.Echo.channel('admin.escalations')
+                .listen('.session.escalated', function(data) {
+                    console.log('🚨 New escalation notification:', data);
+
+                    // Ne pas notifier si c'est la session actuelle (déjà affichée)
+                    if (data.session_uuid === sessionUuid) {
+                        return;
+                    }
+
+                    // Show toast notification
+                    showEscalationToast(data);
+
+                    // Browser notification si autorisé
+                    if (Notification.permission === 'granted') {
+                        var notif = new Notification('🚨 Nouvelle demande de support', {
+                            body: (data.user_name || 'Un utilisateur') + ' - ' + (data.agent_name || 'Agent'),
+                            icon: '/favicon.ico',
+                            tag: 'escalation-' + data.session_id
+                        });
+                        notif.onclick = function() {
+                            window.focus();
+                            window.location.href = '/admin/ai-sessions/' + data.session_id;
+                        };
+                    } else if (Notification.permission !== 'denied') {
+                        Notification.requestPermission();
+                    }
+                });
+
+            // Fonction pour afficher un toast d'escalade
+            function showEscalationToast(data) {
+                var toast = document.createElement('div');
+                toast.className = 'escalation-toast';
+                toast.innerHTML = '<div class="escalation-toast-content">' +
+                    '<div class="escalation-toast-icon">🚨</div>' +
+                    '<div class="escalation-toast-text">' +
+                    '<strong>Nouvelle demande de support</strong><br>' +
+                    '<span>' + (data.user_name || 'Visiteur') + ' - ' + (data.agent_name || 'Agent') + '</span>' +
+                    '</div>' +
+                    '<a href="/admin/ai-sessions/' + data.session_id + '" class="escalation-toast-link">Voir →</a>' +
+                    '</div>';
+
+                document.body.appendChild(toast);
+
+                // Animation d'entrée
+                setTimeout(function() {
+                    toast.classList.add('visible');
+                }, 10);
+
+                // Disparaître après 10 secondes
+                setTimeout(function() {
+                    toast.classList.remove('visible');
+                    setTimeout(function() {
+                        toast.remove();
+                    }, 300);
+                }, 10000);
+
+                // Clic pour fermer
+                toast.addEventListener('click', function(e) {
+                    if (e.target.tagName !== 'A') {
+                        toast.remove();
+                    }
+                });
+            }
+
+            console.log('✅ Global escalation listener registered');
 
             // ═══════════════════════════════════════════════════════════════
             // AUTO-SCROLL AU BAS DE LA CONVERSATION

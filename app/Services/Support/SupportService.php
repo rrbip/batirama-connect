@@ -99,13 +99,18 @@ class SupportService
         AiSession $session,
         string $content
     ): SupportMessage {
-        return SupportMessage::create([
+        $message = SupportMessage::create([
             'session_id' => $session->id,
             'sender_type' => 'system',
             'channel' => 'chat',
             'content' => $content,
             'is_read' => true,
         ]);
+
+        // Dispatcher l'événement pour le temps réel
+        event(new NewSupportMessage($message));
+
+        return $message;
     }
 
     /**

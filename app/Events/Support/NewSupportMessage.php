@@ -8,11 +8,11 @@ use App\Models\SupportMessage;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class NewSupportMessage implements ShouldBroadcast
+class NewSupportMessage implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;
@@ -30,8 +30,8 @@ class NewSupportMessage implements ShouldBroadcast
         $session = $this->message->session;
 
         $channels = [
-            // Canal de la session (les deux parties)
-            new PrivateChannel("session.{$session->uuid}"),
+            // Canal public de la session (pour standalone)
+            new Channel("chat.session.{$session->uuid}"),
         ];
 
         // Si c'est un message utilisateur, notifier l'agent de support
