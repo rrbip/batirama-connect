@@ -986,7 +986,15 @@
                                         @endif
 
                                         {{-- Heure --}}
-                                        <div class="flex items-center justify-end mt-2 text-xs text-success-600 dark:text-success-400">
+                                        <div class="flex items-center justify-between mt-2 text-xs text-success-600 dark:text-success-400">
+                                            <x-filament::button
+                                                size="xs"
+                                                color="success"
+                                                icon="heroicon-o-academic-cap"
+                                                wire:click="learnFromSupportMessage({{ $message['original_id'] }})"
+                                            >
+                                                Apprendre
+                                            </x-filament::button>
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
                                         </div>
                                     </div>
