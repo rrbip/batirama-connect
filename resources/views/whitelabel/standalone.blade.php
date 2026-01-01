@@ -628,16 +628,55 @@
             // WebSocket connection state
             var wsConnected = false;
             var wsConnectionFailed = false;
+            var wsConnectionState = 'initializing';
 
-            // Initialize Echo for WebSocket
-            console.log('🔌 Soketi Config:', CONFIG.soketi);
+            // ═══════════════════════════════════════════════════════════════
+            // SOKETI DEBUG - Configuration détaillée
+            // ═══════════════════════════════════════════════════════════════
+            console.group('🔌 SOKETI WEBSOCKET DEBUG');
+            console.log('📋 Configuration complète:', JSON.stringify(CONFIG.soketi, null, 2));
+            console.log('🌐 Page actuelle:', {
+                hostname: window.location.hostname,
+                port: window.location.port,
+                protocol: window.location.protocol,
+                href: window.location.href
+            });
+            console.log('📦 Librairies disponibles:', {
+                Echo: typeof Echo !== 'undefined' ? '✅ Chargé' : '❌ Non chargé',
+                Pusher: typeof Pusher !== 'undefined' ? '✅ Chargé' : '❌ Non chargé'
+            });
+            console.log('🔑 Clé Soketi:', CONFIG.soketi.key || '(vide)');
+            console.log('🏠 Host frontend:', CONFIG.soketi.frontendHost);
+            console.log('🚪 Port frontend:', CONFIG.soketi.frontendPort);
+            console.log('🔒 Scheme:', CONFIG.soketi.frontendScheme);
+            console.log('🌍 Cluster:', CONFIG.soketi.cluster);
+
+            // Calculer l'URL WebSocket attendue
+            var expectedWsUrl = (CONFIG.soketi.frontendScheme === 'https' ? 'wss://' : 'ws://') +
+                CONFIG.soketi.frontendHost +
+                (CONFIG.soketi.frontendPort && CONFIG.soketi.frontendPort != 80 && CONFIG.soketi.frontendPort != 443 ? ':' + CONFIG.soketi.frontendPort : '') +
+                '/app/' + CONFIG.soketi.key;
+            console.log('🔗 URL WebSocket attendue:', expectedWsUrl);
+            console.groupEnd();
+
+            // Vérifications de configuration
+            var configErrors = [];
+            if (!CONFIG.soketi.key) configErrors.push('❌ Clé Soketi manquante (PUSHER_APP_KEY)');
+            if (CONFIG.soketi.key === 'app-key') configErrors.push('⚠️ Clé Soketi par défaut "app-key" - non configurée');
+            if (!CONFIG.soketi.frontendHost) configErrors.push('❌ Host frontend manquant');
+
+            if (configErrors.length > 0) {
+                console.group('⚠️ PROBLÈMES DE CONFIGURATION SOKETI');
+                configErrors.forEach(function(err) { console.warn(err); });
+                console.groupEnd();
+            }
 
             if (typeof Echo !== 'undefined' && typeof Pusher !== 'undefined' && CONFIG.soketi.key && CONFIG.soketi.key !== 'app-key') {
                 // Enable Pusher logging for debugging
                 Pusher.logToConsole = true;
 
                 var useTLS = CONFIG.soketi.frontendScheme === 'https';
-                window.Echo = new Echo({
+                var echoConfig = {
                     broadcaster: 'pusher',
                     key: CONFIG.soketi.key,
                     wsHost: CONFIG.soketi.frontendHost,
@@ -648,36 +687,87 @@
                     disableStats: true,
                     enabledTransports: ['ws', 'wss'],
                     cluster: CONFIG.soketi.cluster
+                };
+
+                console.group('🔧 CONFIGURATION ECHO/PUSHER');
+                console.log('Configuration Echo:', JSON.stringify(echoConfig, null, 2));
+                console.groupEnd();
+
+                window.Echo = new Echo(echoConfig);
+
+                // Log tous les états de connexion
+                window.Echo.connector.pusher.connection.bind('initialized', function() {
+                    wsConnectionState = 'initialized';
+                    console.log('🔄 Soketi: INITIALIZED - Connexion initialisée');
                 });
 
-                // Log connection state
+                window.Echo.connector.pusher.connection.bind('connecting', function() {
+                    wsConnectionState = 'connecting';
+                    console.log('🔄 Soketi: CONNECTING - Tentative de connexion...');
+                });
+
                 window.Echo.connector.pusher.connection.bind('connected', function() {
-                    console.log('✅ Soketi WebSocket CONNECTED');
+                    wsConnectionState = 'connected';
                     wsConnected = true;
                     wsConnectionFailed = false;
+                    console.log('✅ Soketi: CONNECTED - WebSocket connecté !');
+                    console.log('   Socket ID:', window.Echo.socketId());
                 });
 
                 window.Echo.connector.pusher.connection.bind('disconnected', function() {
-                    console.log('❌ Soketi WebSocket DISCONNECTED');
+                    wsConnectionState = 'disconnected';
                     wsConnected = false;
+                    console.log('❌ Soketi: DISCONNECTED - WebSocket déconnecté');
                 });
 
                 window.Echo.connector.pusher.connection.bind('error', function(err) {
-                    console.error('❌ Soketi WebSocket ERROR:', err);
+                    wsConnectionState = 'error';
                     wsConnectionFailed = true;
                     wsConnected = false;
+                    console.group('❌ Soketi: ERROR');
+                    console.error('Erreur:', err);
+                    if (err && err.error && err.error.data) {
+                        console.error('Code:', err.error.data.code);
+                        console.error('Message:', err.error.data.message);
+                    }
+                    console.log('💡 Causes possibles:');
+                    console.log('   - Soketi n\'est pas démarré');
+                    console.log('   - Mauvaise configuration host/port');
+                    console.log('   - Reverse proxy (Apache/Nginx) ne forward pas les WebSockets');
+                    console.log('   - Pare-feu bloque le port');
+                    console.groupEnd();
                 });
 
                 window.Echo.connector.pusher.connection.bind('unavailable', function() {
-                    console.warn('⚠️ Soketi WebSocket UNAVAILABLE - falling back to polling');
+                    wsConnectionState = 'unavailable';
                     wsConnectionFailed = true;
                     wsConnected = false;
+                    console.warn('⚠️ Soketi: UNAVAILABLE - WebSocket indisponible, fallback polling actif');
                 });
 
-                console.log('🔌 Soketi WebSocket initialized');
+                window.Echo.connector.pusher.connection.bind('failed', function() {
+                    wsConnectionState = 'failed';
+                    wsConnectionFailed = true;
+                    wsConnected = false;
+                    console.error('💀 Soketi: FAILED - Échec total de connexion');
+                });
+
+                window.Echo.connector.pusher.connection.bind('state_change', function(states) {
+                    console.log('🔀 Soketi: État changé:', states.previous, '→', states.current);
+                });
+
+                console.log('🔌 Soketi WebSocket: Initialisation terminée, en attente de connexion...');
             } else {
-                console.warn('⚠️ Soketi WebSocket not configured - using polling mode');
+                console.group('⚠️ SOKETI NON CONFIGURÉ - MODE POLLING');
+                if (typeof Echo === 'undefined') console.warn('   Echo.js non chargé');
+                if (typeof Pusher === 'undefined') console.warn('   Pusher.js non chargé');
+                if (!CONFIG.soketi.key) console.warn('   Clé Soketi vide');
+                if (CONFIG.soketi.key === 'app-key') console.warn('   Clé Soketi par défaut (non configurée)');
+                console.log('   → Le chat utilisera le polling HTTP (1 req/sec)');
+                console.groupEnd();
+
                 wsConnectionFailed = true;
+                wsConnectionState = 'disabled';
                 // Create a mock Echo to prevent errors
                 window.Echo = {
                     channel: function() { return { listen: function() { return this; } }; },
@@ -690,8 +780,24 @@
 
             // Helper function to check if WebSocket is usable
             function isWebSocketAvailable() {
-                return wsConnected && !wsConnectionFailed && window.Echo && window.Echo.connector;
+                var available = wsConnected && !wsConnectionFailed && window.Echo && window.Echo.connector;
+                return available;
             }
+
+            // Fonction pour afficher l'état actuel dans la console
+            window.soketiStatus = function() {
+                console.group('📊 SOKETI STATUS');
+                console.log('État connexion:', wsConnectionState);
+                console.log('Connecté:', wsConnected);
+                console.log('Échec:', wsConnectionFailed);
+                console.log('WebSocket disponible:', isWebSocketAvailable());
+                if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
+                    console.log('Socket ID:', window.Echo.socketId());
+                    console.log('État Pusher:', window.Echo.connector.pusher.connection.state);
+                }
+                console.groupEnd();
+            };
+            console.log('💡 Tapez soketiStatus() dans la console pour voir l\'état actuel');
 
             // State
             var state = {
