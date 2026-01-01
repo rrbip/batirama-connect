@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\IndexingMethod;
+use App\Enums\LLMProvider;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -63,6 +65,9 @@ class Agent extends Model
         'ollama_port',
         'model',
         'fallback_model',
+        'llm_provider',
+        'llm_api_key',
+        'llm_api_model',
         'context_window_size',
         'max_tokens',
         'temperature',
@@ -106,6 +111,7 @@ class Agent extends Model
     protected $casts = [
         'hydration_config' => 'array',
         'indexing_method' => IndexingMethod::class,
+        'llm_provider' => LLMProvider::class,
         'temperature' => 'float',
         'min_rag_score' => 'float',
         'learned_min_score' => 'float',
@@ -190,6 +196,39 @@ class Agent extends Model
     public function getModel(): string
     {
         return $this->model ?? config('ai.ollama.default_model');
+    }
+
+    /**
+     * Retourne le provider LLM (avec fallback sur Ollama).
+     */
+    public function getLLMProvider(): LLMProvider
+    {
+        return $this->llm_provider ?? LLMProvider::OLLAMA;
+    }
+
+    /**
+     * Retourne le modèle effectif selon le provider.
+     */
+    public function getEffectiveModel(): string
+    {
+        $provider = $this->getLLMProvider();
+
+        if ($provider === LLMProvider::OLLAMA) {
+            return $this->model ?? config('ai.ollama.default_model');
+        }
+
+        return $this->llm_api_model ?? $provider->defaultModel();
+    }
+
+    /**
+     * Accessor/mutator pour chiffrer la clé API.
+     */
+    protected function llmApiKey(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value) => $value ? decrypt($value) : null,
+            set: fn (?string $value) => $value ? encrypt($value) : null,
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────

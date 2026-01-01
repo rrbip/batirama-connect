@@ -73,7 +73,7 @@ class RagService
         );
 
         // 7. Construire le prompt avec TOUT le contexte et générer la réponse
-        $ollama = OllamaService::forAgent($agent);
+        $llmService = LLMServiceFactory::forAgent($agent);
 
         $messages = $this->promptBuilder->buildChatMessages(
             agent: $agent,
@@ -83,7 +83,7 @@ class RagService
             learnedResponses: $learnedResponses
         );
 
-        $response = $ollama->chat($messages, [
+        $response = $llmService->chat($messages, [
             'temperature' => $agent->temperature,
             'max_tokens' => $agent->max_tokens,
             'fallback_model' => $agent->fallback_model,

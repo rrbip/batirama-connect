@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Enums\IndexingMethod;
+use App\Enums\LLMProvider;
 use App\Filament\Resources\AgentResource\Pages;
+use Filament\Forms\Get;
 use App\Filament\Resources\AgentResource\RelationManagers;
 use App\Models\Agent;
 use App\Services\AgentResetService;
@@ -105,28 +107,77 @@ class AgentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Configuration IA')
                             ->icon('heroicon-o-cog-6-tooth')
                             ->schema([
-                                Forms\Components\Section::make('Ollama - Chat')
-                                    ->description('Serveur Ollama pour les conversations (vide = config globale)')
+                                Forms\Components\Section::make('Provider LLM')
+                                    ->description('Sélectionnez le provider pour les conversations (Ollama local ou API cloud)')
                                     ->schema([
+                                        Forms\Components\Select::make('llm_provider')
+                                            ->label('Provider')
+                                            ->options(LLMProvider::class)
+                                            ->default('ollama')
+                                            ->live()
+                                            ->required()
+                                            ->helperText(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => 'Free: 250 req/jour. Vision native incluse.',
+                                                'openai' => 'Payant. GPT-4o supporte la vision.',
+                                                default => 'Self-hosted. Gratuit avec GPU/CPU dédié.',
+                                            }),
+
+                                        // Champs API (Gemini/OpenAI)
+                                        Forms\Components\TextInput::make('llm_api_key')
+                                            ->label('Clé API')
+                                            ->password()
+                                            ->revealable()
+                                            ->visible(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->required(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->helperText('La clé sera chiffrée en base de données'),
+
+                                        Forms\Components\Select::make('llm_api_model')
+                                            ->label('Modèle API')
+                                            ->options(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => [
+                                                    'gemini-2.5-flash' => 'Gemini 2.5 Flash (Recommandé)',
+                                                    'gemini-2.5-flash-lite' => 'Gemini 2.5 Flash Lite (Plus rapide)',
+                                                    'gemini-2.5-pro' => 'Gemini 2.5 Pro (Plus puissant)',
+                                                    'gemini-2.0-flash' => 'Gemini 2.0 Flash',
+                                                ],
+                                                'openai' => [
+                                                    'gpt-4o-mini' => 'GPT-4o Mini (Économique)',
+                                                    'gpt-4o' => 'GPT-4o (Performant)',
+                                                    'gpt-4-turbo' => 'GPT-4 Turbo',
+                                                ],
+                                                default => [],
+                                            })
+                                            ->visible(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->default(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => 'gemini-2.5-flash',
+                                                'openai' => 'gpt-4o-mini',
+                                                default => null,
+                                            }),
+
+                                        // Champs Ollama
                                         Forms\Components\TextInput::make('model')
-                                            ->label('Modèle')
-                                            ->placeholder('llama3.2')
-                                            ->helperText('Modèle Ollama à utiliser'),
+                                            ->label('Modèle Ollama')
+                                            ->placeholder('mistral:7b')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null)
+                                            ->helperText('Modèle Ollama pour le chat'),
 
                                         Forms\Components\TextInput::make('fallback_model')
                                             ->label('Modèle de secours')
-                                            ->placeholder('mistral'),
+                                            ->placeholder('llama3.2:3b')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
 
                                         Forms\Components\TextInput::make('ollama_host')
-                                            ->label('Host')
-                                            ->placeholder('ollama'),
+                                            ->label('Host Ollama')
+                                            ->placeholder('ollama')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
 
                                         Forms\Components\TextInput::make('ollama_port')
                                             ->label('Port')
                                             ->numeric()
-                                            ->placeholder('11434'),
+                                            ->placeholder('11434')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
                                     ])
-                                    ->columns(4)
+                                    ->columns(2)
                                     ->collapsible(),
 
                                 Forms\Components\Section::make('Ollama - Vision (extraction PDF)')

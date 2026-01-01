@@ -59,6 +59,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Gemini API Configuration
+    |--------------------------------------------------------------------------
+    */
+
+    'gemini' => [
+        'timeout' => env('GEMINI_TIMEOUT', 120),
+        'default_model' => env('GEMINI_DEFAULT_MODEL', 'gemini-2.5-flash'),
+
+        // Modèles disponibles
+        'available_models' => [
+            'gemini-2.5-flash' => ['name' => 'Gemini 2.5 Flash', 'description' => 'Rapide et économique'],
+            'gemini-2.5-flash-lite' => ['name' => 'Gemini 2.5 Flash Lite', 'description' => 'Ultra rapide'],
+            'gemini-2.5-pro' => ['name' => 'Gemini 2.5 Pro', 'description' => 'Plus puissant'],
+            'gemini-2.0-flash' => ['name' => 'Gemini 2.0 Flash', 'description' => 'Legacy'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Qdrant Configuration
     |--------------------------------------------------------------------------
     */

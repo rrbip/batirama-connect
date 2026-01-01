@@ -236,6 +236,8 @@ batirama-connect/
 | [15_fabricant_catalogs.md](./15_fabricant_catalogs.md) | Catalogues Fabricants (crawl, extraction produits, liaison utilisateurs) |
 | [16_locale_detection.md](./16_locale_detection.md) | Détection de langue sur documents et produits (80+ langues supportées) |
 | [17_extraction_pipelines.md](./17_extraction_pipelines.md) | Pipelines d'extraction (OCR, Vision, HTML) - Visualisation et traçage |
+| [20_handoff_humain_support.md](./20_handoff_humain_support.md) | Système de handoff humain pour le support IA (escalade, email bidirectionnel) |
+| [21_llm_providers.md](./21_llm_providers.md) | Configuration multi-providers LLM (Ollama, Gemini, OpenAI) |
 
 ---
 
