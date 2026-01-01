@@ -605,7 +605,7 @@ HANDOFF;
      *
      * Retourne true si:
      * - On est en dehors des horaires de support
-     * - OU aucun agent n'est connecté (à implémenter avec Soketi)
+     * - OU aucun agent n'est connecté (vérifié via Soketi)
      */
     public function shouldUseAsyncSupport(): bool
     {
@@ -614,11 +614,9 @@ HANDOFF;
             return true;
         }
 
-        // TODO: Vérifier avec Soketi si des agents sont connectés
-        // Pour l'instant, on suppose qu'il y a des agents en ligne pendant les heures
-        // Quand Soketi sera implémenté, ajouter: return !$this->hasConnectedAgents();
-
-        return false;
+        // Vérifier si des agents sont connectés via Soketi
+        $presenceService = app(\App\Services\Support\PresenceService::class);
+        return !$presenceService->hasConnectedAgents($this->id);
     }
 
     // ─────────────────────────────────────────────────────────────────

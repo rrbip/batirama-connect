@@ -51,6 +51,41 @@ Broadcast::channel('agent.{agentId}.support', function (User $user, int $agentId
 });
 
 /**
+ * Canal de PRÉSENCE pour les agents de support d'un agent IA.
+ * Utilisé pour tracker en temps réel quels admins sont connectés.
+ *
+ * Retourne les infos utilisateur pour le suivi de présence.
+ */
+Broadcast::channel('presence-agent.{agentId}.support', function (User $user, int $agentId) {
+    // Super-admin et admin peuvent rejoindre
+    if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->roles->first()?->name ?? 'user',
+        ];
+    }
+
+    // Vérifie si l'utilisateur est assigné comme agent de support
+    $agent = \App\Models\Agent::find($agentId);
+    if (!$agent) {
+        return false;
+    }
+
+    if ($agent->userCanHandleSupport($user)) {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => 'support-agent',
+        ];
+    }
+
+    return false;
+});
+
+/**
  * Canal privé pour une session spécifique.
  * Utilisé pour la communication en temps réel user <-> agent.
  */

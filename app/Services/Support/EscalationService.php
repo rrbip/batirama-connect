@@ -123,15 +123,16 @@ class EscalationService
     }
 
     /**
-     * Vérifie si des agents de support sont connectés.
-     * Note: Sera amélioré avec Soketi pour vérifier la présence en temps réel.
+     * Vérifie si des agents de support sont connectés via Soketi.
      */
     public function hasConnectedAgents(AiSession $session): bool
     {
-        // Pour l'instant, on retourne toujours false car on n'a pas encore
-        // implémenté la détection de présence avec Soketi.
-        // Cela sera fait dans la Phase 4.
-        return false;
+        if (!$session->agent_id) {
+            return false;
+        }
+
+        $presenceService = app(PresenceService::class);
+        return $presenceService->hasConnectedAgents($session->agent_id);
     }
 
     /**
