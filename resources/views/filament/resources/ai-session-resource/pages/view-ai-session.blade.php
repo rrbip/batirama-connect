@@ -953,7 +953,21 @@
 
                         {{-- Message Support Agent (gauche, vert) --}}
                         @elseif($isSupport)
-                            <div class="flex justify-start">
+                            @php
+                                // Trouver la question client précédente pour pré-remplir le formulaire
+                                $previousQuestion = '';
+                                for ($i = $index - 1; $i >= 0; $i--) {
+                                    if (($unifiedMessages[$i]['type'] ?? '') === 'client') {
+                                        $previousQuestion = $unifiedMessages[$i]['content'] ?? '';
+                                        break;
+                                    }
+                                }
+                            @endphp
+                            <div class="flex justify-start" x-data="{
+                                showLearnForm: false,
+                                learnQuestion: @js($previousQuestion),
+                                learnAnswer: @js($message['content'])
+                            }">
                                 <div class="max-w-[75%]">
                                     <div class="bg-success-50 dark:bg-success-950 border border-success-200 dark:border-success-800 rounded-lg p-3 shadow-sm">
                                         {{-- Header Support --}}
@@ -985,17 +999,56 @@
                                             </div>
                                         @endif
 
-                                        {{-- Heure --}}
+                                        {{-- Bouton Apprendre et Heure --}}
                                         <div class="flex items-center justify-between mt-2 text-xs text-success-600 dark:text-success-400">
                                             <x-filament::button
                                                 size="xs"
                                                 color="success"
                                                 icon="heroicon-o-academic-cap"
-                                                wire:click="learnFromSupportMessage({{ $message['original_id'] }})"
+                                                x-on:click="showLearnForm = !showLearnForm"
                                             >
                                                 Apprendre
                                             </x-filament::button>
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
+                                        </div>
+
+                                        {{-- Formulaire d'apprentissage --}}
+                                        <div x-show="showLearnForm" x-cloak class="mt-3 pt-3 border-t border-success-200 dark:border-success-700 space-y-3">
+                                            <div>
+                                                <label class="block text-xs font-medium text-success-700 dark:text-success-300 mb-1">Question (du client)</label>
+                                                <textarea
+                                                    x-model="learnQuestion"
+                                                    rows="2"
+                                                    class="w-full rounded-lg border-success-300 dark:border-success-700 dark:bg-success-900 text-sm"
+                                                    placeholder="Question du client..."
+                                                ></textarea>
+                                            </div>
+                                            <div>
+                                                <label class="block text-xs font-medium text-success-700 dark:text-success-300 mb-1">Réponse (à enseigner)</label>
+                                                <textarea
+                                                    x-model="learnAnswer"
+                                                    rows="3"
+                                                    class="w-full rounded-lg border-success-300 dark:border-success-700 dark:bg-success-900 text-sm"
+                                                    placeholder="Réponse à enseigner à l'IA..."
+                                                ></textarea>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <x-filament::button
+                                                    size="xs"
+                                                    color="success"
+                                                    icon="heroicon-o-check"
+                                                    x-on:click="$wire.learnFromSupportMessageWithEdit({{ $message['original_id'] }}, learnQuestion, learnAnswer); showLearnForm = false"
+                                                >
+                                                    Enregistrer
+                                                </x-filament::button>
+                                                <x-filament::button
+                                                    size="xs"
+                                                    color="gray"
+                                                    x-on:click="showLearnForm = false"
+                                                >
+                                                    Annuler
+                                                </x-filament::button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

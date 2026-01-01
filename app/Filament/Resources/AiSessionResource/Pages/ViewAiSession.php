@@ -507,54 +507,14 @@ class ViewAiSession extends ViewRecord
     }
 
     /**
-     * Apprend à l'IA à partir d'un message de support.
-     * Trouve la question client précédente et indexe la paire Q/R.
+     * Apprend à l'IA avec question et réponse éditées par l'admin.
      */
-    public function learnFromSupportMessage(int $supportMessageId): void
+    public function learnFromSupportMessageWithEdit(int $supportMessageId, string $question, string $answer): void
     {
-        $supportMessage = $this->record->supportMessages()->find($supportMessageId);
-
-        if (!$supportMessage || $supportMessage->sender_type !== 'agent') {
+        if (empty(trim($question)) || empty(trim($answer))) {
             Notification::make()
                 ->title('Erreur')
-                ->body('Message de support non trouvé.')
-                ->danger()
-                ->send();
-            return;
-        }
-
-        // Trouver la question client précédente (dans les messages IA ou support)
-        $question = null;
-
-        // Chercher d'abord dans les messages IA (role = user)
-        $userMessage = $this->record->messages()
-            ->where('role', 'user')
-            ->where('created_at', '<', $supportMessage->created_at)
-            ->orderBy('created_at', 'desc')
-            ->first();
-
-        // Chercher aussi dans les messages de support (sender_type = user)
-        $userSupportMessage = $this->record->supportMessages()
-            ->where('sender_type', 'user')
-            ->where('created_at', '<', $supportMessage->created_at)
-            ->orderBy('created_at', 'desc')
-            ->first();
-
-        // Prendre le plus récent des deux
-        if ($userMessage && $userSupportMessage) {
-            $question = $userMessage->created_at > $userSupportMessage->created_at
-                ? $userMessage->content
-                : $userSupportMessage->content;
-        } elseif ($userMessage) {
-            $question = $userMessage->content;
-        } elseif ($userSupportMessage) {
-            $question = $userSupportMessage->content;
-        }
-
-        if (!$question) {
-            Notification::make()
-                ->title('Erreur')
-                ->body('Aucune question client trouvée avant ce message.')
+                ->body('La question et la réponse sont obligatoires.')
                 ->danger()
                 ->send();
             return;
@@ -564,18 +524,18 @@ class ViewAiSession extends ViewRecord
             $learningService = app(\App\Services\AI\LearningService::class);
 
             $result = $learningService->indexLearnedResponse(
-                question: $question,
-                answer: $supportMessage->content,
+                question: trim($question),
+                answer: trim($answer),
                 agentId: $this->record->agent_id,
                 agentSlug: $this->record->agent->slug,
-                messageId: $supportMessage->id,
+                messageId: $supportMessageId,
                 validatorId: auth()->id()
             );
 
             if ($result) {
                 Notification::make()
                     ->title('Réponse apprise')
-                    ->body("Q: " . \Illuminate\Support\Str::limit($question, 50) . "\nR: " . \Illuminate\Support\Str::limit($supportMessage->content, 50))
+                    ->body("Q: " . \Illuminate\Support\Str::limit($question, 50) . "\nR: " . \Illuminate\Support\Str::limit($answer, 50))
                     ->success()
                     ->send();
             } else {
