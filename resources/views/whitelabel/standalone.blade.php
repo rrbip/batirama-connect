@@ -625,21 +625,19 @@
                 }
             };
 
-            // Initialize Echo for WebSocket
-            var echo = null;
-            console.log('🔌 Soketi Config:', CONFIG.soketi);
-            console.log('🔌 Using host:', CONFIG.soketi.frontendHost);
-            console.log('🔌 Using port:', CONFIG.soketi.frontendPort);
-            console.log('🔌 Using scheme:', CONFIG.soketi.frontendScheme);
-            console.log('🔌 Echo available:', typeof Echo !== 'undefined');
-            console.log('🔌 Pusher available:', typeof Pusher !== 'undefined');
+            // WebSocket connection state
+            var wsConnected = false;
+            var wsConnectionFailed = false;
 
-            if (typeof Echo !== 'undefined' && CONFIG.soketi.key && CONFIG.soketi.key !== 'app-key') {
+            // Initialize Echo for WebSocket
+            console.log('🔌 Soketi Config:', CONFIG.soketi);
+
+            if (typeof Echo !== 'undefined' && typeof Pusher !== 'undefined' && CONFIG.soketi.key && CONFIG.soketi.key !== 'app-key') {
                 // Enable Pusher logging for debugging
                 Pusher.logToConsole = true;
 
                 var useTLS = CONFIG.soketi.frontendScheme === 'https';
-                echo = new Echo({
+                window.Echo = new Echo({
                     broadcaster: 'pusher',
                     key: CONFIG.soketi.key,
                     wsHost: CONFIG.soketi.frontendHost,
@@ -653,21 +651,46 @@
                 });
 
                 // Log connection state
-                echo.connector.pusher.connection.bind('connected', function() {
+                window.Echo.connector.pusher.connection.bind('connected', function() {
                     console.log('✅ Soketi WebSocket CONNECTED');
+                    wsConnected = true;
+                    wsConnectionFailed = false;
                 });
 
-                echo.connector.pusher.connection.bind('disconnected', function() {
+                window.Echo.connector.pusher.connection.bind('disconnected', function() {
                     console.log('❌ Soketi WebSocket DISCONNECTED');
+                    wsConnected = false;
                 });
 
-                echo.connector.pusher.connection.bind('error', function(err) {
+                window.Echo.connector.pusher.connection.bind('error', function(err) {
                     console.error('❌ Soketi WebSocket ERROR:', err);
+                    wsConnectionFailed = true;
+                    wsConnected = false;
+                });
+
+                window.Echo.connector.pusher.connection.bind('unavailable', function() {
+                    console.warn('⚠️ Soketi WebSocket UNAVAILABLE - falling back to polling');
+                    wsConnectionFailed = true;
+                    wsConnected = false;
                 });
 
                 console.log('🔌 Soketi WebSocket initialized');
             } else {
-                console.warn('⚠️ Soketi WebSocket not configured. Key:', CONFIG.soketi.key);
+                console.warn('⚠️ Soketi WebSocket not configured - using polling mode');
+                wsConnectionFailed = true;
+                // Create a mock Echo to prevent errors
+                window.Echo = {
+                    channel: function() { return { listen: function() { return this; } }; },
+                    private: function() { return { listen: function() { return this; } }; },
+                    join: function() { return { listen: function() { return this; } }; },
+                    leave: function() {},
+                    socketId: function() { return null; }
+                };
+            }
+
+            // Helper function to check if WebSocket is usable
+            function isWebSocketAvailable() {
+                return wsConnected && !wsConnectionFailed && window.Echo && window.Echo.connector;
             }
 
             // State
@@ -950,7 +973,7 @@
                     var response;
 
                     if (CONFIG.tokenMode) {
-                        // Legacy mode - use /c/{token}/message with async + WebSocket
+                        // Legacy mode - use /c/{token}/message with async + hybrid WebSocket/polling
                         response = await apiRequest('POST', '/c/' + CONFIG.token + '/message', {
                             message: content || 'Fichier joint',
                             attachments: attachments,
@@ -960,60 +983,93 @@
                         var messageId = response.data.message_id;
                         var timeoutMs = 300000; // 5 minutes (same as job timeout)
 
-                        // Use WebSocket if Echo available, otherwise fallback to polling
-                        if (echo) {
-                            await new Promise(function(resolve, reject) {
-                                var timeout = setTimeout(function() {
-                                    echo.leave('chat.message.' + messageId);
-                                    reject(new Error('Délai d\'attente dépassé'));
-                                }, timeoutMs);
+                        // Hybrid approach: try WebSocket first, fallback to polling
+                        await new Promise(function(resolve, reject) {
+                            var resolved = false;
+                            var wsTimeout = null;
+                            var pollInterval = null;
+                            var startTime = Date.now();
 
-                                echo.channel('chat.message.' + messageId)
-                                    .listen('.completed', function(data) {
-                                        clearTimeout(timeout);
-                                        echo.leave('chat.message.' + messageId);
-                                        addMessage({
-                                            role: 'assistant',
-                                            content: data.content,
-                                            created_at: new Date().toISOString()
-                                        });
-                                        resolve();
-                                    })
-                                    .listen('.failed', function(data) {
-                                        clearTimeout(timeout);
-                                        echo.leave('chat.message.' + messageId);
-                                        reject(new Error(data.error || 'Erreur lors du traitement'));
-                                    });
-                            });
-                        } else {
-                            // Fallback to polling if WebSocket not available
-                            var pollUrl = '/messages/' + messageId + '/status';
-                            var maxAttempts = 300; // 5 minutes (1 poll/second)
-                            var attempt = 0;
-
-                            while (attempt < maxAttempts) {
-                                await new Promise(function(resolve) { setTimeout(resolve, 1000); });
-                                attempt++;
-
-                                var statusResponse = await apiRequest('GET', pollUrl);
-                                var status = statusResponse.data.status;
-
-                                if (status === 'completed') {
-                                    addMessage({
-                                        role: 'assistant',
-                                        content: statusResponse.data.content,
-                                        created_at: new Date().toISOString()
-                                    });
-                                    break;
-                                } else if (status === 'failed') {
-                                    throw new Error(statusResponse.data.error || 'Erreur lors du traitement');
+                            // Cleanup function
+                            function cleanup() {
+                                if (wsTimeout) clearTimeout(wsTimeout);
+                                if (pollInterval) clearInterval(pollInterval);
+                                if (window.Echo && window.Echo.leave) {
+                                    window.Echo.leave('chat.message.' + messageId);
                                 }
                             }
 
-                            if (attempt >= maxAttempts) {
-                                throw new Error('Délai d\'attente dépassé');
+                            // Handle success
+                            function onSuccess(data) {
+                                if (resolved) return;
+                                resolved = true;
+                                cleanup();
+                                addMessage({
+                                    role: 'assistant',
+                                    content: data.content,
+                                    created_at: new Date().toISOString()
+                                });
+                                resolve();
                             }
-                        }
+
+                            // Handle failure
+                            function onError(error) {
+                                if (resolved) return;
+                                resolved = true;
+                                cleanup();
+                                reject(new Error(error || 'Erreur lors du traitement'));
+                            }
+
+                            // Global timeout
+                            wsTimeout = setTimeout(function() {
+                                if (!resolved) {
+                                    onError('Délai d\'attente dépassé');
+                                }
+                            }, timeoutMs);
+
+                            // Try WebSocket if available
+                            if (isWebSocketAvailable()) {
+                                console.log('🔌 Using WebSocket for message:', messageId);
+                                window.Echo.channel('chat.message.' + messageId)
+                                    .listen('.completed', function(data) {
+                                        console.log('📨 WebSocket received:', data);
+                                        onSuccess(data);
+                                    })
+                                    .listen('.failed', function(data) {
+                                        console.log('❌ WebSocket failed:', data);
+                                        onError(data.error);
+                                    });
+                            }
+
+                            // Always start polling as backup (or primary if WebSocket unavailable)
+                            var pollUrl = '/messages/' + messageId + '/status';
+                            var pollDelay = isWebSocketAvailable() ? 3000 : 1000; // Poll less often if WebSocket active
+
+                            console.log('📊 Starting polling (interval: ' + pollDelay + 'ms)');
+
+                            pollInterval = setInterval(async function() {
+                                if (resolved) return;
+
+                                try {
+                                    var statusResponse = await apiRequest('GET', pollUrl);
+                                    var status = statusResponse.data.status;
+
+                                    if (status === 'completed') {
+                                        console.log('📊 Polling found completed message');
+                                        onSuccess({
+                                            content: statusResponse.data.content
+                                        });
+                                    } else if (status === 'failed') {
+                                        console.log('📊 Polling found failed message');
+                                        onError(statusResponse.data.error);
+                                    }
+                                    // else: still processing, continue polling
+                                } catch (pollError) {
+                                    console.warn('📊 Polling error (will retry):', pollError.message);
+                                    // Don't fail on single poll error, continue trying
+                                }
+                            }, pollDelay);
+                        });
                     } else {
                         // Whitelabel mode
                         response = await apiRequest('POST', '/whitelabel/sessions/' + state.session.session_id + '/messages', {

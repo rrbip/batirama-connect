@@ -1000,81 +1000,20 @@ R: {{ addslashes($learned['answer'] ?? '') }}
         </div>
     </div>
 
-    {{-- WebSocket Soketi for real-time updates --}}
+    {{-- WebSocket Soketi for real-time updates (optional - Livewire handles most updates) --}}
     @push('scripts')
-    <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const sessionUuid = @json($session->uuid);
-            const soketiConfig = {
-                key: @json(config('broadcasting.connections.pusher.key')),
-                // Frontend config - use same domain via Caddy reverse proxy
-                frontendHost: @json(config('broadcasting.connections.pusher.frontend.host')) || window.location.hostname,
-                frontendPort: @json(config('broadcasting.connections.pusher.frontend.port')) || (window.location.protocol === 'https:' ? 443 : 80),
-                frontendScheme: @json(config('broadcasting.connections.pusher.frontend.scheme')) || window.location.protocol.replace(':', ''),
-                cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
+        // Create a mock Echo object to prevent errors from other scripts that might expect it
+        // The admin panel uses Livewire for updates, so WebSocket is optional here
+        if (typeof window.Echo === 'undefined') {
+            window.Echo = {
+                channel: function() { return { listen: function() { return this; } }; },
+                private: function() { return { listen: function() { return this; } }; },
+                join: function() { return { listen: function() { return this; } }; },
+                leave: function() {},
+                socketId: function() { return null; }
             };
-
-            console.log('🔌 Soketi Config:', soketiConfig);
-            console.log('🔌 Using host:', soketiConfig.frontendHost);
-            console.log('🔌 Using port:', soketiConfig.frontendPort);
-            console.log('🔌 Using scheme:', soketiConfig.frontendScheme);
-            console.log('🔌 Session UUID:', sessionUuid);
-            console.log('🔌 Echo available:', typeof Echo !== 'undefined');
-            console.log('🔌 Pusher available:', typeof Pusher !== 'undefined');
-
-            if (typeof Echo !== 'undefined' && soketiConfig.key && soketiConfig.key !== 'app-key') {
-                // Enable Pusher logging for debugging
-                Pusher.logToConsole = true;
-
-                const useTLS = soketiConfig.frontendScheme === 'https';
-                window.Echo = new Echo({
-                    broadcaster: 'pusher',
-                    key: soketiConfig.key,
-                    wsHost: soketiConfig.frontendHost,
-                    wsPort: useTLS ? 443 : soketiConfig.frontendPort,
-                    wssPort: useTLS ? 443 : soketiConfig.frontendPort,
-                    forceTLS: useTLS,
-                    encrypted: useTLS,
-                    disableStats: true,
-                    enabledTransports: ['ws', 'wss'],
-                    cluster: soketiConfig.cluster
-                });
-
-                // Log connection state
-                window.Echo.connector.pusher.connection.bind('connected', function() {
-                    console.log('✅ Soketi WebSocket CONNECTED');
-                });
-
-                window.Echo.connector.pusher.connection.bind('disconnected', function() {
-                    console.log('❌ Soketi WebSocket DISCONNECTED');
-                });
-
-                window.Echo.connector.pusher.connection.bind('error', function(err) {
-                    console.error('❌ Soketi WebSocket ERROR:', err);
-                });
-
-                // Listen for new messages on this session (public channel for chat)
-                window.Echo.channel('chat.message.' + sessionUuid)
-                    .listen('.completed', function(data) {
-                        console.log('📨 New message received:', data);
-                        Livewire.dispatch('refreshMessages');
-                    });
-
-                console.log('🔌 Soketi WebSocket initialized for session:', sessionUuid);
-            } else {
-                console.warn('⚠️ Soketi WebSocket not configured or key is default. Config:', soketiConfig);
-                // Create a mock Echo to prevent errors from other scripts
-                window.Echo = {
-                    channel: function() { return { listen: function() { return this; } }; },
-                    private: function() { return { listen: function() { return this; } }; },
-                    join: function() { return { listen: function() { return this; } }; },
-                    leave: function() {},
-                    socketId: function() { return null; }
-                };
-            }
-        });
+        }
     </script>
     @endpush
 </x-filament-panels::page>
