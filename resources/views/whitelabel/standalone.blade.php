@@ -1087,10 +1087,10 @@
                         }
                     })
                     // Listen for session assignment (admin took over)
+                    // Note: Le message système est déjà envoyé via .message.new, pas besoin de l'ajouter ici
                     .listen('.session.assigned', function(data) {
                         console.log('👤 Session assigned to agent:', data);
-                        var agentName = data.support_agent ? data.support_agent.name : 'Un conseiller';
-                        addSystemMessage(agentName + ' a pris en charge votre demande.');
+                        // Le message "X a pris en charge votre demande" arrive via NewSupportMessage
                         scrollToBottom();
                     })
                     // Listen for escalation (confirmation)
