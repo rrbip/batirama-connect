@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Events\Chat\AiMessageCompleted;
+use App\Events\Chat\AiMessageFailed;
 use App\Models\AiMessage;
 use App\Services\AI\RagService;
 use Illuminate\Bus\Queueable;
@@ -97,6 +99,9 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
             ]);
 
+            // Broadcast completion event via WebSocket
+            broadcast(new AiMessageCompleted($this->message))->toOthers();
+
         } catch (\Exception $e) {
             Log::error('ProcessAiMessageJob: Processing failed', [
                 'message_id' => $this->message->id,
@@ -127,6 +132,9 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             error: $exception->getMessage(),
             attempt: $this->attempts()
         );
+
+        // Broadcast failure event via WebSocket
+        broadcast(new AiMessageFailed($this->message))->toOthers();
     }
 
     /**

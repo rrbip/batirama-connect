@@ -595,6 +595,10 @@
         @endif
     </div>
 
+    <!-- Soketi/Echo for WebSocket -->
+    <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
+
     <script>
         (function() {
             'use strict';
@@ -609,8 +613,33 @@
                 widgetParams: @json($widgetParams ?? []),
                 maxMessageLength: @json($config['max_message_length'] ?? 2000),
                 attachmentsEnabled: @json($config['attachments_enabled'] ?? false),
-                branding: @json($branding)
+                branding: @json($branding),
+                // Soketi WebSocket config
+                soketi: {
+                    key: @json(config('broadcasting.connections.pusher.key')),
+                    host: @json(config('broadcasting.connections.pusher.options.host')),
+                    port: @json(config('broadcasting.connections.pusher.options.port')),
+                    scheme: @json(config('broadcasting.connections.pusher.options.scheme', 'http')),
+                    cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
+                }
             };
+
+            // Initialize Echo for WebSocket
+            var echo = null;
+            if (typeof Echo !== 'undefined' && CONFIG.soketi.key) {
+                echo = new Echo({
+                    broadcaster: 'pusher',
+                    key: CONFIG.soketi.key,
+                    wsHost: CONFIG.soketi.host,
+                    wsPort: CONFIG.soketi.port,
+                    wssPort: CONFIG.soketi.port,
+                    forceTLS: CONFIG.soketi.scheme === 'https',
+                    encrypted: CONFIG.soketi.scheme === 'https',
+                    disableStats: true,
+                    enabledTransports: ['ws', 'wss'],
+                    cluster: CONFIG.soketi.cluster
+                });
+            }
 
             // State
             var state = {
@@ -892,41 +921,68 @@
                     var response;
 
                     if (CONFIG.tokenMode) {
-                        // Legacy mode - use /c/{token}/message with async polling
+                        // Legacy mode - use /c/{token}/message with async + WebSocket
                         response = await apiRequest('POST', '/c/' + CONFIG.token + '/message', {
                             message: content || 'Fichier joint',
                             attachments: attachments,
                             async: true
                         });
 
-                        // Poll for result
                         var messageId = response.data.message_id;
-                        var pollUrl = '/messages/' + messageId + '/status';
-                        var maxAttempts = 120; // 2 minutes max
-                        var attempt = 0;
 
-                        while (attempt < maxAttempts) {
-                            await new Promise(function(resolve) { setTimeout(resolve, 1000); });
-                            attempt++;
+                        // Use WebSocket if Echo available, otherwise fallback to polling
+                        if (echo) {
+                            await new Promise(function(resolve, reject) {
+                                var timeout = setTimeout(function() {
+                                    echo.leave('chat.message.' + messageId);
+                                    reject(new Error('Délai d\'attente dépassé'));
+                                }, 120000); // 2 minutes timeout
 
-                            var statusResponse = await apiRequest('GET', pollUrl);
-                            var status = statusResponse.data.status;
+                                echo.channel('chat.message.' + messageId)
+                                    .listen('.completed', function(data) {
+                                        clearTimeout(timeout);
+                                        echo.leave('chat.message.' + messageId);
+                                        addMessage({
+                                            role: 'assistant',
+                                            content: data.content,
+                                            created_at: new Date().toISOString()
+                                        });
+                                        resolve();
+                                    })
+                                    .listen('.failed', function(data) {
+                                        clearTimeout(timeout);
+                                        echo.leave('chat.message.' + messageId);
+                                        reject(new Error(data.error || 'Erreur lors du traitement'));
+                                    });
+                            });
+                        } else {
+                            // Fallback to polling if WebSocket not available
+                            var pollUrl = '/messages/' + messageId + '/status';
+                            var maxAttempts = 120;
+                            var attempt = 0;
 
-                            if (status === 'completed') {
-                                addMessage({
-                                    role: 'assistant',
-                                    content: statusResponse.data.content,
-                                    created_at: new Date().toISOString()
-                                });
-                                break;
-                            } else if (status === 'failed') {
-                                throw new Error(statusResponse.data.error || 'Erreur lors du traitement');
+                            while (attempt < maxAttempts) {
+                                await new Promise(function(resolve) { setTimeout(resolve, 1000); });
+                                attempt++;
+
+                                var statusResponse = await apiRequest('GET', pollUrl);
+                                var status = statusResponse.data.status;
+
+                                if (status === 'completed') {
+                                    addMessage({
+                                        role: 'assistant',
+                                        content: statusResponse.data.content,
+                                        created_at: new Date().toISOString()
+                                    });
+                                    break;
+                                } else if (status === 'failed') {
+                                    throw new Error(statusResponse.data.error || 'Erreur lors du traitement');
+                                }
                             }
-                            // Continue polling for pending/processing status
-                        }
 
-                        if (attempt >= maxAttempts) {
-                            throw new Error('Délai d\'attente dépassé');
+                            if (attempt >= maxAttempts) {
+                                throw new Error('Délai d\'attente dépassé');
+                            }
                         }
                     } else {
                         // Whitelabel mode
