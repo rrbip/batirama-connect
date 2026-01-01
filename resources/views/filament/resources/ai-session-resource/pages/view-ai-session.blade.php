@@ -285,7 +285,8 @@
                                                     @php
                                                         // Nettoyer le contenu : supprimer [HANDOFF_NEEDED] et la phrase d'invitation au support
                                                         $cleanedContent = $message['content'] ?? '';
-                                                        $cleanedContent = preg_replace('/\n*\[HANDOFF_NEEDED\]\n*/', '', $cleanedContent);
+                                                        // Supprimer [HANDOFF_NEEDED] ou [HANDOFF\_NEEDED] (avec backslash d'échappement)
+                                                        $cleanedContent = preg_replace('/\n*\[HANDOFF\\\\?_NEEDED\]\n*/i', '', $cleanedContent);
                                                         $cleanedContent = preg_replace('/Si vous ne trouvez toujours pas.*support humain.*aide\.\s*/i', '', $cleanedContent);
                                                         $cleanedContent = preg_replace('/je vous invite à contacter.*humain.*\.\s*/i', '', $cleanedContent);
                                                         $cleanedContent = preg_replace('/Un conseiller pourra.*\.\s*/i', '', $cleanedContent);
