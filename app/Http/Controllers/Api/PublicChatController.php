@@ -349,6 +349,7 @@ class PublicChatController extends Controller
             'data' => [
                 'session_id' => $session->uuid,
                 'messages' => $history,
+                'support_status' => $session->support_status,
             ],
         ]);
     }

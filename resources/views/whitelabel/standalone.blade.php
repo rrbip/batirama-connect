@@ -834,7 +834,8 @@
                 isLoading: true,
                 isSending: false,
                 currentFile: null,
-                uploadedAttachment: null
+                uploadedAttachment: null,
+                isHumanSupportActive: false  // True when escalated/assigned - hide AI typing
             };
 
             // DOM Elements
@@ -960,7 +961,12 @@
             }
 
             // Show/hide typing indicator
+            // Ne pas afficher quand le support humain est actif (l'utilisateur ne doit pas voir l'IA réfléchir)
             function showTyping() {
+                if (state.isHumanSupportActive) {
+                    console.log('🤖 AI typing hidden (human support mode)');
+                    return; // Ne pas montrer le typing en mode support humain
+                }
                 elements.typingIndicator.classList.add('visible');
                 scrollToBottom();
             }
@@ -1022,6 +1028,11 @@
                                 loadMessageByRole(msg);
                             });
                         }
+                        // Vérifier si le support humain est actif
+                        if (historyResponse.data.support_status && ['escalated', 'assigned'].includes(historyResponse.data.support_status)) {
+                            state.isHumanSupportActive = true;
+                            console.log('🔄 Restored human support mode from session:', historyResponse.data.support_status);
+                        }
                     } else {
                         // Whitelabel mode - create session via whitelabel API
                         var sessionResponse = await apiRequest('POST', '/whitelabel/sessions', {
@@ -1033,6 +1044,11 @@
                             sessionResponse.messages.forEach(function(msg) {
                                 loadMessageByRole(msg);
                             });
+                        }
+                        // Vérifier si le support humain est actif
+                        if (sessionResponse.support_status && ['escalated', 'assigned'].includes(sessionResponse.support_status)) {
+                            state.isHumanSupportActive = true;
+                            console.log('🔄 Restored human support mode from session:', sessionResponse.support_status);
                         }
                     }
 
@@ -1090,12 +1106,16 @@
                     // Note: Le message système est déjà envoyé via .message.new, pas besoin de l'ajouter ici
                     .listen('.session.assigned', function(data) {
                         console.log('👤 Session assigned to agent:', data);
+                        state.isHumanSupportActive = true;
+                        hideTyping(); // Cacher immédiatement le typing indicator
                         // Le message "X a pris en charge votre demande" arrive via NewSupportMessage
                         scrollToBottom();
                     })
                     // Listen for escalation (confirmation)
                     .listen('.session.escalated', function(data) {
                         console.log('🚨 Session escalated:', data);
+                        state.isHumanSupportActive = true;
+                        hideTyping(); // Cacher immédiatement le typing indicator
                         addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra prochainement.');
                         scrollToBottom();
                     })
@@ -1239,6 +1259,13 @@
                                 if (resolved) return;
                                 resolved = true;
                                 cleanup();
+                                // En mode support humain, ne pas afficher la réponse IA
+                                // Elle sera affichée après validation via .message.validated
+                                if (state.isHumanSupportActive) {
+                                    console.log('🤖 AI response hidden (human support mode) - waiting for validation');
+                                    resolve();
+                                    return;
+                                }
                                 addMessage({
                                     role: 'assistant',
                                     content: data.content,

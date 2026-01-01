@@ -285,6 +285,7 @@ class WidgetController extends Controller
         return response()->json([
             'session_id' => $session->uuid,
             'messages' => $allMessages,
+            'support_status' => $session->support_status,
         ]);
     }
 
@@ -313,6 +314,7 @@ class WidgetController extends Controller
         return response()->json([
             'session_id' => $session->uuid,
             'status' => $session->status,
+            'support_status' => $session->support_status,
             'message_count' => $session->message_count,
             'branding' => $branding,
             'created_at' => $session->created_at->toIso8601String(),
