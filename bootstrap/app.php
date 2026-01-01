@@ -25,6 +25,9 @@ return Application::configure(basePath: dirname(__DIR__))
                      \Illuminate\Http\Request::HEADER_X_FORWARDED_AWS_ELB
         );
 
+        // Force JSON responses for API routes (catch exceptions as JSON)
+        $middleware->prependToGroup('api', \App\Http\Middleware\ForceJsonResponse::class);
+
         // Enregistrement des alias de middleware pour l'API whitelabel
         $middleware->alias([
             'deployment.key' => \App\Http\Middleware\ValidateDeploymentKey::class,
