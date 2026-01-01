@@ -85,6 +85,13 @@ class PublicLinksManager extends Component implements HasForms, HasTable
                     ->dateTime('d/m/Y H:i')
                     ->color(fn ($record) => $record->isExpired() ? 'danger' : null),
 
+                TextColumn::make('client_email')
+                    ->label('Email')
+                    ->getStateUsing(fn ($record) => $record->client_info['email'] ?? null)
+                    ->placeholder('—')
+                    ->icon('heroicon-o-envelope')
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('creator.name')
                     ->label('Créé par')
                     ->default('Système')
@@ -111,6 +118,12 @@ class PublicLinksManager extends Component implements HasForms, HasTable
                     ->icon('heroicon-o-plus')
                     ->color('primary')
                     ->form([
+                        TextInput::make('client_email')
+                            ->label('Email client (optionnel)')
+                            ->email()
+                            ->placeholder('client@example.com')
+                            ->helperText('Si renseigné, évite la collecte d\'email lors de l\'escalade'),
+
                         TextInput::make('max_uses')
                             ->label('Utilisations max')
                             ->numeric()
@@ -131,6 +144,15 @@ class PublicLinksManager extends Component implements HasForms, HasTable
                             ->placeholder('Ex: Lien pour client X, devis #123...'),
                     ])
                     ->action(function (array $data) {
+                        // Construire client_info avec email et note
+                        $clientInfo = [];
+                        if (!empty($data['client_email'])) {
+                            $clientInfo['email'] = $data['client_email'];
+                        }
+                        if (!empty($data['note'])) {
+                            $clientInfo['note'] = $data['note'];
+                        }
+
                         $token = PublicAccessToken::create([
                             'token' => Str::random(32),
                             'agent_id' => $this->agent->id,
@@ -139,7 +161,7 @@ class PublicLinksManager extends Component implements HasForms, HasTable
                             'max_uses' => $data['max_uses'] ?? 1,
                             'use_count' => 0,
                             'status' => 'active',
-                            'client_info' => $data['note'] ? ['note' => $data['note']] : null,
+                            'client_info' => !empty($clientInfo) ? $clientInfo : null,
                             'created_at' => now(),
                         ]);
 

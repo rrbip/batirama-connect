@@ -60,7 +60,7 @@ class PublicChatController extends Controller
         }
 
         $session = $accessToken->session;
-        $usesCount = $accessToken->uses_count ?? $accessToken->use_count ?? 0;
+        $usesCount = $accessToken->use_count ?? 0;
         $maxUses = $accessToken->max_uses ?? 1;
 
         return response()->json([
@@ -127,6 +127,12 @@ class PublicChatController extends Controller
             // Lier la session au token
             $accessToken->update(['session_id' => $session->id]);
             $accessToken->refresh();
+
+            // Si un email client est pré-configuré, l'ajouter à la session
+            $clientEmail = $accessToken->client_info['email'] ?? null;
+            if ($clientEmail) {
+                $session->update(['user_email' => $clientEmail]);
+            }
         }
 
         // Incrémenter le compteur
