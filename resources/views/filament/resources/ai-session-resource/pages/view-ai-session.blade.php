@@ -1156,6 +1156,36 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 });
 
             console.log('✅ WebSocket listeners registered for session:', sessionUuid);
+
+            // ═══════════════════════════════════════════════════════════════
+            // AUTO-SCROLL AU BAS DE LA CONVERSATION
+            // ═══════════════════════════════════════════════════════════════
+            function scrollToBottom() {
+                var chatContainer = document.getElementById('chat-messages');
+                if (chatContainer) {
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+
+            // Scroll au chargement initial
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(scrollToBottom, 100);
+            });
+
+            // Scroll après chaque refresh Livewire
+            document.addEventListener('livewire:navigated', scrollToBottom);
+
+            // Écouter les événements Livewire pour scroll après refresh
+            if (typeof Livewire !== 'undefined') {
+                Livewire.hook('message.processed', function() {
+                    setTimeout(scrollToBottom, 50);
+                });
+            }
+
+            // Scroll initial si la page est déjà chargée
+            if (document.readyState === 'complete') {
+                scrollToBottom();
+            }
         })();
     </script>
     @endpush

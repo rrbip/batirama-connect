@@ -506,7 +506,7 @@ class ViewAiSession extends ViewRecord
         $messages = [];
 
         // Messages IA (user + assistant)
-        foreach ($this->record->messages()->orderBy('created_at', 'asc')->get() as $msg) {
+        foreach ($this->record->messages()->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get() as $msg) {
             $messages[] = [
                 'id' => 'ai_' . $msg->id,
                 'original_id' => $msg->id,
@@ -528,7 +528,7 @@ class ViewAiSession extends ViewRecord
 
         // Messages de support (si escaladé)
         if ($this->record->isEscalated()) {
-            foreach ($this->record->supportMessages()->with('agent', 'attachments')->orderBy('created_at', 'asc')->get() as $supportMsg) {
+            foreach ($this->record->supportMessages()->with('agent', 'attachments')->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get() as $supportMsg) {
                 // Déterminer le type
                 $type = match ($supportMsg->sender_type) {
                     'agent' => 'support',
@@ -556,8 +556,15 @@ class ViewAiSession extends ViewRecord
             }
         }
 
-        // Trier par date
-        usort($messages, fn ($a, $b) => $a['created_at'] <=> $b['created_at']);
+        // Trier par date puis par ID pour les messages simultanés
+        usort($messages, function ($a, $b) {
+            $dateCompare = $a['created_at'] <=> $b['created_at'];
+            if ($dateCompare !== 0) {
+                return $dateCompare;
+            }
+            // Si même date, trier par ID
+            return $a['original_id'] <=> $b['original_id'];
+        });
 
         return $messages;
     }

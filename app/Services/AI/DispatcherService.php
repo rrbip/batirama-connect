@@ -204,6 +204,7 @@ class DispatcherService
     {
         return $session->messages()
             ->orderBy('created_at', 'asc')
+            ->orderBy('id', 'asc')
             ->take($limit)
             ->get()
             ->map(fn($msg) => [

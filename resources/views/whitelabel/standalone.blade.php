@@ -996,6 +996,9 @@
                     elements.loadingOverlay.style.display = 'none';
                     state.isLoading = false;
 
+                    // Scroll to bottom after loading history
+                    setTimeout(scrollToBottom, 100);
+
                 } catch (error) {
                     console.error('Init error:', error);
                     elements.loadingOverlay.querySelector('.loading-text').textContent = 'Erreur de connexion';
