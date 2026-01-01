@@ -12,6 +12,7 @@ use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\User;
 use App\Models\UserEditorLink;
+use App\Jobs\ProcessAiMessageJob;
 use App\Services\Upload\FileUploadService;
 use App\Services\Whitelabel\BrandingResolver;
 use Illuminate\Http\JsonResponse;
@@ -142,6 +143,7 @@ class WidgetController extends Controller
 
     /**
      * Envoie un message et reçoit la réponse de l'IA.
+     * Supporte le mode async pour le handoff humain.
      */
     public function sendMessage(Request $request, string $sessionId): JsonResponse
     {
@@ -150,6 +152,7 @@ class WidgetController extends Controller
             'attachments' => 'nullable|array',
             'attachments.*.type' => 'required_with:attachments|string',
             'attachments.*.url' => 'required_with:attachments|url',
+            'async' => 'nullable|boolean',
         ]);
 
         /** @var AgentDeployment $deployment */
@@ -183,8 +186,34 @@ class WidgetController extends Controller
         $deployment->incrementMessageCount();
         $session->increment('message_count');
 
-        // Dispatcher le job de génération de réponse IA
-        // Pour l'instant, on utilise le service existant de chat
+        // Mode async: dispatcher un job et retourner immédiatement
+        // Utilisé quand le support humain est actif pour ne pas bloquer l'utilisateur
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+        $useAsync = $request->boolean('async', false) || $isHumanSupportActive;
+
+        if ($useAsync) {
+            // Créer le message assistant en attente
+            $assistantMessage = $session->messages()->create([
+                'uuid' => (string) Str::uuid(),
+                'role' => 'assistant',
+                'content' => '',
+                'processing_status' => AiMessage::STATUS_PENDING,
+            ]);
+
+            // Dispatcher le job
+            ProcessAiMessageJob::dispatch($assistantMessage, $validated['message']);
+            $assistantMessage->markAsQueued();
+
+            return response()->json([
+                'message_id' => $userMessage->uuid,
+                'async' => true,
+                'ai_message_id' => $assistantMessage->uuid,
+                'support_status' => $session->support_status,
+                'poll_url' => url("/api/messages/{$assistantMessage->uuid}/status"),
+            ]);
+        }
+
+        // Mode sync: générer la réponse immédiatement
         try {
             $response = $this->generateAiResponse($session, $userMessage);
 

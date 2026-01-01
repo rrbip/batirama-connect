@@ -1140,7 +1140,9 @@
                 var messageDiv = document.createElement('div');
                 messageDiv.className = 'system-message';
                 messageDiv.innerHTML = '<div class="system-message-content">' + escapeHtml(content) + '</div>';
-                container.appendChild(messageDiv);
+                // Insérer avant le typing indicator pour maintenir l'ordre chronologique
+                container.insertBefore(messageDiv, elements.typingIndicator);
+                scrollToBottom();
             }
 
             // Load message by role (used when loading history)
@@ -1234,6 +1236,16 @@
                             attachments: attachments,
                             async: true
                         });
+
+                        // En mode support humain, ne pas attendre la réponse IA
+                        // L'utilisateur peut continuer à envoyer des messages
+                        if (state.isHumanSupportActive) {
+                            console.log('📤 Message sent (human support mode) - not waiting for AI');
+                            hideTyping();
+                            state.isSending = false;
+                            updateSendButton();
+                            return;
+                        }
 
                         var messageId = response.data.message_id;
                         var timeoutMs = 300000; // 5 minutes (same as job timeout)
@@ -1336,15 +1348,29 @@
                         // Whitelabel mode
                         response = await apiRequest('POST', '/whitelabel/sessions/' + state.session.session_id + '/messages', {
                             message: content || 'Fichier joint',
-                            attachments: attachments
+                            attachments: attachments,
+                            async: state.isHumanSupportActive // Mode async si support humain actif
                         });
 
-                        addMessage({
-                            role: 'assistant',
-                            content: response.content,
-                            sources: response.sources,
-                            created_at: response.created_at
-                        });
+                        // En mode async (support humain), ne pas attendre la réponse IA
+                        if (response.async) {
+                            console.log('📤 Message sent (whitelabel async mode) - not waiting for AI');
+                            // Update support status if returned
+                            if (response.support_status && ['escalated', 'assigned'].includes(response.support_status)) {
+                                state.isHumanSupportActive = true;
+                            }
+                            return;
+                        }
+
+                        // Mode sync: afficher la réponse immédiatement
+                        if (response.response) {
+                            addMessage({
+                                role: 'assistant',
+                                content: response.response.content,
+                                sources: response.response.sources,
+                                created_at: response.response.created_at
+                            });
+                        }
                     }
 
                 } catch (error) {
