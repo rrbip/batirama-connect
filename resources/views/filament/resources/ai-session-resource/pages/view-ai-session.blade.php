@@ -353,6 +353,21 @@
                                                 if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
                                                     $userQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
                                                 }
+
+                                                // Calculer le score RAG max pour l'évaluation handoff
+                                                $maxRagScore = 0;
+                                                foreach ($documentSources as $doc) {
+                                                    $score = ($doc['score'] ?? 0) / 100; // Convertir de % à décimal
+                                                    if ($score > $maxRagScore) {
+                                                        $maxRagScore = $score;
+                                                    }
+                                                }
+
+                                                // Récupérer les infos de l'agent pour le handoff
+                                                $agentForHandoff = $session->agent;
+                                                $handoffEnabled = $agentForHandoff?->human_support_enabled ?? false;
+                                                $escalationThreshold = $agentForHandoff?->escalation_threshold ?? 0.3;
+                                                $wouldEscalate = $handoffEnabled && $maxRagScore < $escalationThreshold && $maxRagScore > 0;
                                             @endphp
                                             <div x-data="{
                                                 openContext: false,
@@ -416,12 +431,25 @@ Q: {{ addslashes($learned['question'] ?? '') }}
 R: {{ addslashes($learned['answer'] ?? '') }}
 @endforeach
 
+## Evaluation Handoff Humain
+- Handoff active: {{ $handoffEnabled ? 'Oui' : 'Non' }}
+@if($handoffEnabled)
+- Seuil d'escalade configure: {{ number_format($escalationThreshold * 100, 0) }}%
+- Score RAG maximum obtenu: {{ $maxRagScore > 0 ? number_format($maxRagScore * 100, 1) . '%' : 'Aucun document trouve' }}
+- Decision d'escalade: {{ $wouldEscalate ? 'OUI - Score RAG insuffisant (< seuil)' : ($maxRagScore == 0 ? 'OUI - Aucune source trouvee' : 'NON - Score suffisant') }}
+- Agents de support configures: {{ $agentForHandoff?->supportUsers()->count() ?? 0 }}
+@if($agentForHandoff?->support_email)
+- Email de support: {{ $agentForHandoff->support_email }}
+@endif
+@endif
+
 ## Informations techniques
 - Agent: {{ $stats['agent_slug'] ?? 'N/A' }}
 - Modele: {{ $stats['agent_model'] ?? 'N/A' }}
 - Temperature: {{ $stats['temperature'] ?? 'N/A' }}
 - Fenetre contexte: {{ $stats['context_window_size'] ?? 0 }} messages
-- Filtrage categorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Active' : 'Desactive' }}`;
+- Filtrage categorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Active' : 'Desactive' }}
+- Type de reponse: {{ ($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans appel LLM)' : 'Generation LLM' }}`;
                                                 }
                                             }">
                                                 <button
@@ -703,6 +731,43 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                             <li>Confiance détection: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%</li>
                                                                                         @endif
                                                                                     </ul>
+
+                                                                                    {{-- Évaluation Handoff --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Évaluation Handoff</h4>
+                                                                                    <div class="p-3 rounded-lg {{ $wouldEscalate || $maxRagScore == 0 ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700' : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' }}">
+                                                                                        <ul class="text-sm space-y-1">
+                                                                                            <li class="flex items-center gap-2">
+                                                                                                <span class="text-gray-600 dark:text-gray-400">Handoff activé:</span>
+                                                                                                <span class="font-medium">{{ $handoffEnabled ? 'Oui' : 'Non' }}</span>
+                                                                                            </li>
+                                                                                            @if($handoffEnabled)
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Seuil d'escalade:</span>
+                                                                                                    <span class="font-medium">{{ number_format($escalationThreshold * 100, 0) }}%</span>
+                                                                                                </li>
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Score RAG max:</span>
+                                                                                                    <span class="font-medium {{ $maxRagScore < $escalationThreshold ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">
+                                                                                                        {{ $maxRagScore > 0 ? number_format($maxRagScore * 100, 1) . '%' : 'Aucun' }}
+                                                                                                    </span>
+                                                                                                </li>
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Décision:</span>
+                                                                                                    @if($wouldEscalate || $maxRagScore == 0)
+                                                                                                        <span class="font-bold text-red-600 dark:text-red-400">
+                                                                                                            <x-heroicon-o-exclamation-triangle class="w-4 h-4 inline" />
+                                                                                                            ESCALADE RECOMMANDÉE
+                                                                                                        </span>
+                                                                                                    @else
+                                                                                                        <span class="font-medium text-green-600 dark:text-green-400">
+                                                                                                            <x-heroicon-o-check-circle class="w-4 h-4 inline" />
+                                                                                                            Score suffisant
+                                                                                                        </span>
+                                                                                                    @endif
+                                                                                                </li>
+                                                                                            @endif
+                                                                                        </ul>
+                                                                                    </div>
 
                                                                                     @if(!empty($documentSources))
                                                                                         <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Documents RAG (aperçu)</h4>
