@@ -1029,7 +1029,7 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 Pusher.logToConsole = true;
 
                 const useTLS = soketiConfig.frontendScheme === 'https';
-                const echo = new Echo({
+                window.Echo = new Echo({
                     broadcaster: 'pusher',
                     key: soketiConfig.key,
                     wsHost: soketiConfig.frontendHost,
@@ -1043,20 +1043,20 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 });
 
                 // Log connection state
-                echo.connector.pusher.connection.bind('connected', function() {
+                window.Echo.connector.pusher.connection.bind('connected', function() {
                     console.log('✅ Soketi WebSocket CONNECTED');
                 });
 
-                echo.connector.pusher.connection.bind('disconnected', function() {
+                window.Echo.connector.pusher.connection.bind('disconnected', function() {
                     console.log('❌ Soketi WebSocket DISCONNECTED');
                 });
 
-                echo.connector.pusher.connection.bind('error', function(err) {
+                window.Echo.connector.pusher.connection.bind('error', function(err) {
                     console.error('❌ Soketi WebSocket ERROR:', err);
                 });
 
                 // Listen for new messages on this session (public channel for chat)
-                echo.channel('chat.message.' + sessionUuid)
+                window.Echo.channel('chat.message.' + sessionUuid)
                     .listen('.completed', function(data) {
                         console.log('📨 New message received:', data);
                         Livewire.dispatch('refreshMessages');
@@ -1065,6 +1065,14 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 console.log('🔌 Soketi WebSocket initialized for session:', sessionUuid);
             } else {
                 console.warn('⚠️ Soketi WebSocket not configured or key is default. Config:', soketiConfig);
+                // Create a mock Echo to prevent errors from other scripts
+                window.Echo = {
+                    channel: function() { return { listen: function() { return this; } }; },
+                    private: function() { return { listen: function() { return this; } }; },
+                    join: function() { return { listen: function() { return this; } }; },
+                    leave: function() {},
+                    socketId: function() { return null; }
+                };
             }
         });
     </script>
