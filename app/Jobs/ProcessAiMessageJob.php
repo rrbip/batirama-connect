@@ -8,6 +8,7 @@ use App\Events\Chat\AiMessageCompleted;
 use App\Events\Chat\AiMessageFailed;
 use App\Models\AiMessage;
 use App\Services\AI\RagService;
+use App\Services\Support\EscalationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -76,9 +77,13 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Exécuter le RAG complet (embedding, recherche, LLM)
             $response = $ragService->query($agent, $this->userContent, $session);
 
-            // Mettre à jour le message avec la réponse
+            // Vérifier si l'IA demande un handoff humain
+            $needsHandoff = $this->checkHandoffMarker($response->content);
+            $cleanContent = $this->removeHandoffMarker($response->content);
+
+            // Mettre à jour le message avec la réponse (sans le marqueur)
             $this->message->markAsCompleted(
-                content: $response->content,
+                content: $cleanContent,
                 model: $response->model,
                 tokensPrompt: $response->tokensPrompt,
                 tokensCompletion: $response->tokensCompletion,
@@ -90,6 +95,11 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Incrémenter le compteur de messages de la session
             $session->increment('message_count');
 
+            // Si handoff demandé par l'IA, déclencher l'escalade
+            if ($needsHandoff && $agent->human_support_enabled) {
+                $this->triggerEscalation($session, 'ai_handoff_request');
+            }
+
             Log::info('ProcessAiMessageJob: Completed successfully', [
                 'message_id' => $this->message->id,
                 'message_uuid' => $this->message->uuid,
@@ -97,6 +107,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'used_fallback' => $response->usedFallback,
                 'generation_time_ms' => $response->generationTimeMs,
                 'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
+                'needs_handoff' => $needsHandoff,
             ]);
 
             // Broadcast completion event via WebSocket
@@ -179,5 +190,53 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
     {
         // Le job peut être retenté pendant 10 minutes max
         return now()->addMinutes(10);
+    }
+
+    /**
+     * Vérifie si la réponse contient le marqueur de handoff
+     */
+    private function checkHandoffMarker(string $content): bool
+    {
+        return str_contains($content, '[HANDOFF_NEEDED]');
+    }
+
+    /**
+     * Supprime le marqueur de handoff du contenu
+     */
+    private function removeHandoffMarker(string $content): string
+    {
+        // Supprimer le marqueur et les lignes vides autour
+        $content = preg_replace('/\n*\[HANDOFF_NEEDED\]\n*/', '', $content);
+
+        return trim($content);
+    }
+
+    /**
+     * Déclenche l'escalade vers le support humain
+     */
+    private function triggerEscalation(\App\Models\AiSession $session, string $reason): void
+    {
+        // Ne pas escalader si déjà escaladé
+        if ($session->isEscalated()) {
+            Log::info('ProcessAiMessageJob: Session already escalated, skipping', [
+                'session_id' => $session->id,
+            ]);
+            return;
+        }
+
+        try {
+            $escalationService = app(EscalationService::class);
+            $escalationService->escalate($session, $reason);
+
+            Log::info('ProcessAiMessageJob: Session escalated to human support', [
+                'session_id' => $session->id,
+                'reason' => $reason,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('ProcessAiMessageJob: Failed to escalate session', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

@@ -376,6 +376,39 @@ GUARDRAILS;
     }
 
     /**
+     * Retourne les instructions de handoff humain à ajouter au prompt
+     */
+    public function getHandoffInstructions(): string
+    {
+        if (!$this->human_support_enabled) {
+            return '';
+        }
+
+        return <<<'HANDOFF'
+
+## TRANSFERT VERS UN HUMAIN
+
+Tu dois ajouter le marqueur `[HANDOFF_NEEDED]` à la FIN de ta réponse si l'une de ces conditions est remplie :
+
+1. **Contexte insuffisant** : Tu n'as pas assez d'informations dans le contexte pour répondre correctement
+2. **Question complexe** : La demande nécessite une expertise humaine (devis personnalisé, cas particulier, réclamation)
+3. **Demande explicite** : L'utilisateur demande à parler à un humain/conseiller
+4. **Incertitude** : Tu n'es pas sûr de ta réponse (confiance < 60%)
+5. **Hors périmètre** : La question ne correspond pas à ton domaine de compétence
+
+**Format de réponse quand handoff nécessaire :**
+- Donne d'abord une réponse partielle ou explique pourquoi tu ne peux pas aider complètement
+- Termine TOUJOURS par le marqueur `[HANDOFF_NEEDED]` sur une ligne séparée
+
+**Exemple :**
+"Je n'ai pas trouvé d'information précise sur les tarifs pour ce type de projet spécifique. Un conseiller pourra vous établir un devis personnalisé.
+
+[HANDOFF_NEEDED]"
+
+HANDOFF;
+    }
+
+    /**
      * Retourne la méthode d'extraction par défaut pour les PDFs
      */
     public function getDefaultExtractionMethod(): string

@@ -73,6 +73,9 @@ class PromptBuilder
         // Ajouter les garde-fous si strict_mode est activé
         $systemContent .= $agent->getStrictModeGuardrails();
 
+        // Ajouter les instructions de handoff humain si activé
+        $systemContent .= $agent->getHandoffInstructions();
+
         // Ajouter les instructions de structured output si activées
         $systemContent .= $this->getStructuredOutputInstructions($agent, $session);
 
