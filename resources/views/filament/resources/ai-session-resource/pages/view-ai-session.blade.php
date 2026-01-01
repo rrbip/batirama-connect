@@ -374,47 +374,193 @@
                                                                     <x-heroicon-o-x-mark class="w-6 h-6" />
                                                                 </button>
                                                             </div>
-                                                            <div class="flex-1 overflow-y-auto p-6 space-y-4">
-                                                                @if(!empty($documentSources))
-                                                                    <div class="space-y-3">
-                                                                        <h3 class="font-semibold text-gray-700 dark:text-gray-300">Documents RAG ({{ count($documentSources) }})</h3>
-                                                                        @foreach($documentSources as $doc)
-                                                                            @php
-                                                                                $hasEmptyContent = empty(trim($doc['content'] ?? ''));
-                                                                            @endphp
-                                                                            <div class="border {{ $hasEmptyContent ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700' }} rounded-lg p-3">
-                                                                                <div class="flex justify-between items-start mb-2">
-                                                                                    <span class="font-medium text-sm">{{ $doc['source_doc'] ?? $doc['metadata']['title'] ?? 'Document #' . ($doc['index'] ?? $loop->iteration) }}</span>
-                                                                                    <span class="text-xs px-2 py-0.5 rounded {{ $hasEmptyContent ? 'bg-red-100 text-red-700' : 'bg-cyan-100 text-cyan-700' }}">{{ $doc['score'] ?? 0 }}%</span>
-                                                                                </div>
-                                                                                @if($hasEmptyContent)
-                                                                                    <div class="p-2 bg-red-50 dark:bg-red-900/30 rounded text-red-600 dark:text-red-300 text-sm">
-                                                                                        <x-heroicon-o-exclamation-triangle class="w-4 h-4 inline" />
-                                                                                        Contenu vide - problème d'indexation
+                                                            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                                                                {{-- Stats Section --}}
+                                                                @if(!empty($context['stats']))
+                                                                    <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                                                                        <h3 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                                                                            <x-heroicon-o-chart-bar class="w-4 h-4" />
+                                                                            Statistiques de génération
+                                                                        </h3>
+                                                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                                                            <div>
+                                                                                <span class="text-gray-500">Agent</span>
+                                                                                <p class="font-medium">{{ $context['stats']['agent_slug'] ?? '-' }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Modèle</span>
+                                                                                <p class="font-medium">{{ $context['stats']['agent_model'] ?? '-' }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Température</span>
+                                                                                <p class="font-medium">{{ $context['stats']['temperature'] ?? '-' }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Fenêtre contexte</span>
+                                                                                <p class="font-medium">{{ $context['stats']['context_window_size'] ?? 0 }} messages</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Sources docs</span>
+                                                                                <p class="font-medium">{{ $context['stats']['document_count'] ?? 0 }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Sources apprises</span>
+                                                                                <p class="font-medium">{{ $context['stats']['learned_count'] ?? 0 }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Historique</span>
+                                                                                <p class="font-medium">{{ $context['stats']['history_count'] ?? 0 }} msgs</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-gray-500">Filtrage catégorie</span>
+                                                                                <p class="font-medium">{{ ($context['stats']['use_category_filtering'] ?? false) ? 'Oui' : 'Non' }}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                @endif
+
+                                                                {{-- Category Detection --}}
+                                                                @if(!empty($context['category_detection']))
+                                                                    <div class="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4 border border-purple-200 dark:border-purple-700">
+                                                                        <h3 class="font-semibold text-purple-700 dark:text-purple-300 mb-3 flex items-center gap-2">
+                                                                            <x-heroicon-o-tag class="w-4 h-4" />
+                                                                            Détection de catégorie
+                                                                        </h3>
+                                                                        <div class="grid grid-cols-2 gap-4 text-sm">
+                                                                            <div>
+                                                                                <span class="text-purple-500">Méthode</span>
+                                                                                <p class="font-medium">{{ $context['category_detection']['method'] ?? '-' }}</p>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span class="text-purple-500">Confiance</span>
+                                                                                <p class="font-medium">{{ round(($context['category_detection']['confidence'] ?? 0) * 100) }}%</p>
+                                                                            </div>
+                                                                            @if(!empty($context['category_detection']['categories']))
+                                                                                <div class="col-span-2">
+                                                                                    <span class="text-purple-500">Catégories détectées</span>
+                                                                                    <div class="flex flex-wrap gap-1 mt-1">
+                                                                                        @foreach($context['category_detection']['categories'] as $cat)
+                                                                                            <span class="px-2 py-0.5 bg-purple-100 dark:bg-purple-800 text-purple-700 dark:text-purple-200 rounded text-xs">{{ $cat['name'] ?? $cat }}</span>
+                                                                                        @endforeach
                                                                                     </div>
-                                                                                @else
-                                                                                    <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">{{ $doc['content'] }}</pre>
+                                                                                </div>
+                                                                            @endif
+                                                                            @if(isset($context['category_detection']['used_fallback']))
+                                                                                <div>
+                                                                                    <span class="text-purple-500">Fallback utilisé</span>
+                                                                                    <p class="font-medium">{{ $context['category_detection']['used_fallback'] ? 'Oui' : 'Non' }}</p>
+                                                                                </div>
+                                                                            @endif
+                                                                        </div>
+                                                                    </div>
+                                                                @endif
+
+                                                                {{-- System Prompt Sent --}}
+                                                                @if(!empty($context['system_prompt_sent']))
+                                                                    <div class="border border-blue-200 dark:border-blue-700 rounded-lg overflow-hidden">
+                                                                        <div class="bg-blue-50 dark:bg-blue-900/30 px-4 py-2 border-b border-blue-200 dark:border-blue-700">
+                                                                            <h3 class="font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-command-line class="w-4 h-4" />
+                                                                                System Prompt envoyé au LLM
+                                                                            </h3>
+                                                                        </div>
+                                                                        <pre class="p-4 text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap max-h-64 overflow-y-auto bg-gray-50 dark:bg-gray-900">{{ $context['system_prompt_sent'] }}</pre>
+                                                                    </div>
+                                                                @endif
+
+                                                                {{-- Conversation History --}}
+                                                                @if(!empty($context['conversation_history']))
+                                                                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                                                                        <div class="bg-gray-100 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                                                                            <h3 class="font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                                                                <x-heroicon-o-clock class="w-4 h-4" />
+                                                                                Historique de conversation (fenêtre glissante: {{ count($context['conversation_history']) }} msgs)
+                                                                            </h3>
+                                                                        </div>
+                                                                        <div class="p-4 space-y-2 max-h-48 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+                                                                            @foreach($context['conversation_history'] as $histMsg)
+                                                                                <div class="text-xs">
+                                                                                    <span class="font-semibold {{ $histMsg['role'] === 'user' ? 'text-blue-600' : 'text-green-600' }}">
+                                                                                        [{{ $histMsg['timestamp'] ?? '' }}] {{ $histMsg['role'] === 'user' ? 'User' : 'Assistant' }}:
+                                                                                    </span>
+                                                                                    <span class="text-gray-600 dark:text-gray-400">{{ \Illuminate\Support\Str::limit($histMsg['content'], 200) }}</span>
+                                                                                </div>
+                                                                            @endforeach
+                                                                        </div>
+                                                                    </div>
+                                                                @endif
+
+                                                                {{-- Learned Sources --}}
+                                                                @if(!empty($learnedSources))
+                                                                    <div class="space-y-3">
+                                                                        <h3 class="font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-light-bulb class="w-4 h-4" />
+                                                                            Sources apprises ({{ count($learnedSources) }})
+                                                                        </h3>
+                                                                        @foreach($learnedSources as $learned)
+                                                                            <div class="border border-amber-200 dark:border-amber-700 rounded-lg p-3 bg-amber-50 dark:bg-amber-900/20">
+                                                                                <div class="flex justify-between items-start mb-2">
+                                                                                    <span class="font-medium text-sm text-amber-800 dark:text-amber-200">Q: {{ $learned['question'] ?? '' }}</span>
+                                                                                    <span class="text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-800 text-amber-700 dark:text-amber-200">{{ $learned['score'] ?? 0 }}%</span>
+                                                                                </div>
+                                                                                <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">{{ $learned['answer'] ?? '' }}</pre>
+                                                                                @if(isset($learned['message_id']))
+                                                                                    <p class="text-xs text-gray-400 mt-1">Message ID: {{ $learned['message_id'] }}</p>
                                                                                 @endif
                                                                             </div>
                                                                         @endforeach
                                                                     </div>
                                                                 @endif
-                                                                @if(!empty($learnedSources))
+
+                                                                {{-- Document Sources RAG --}}
+                                                                @if(!empty($documentSources))
                                                                     <div class="space-y-3">
-                                                                        <h3 class="font-semibold text-gray-700 dark:text-gray-300">Sources apprises ({{ count($learnedSources) }})</h3>
-                                                                        @foreach($learnedSources as $learned)
-                                                                            <div class="border border-amber-200 dark:border-amber-700 rounded-lg p-3 bg-amber-50 dark:bg-amber-900/20">
+                                                                        <h3 class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                                                                            <x-heroicon-o-document-text class="w-4 h-4" />
+                                                                            Documents RAG ({{ count($documentSources) }})
+                                                                        </h3>
+                                                                        @foreach($documentSources as $doc)
+                                                                            @php
+                                                                                $hasEmptyContent = empty(trim($doc['content'] ?? ''));
+                                                                            @endphp
+                                                                            <div class="border {{ $hasEmptyContent ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20' : 'border-cyan-200 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-900/20' }} rounded-lg p-3">
                                                                                 <div class="flex justify-between items-start mb-2">
-                                                                                    <span class="font-medium text-sm">Q: {{ \Illuminate\Support\Str::limit($learned['question'] ?? '', 60) }}</span>
-                                                                                    <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">{{ $learned['score'] ?? 0 }}%</span>
+                                                                                    <div>
+                                                                                        <span class="font-medium text-sm">{{ $doc['source_doc'] ?? 'Document #' . ($doc['index'] ?? $loop->iteration) }}</span>
+                                                                                        @if(!empty($doc['type']))
+                                                                                            <span class="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{{ $doc['type'] }}</span>
+                                                                                        @endif
+                                                                                        @if(!empty($doc['category']))
+                                                                                            <span class="ml-1 text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-800 text-purple-600 dark:text-purple-300">{{ $doc['category'] }}</span>
+                                                                                        @endif
+                                                                                    </div>
+                                                                                    <span class="text-xs px-2 py-0.5 rounded {{ $hasEmptyContent ? 'bg-red-100 dark:bg-red-800 text-red-700 dark:text-red-200' : 'bg-cyan-100 dark:bg-cyan-800 text-cyan-700 dark:text-cyan-200' }}">{{ $doc['score'] ?? 0 }}%</span>
                                                                                 </div>
-                                                                                <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-24 overflow-y-auto">{{ $learned['answer'] ?? '' }}</pre>
+                                                                                @if(!empty($doc['question']))
+                                                                                    <p class="text-xs text-gray-500 mb-1"><strong>Q:</strong> {{ $doc['question'] }}</p>
+                                                                                @endif
+                                                                                @if($hasEmptyContent)
+                                                                                    <div class="p-2 bg-red-100 dark:bg-red-900/50 rounded text-red-600 dark:text-red-300 text-sm flex items-center gap-2">
+                                                                                        <x-heroicon-o-exclamation-triangle class="w-4 h-4 flex-shrink-0" />
+                                                                                        <span>Contenu vide - problème d'indexation (ID: {{ $doc['id'] ?? 'N/A' }})</span>
+                                                                                    </div>
+                                                                                @else
+                                                                                    <pre class="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto bg-white dark:bg-gray-800 p-2 rounded">{{ $doc['content'] }}</pre>
+                                                                                @endif
+                                                                                @if(!empty($doc['metadata']))
+                                                                                    <details class="mt-2">
+                                                                                        <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Métadonnées</summary>
+                                                                                        <pre class="text-xs text-gray-500 mt-1 p-2 bg-gray-100 dark:bg-gray-800 rounded overflow-x-auto">{{ json_encode($doc['metadata'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                                                                                    </details>
+                                                                                @endif
                                                                             </div>
                                                                         @endforeach
                                                                     </div>
                                                                 @endif
-                                                                @if(empty($documentSources) && empty($learnedSources))
-                                                                    <p class="text-gray-500 text-center py-8">Aucune source RAG disponible</p>
+
+                                                                {{-- No sources --}}
+                                                                @if(empty($documentSources) && empty($learnedSources) && empty($context['system_prompt_sent']))
+                                                                    <p class="text-gray-500 text-center py-8">Aucune donnée de contexte RAG disponible</p>
                                                                 @endif
                                                             </div>
                                                         </div>
