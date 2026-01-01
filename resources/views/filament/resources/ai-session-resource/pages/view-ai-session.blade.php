@@ -1003,16 +1003,41 @@ R: {{ addslashes($learned['answer'] ?? '') }}
     {{-- WebSocket Soketi for real-time updates (optional - Livewire handles most updates) --}}
     @push('scripts')
     <script>
-        // Create a mock Echo object to prevent errors from other scripts that might expect it
+        // Create a mock Echo object to prevent errors from Livewire and other scripts
         // The admin panel uses Livewire for updates, so WebSocket is optional here
         if (typeof window.Echo === 'undefined') {
-            window.Echo = {
-                channel: function() { return { listen: function() { return this; } }; },
-                private: function() { return { listen: function() { return this; } }; },
-                join: function() { return { listen: function() { return this; } }; },
-                leave: function() {},
-                socketId: function() { return null; }
+            // Mock channel object with all methods Livewire might use
+            var mockChannel = {
+                listen: function() { return this; },
+                listenForWhisper: function() { return this; },
+                notification: function() { return this; },
+                stopListening: function() { return this; },
+                stopListeningForWhisper: function() { return this; },
+                subscribed: function() { return this; },
+                error: function() { return this; }
             };
+
+            window.Echo = {
+                channel: function() { return mockChannel; },
+                private: function() { return mockChannel; },
+                encryptedPrivate: function() { return mockChannel; },
+                presence: function() { return mockChannel; },
+                join: function() { return mockChannel; },
+                leave: function() {},
+                leaveChannel: function() {},
+                leaveAllChannels: function() {},
+                socketId: function() { return null; },
+                connector: {
+                    pusher: {
+                        connection: {
+                            state: 'unavailable',
+                            bind: function() {}
+                        }
+                    }
+                }
+            };
+
+            console.log('⚠️ Echo mock chargé (WebSocket non configuré pour l\'admin)');
         }
     </script>
     @endpush
