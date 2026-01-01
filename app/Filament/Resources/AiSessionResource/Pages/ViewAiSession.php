@@ -538,6 +538,7 @@ class ViewAiSession extends ViewRecord
                 'corrected_content' => $msg->corrected_content,
                 'original' => $msg,
                 'is_pending_validation' => $msg->role === 'assistant' && $msg->validation_status === 'pending',
+                'is_direct_match' => $msg->model_used === 'direct_qr_match',
             ];
         }
 

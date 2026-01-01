@@ -273,6 +273,19 @@ class LearningService
      */
     public function validate(AiMessage $message, int $validatorId): bool
     {
+        // Si c'est un direct_qr_match, la réponse vient déjà de learned_responses
+        // Donc on ne ré-indexe pas, on marque juste comme validé
+        if ($message->model_used === 'direct_qr_match') {
+            Log::info('Skip learning for direct_qr_match - already in learned_responses', [
+                'message_id' => $message->id,
+            ]);
+            return $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
+            ]);
+        }
+
         $validator = User::find($validatorId);
         if (!$validator) {
             return $message->update([

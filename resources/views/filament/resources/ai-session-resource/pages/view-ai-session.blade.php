@@ -305,6 +305,7 @@
                                                         Corriger
                                                     </x-filament::button>
 
+                                                    @if(!($message['is_direct_match'] ?? false))
                                                     <x-filament::button
                                                         size="xs"
                                                         color="danger"
@@ -313,6 +314,7 @@
                                                     >
                                                         Rejeter
                                                     </x-filament::button>
+                                                    @endif
                                                 </div>
 
                                                 {{-- Formulaire de correction --}}
