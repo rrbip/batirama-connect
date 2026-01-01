@@ -1000,13 +1000,39 @@ R: {{ addslashes($learned['answer'] ?? '') }}
         </div>
     </div>
 
-    {{-- WebSocket Soketi for real-time updates (optional - Livewire handles most updates) --}}
+    {{-- WebSocket Soketi for real-time updates --}}
     @push('scripts')
+    <script src="https://cdn.jsdelivr.net/npm/pusher-js@8.3.0/dist/web/pusher.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/laravel-echo@1.15.3/dist/echo.iife.js"></script>
     <script>
-        // Create a mock Echo object to prevent errors from Livewire and other scripts
-        // The admin panel uses Livewire for updates, so WebSocket is optional here
-        if (typeof window.Echo === 'undefined') {
-            // Mock channel object with all methods Livewire might use
+        (function() {
+            // Soketi config from Laravel
+            var soketiConfig = {
+                key: @json(config('broadcasting.connections.pusher.key')),
+                frontendHost: @json(config('broadcasting.connections.pusher.frontend.host')) || window.location.hostname,
+                frontendPort: @json(config('broadcasting.connections.pusher.frontend.port')) || (window.location.protocol === 'https:' ? 443 : 80),
+                frontendScheme: @json(config('broadcasting.connections.pusher.frontend.scheme')) || window.location.protocol.replace(':', ''),
+                cluster: @json(config('broadcasting.connections.pusher.options.cluster', 'mt1'))
+            };
+
+            // ═══════════════════════════════════════════════════════════════
+            // SOKETI DEBUG - Admin Panel
+            // ═══════════════════════════════════════════════════════════════
+            console.group('🔌 SOKETI WEBSOCKET DEBUG (Admin)');
+            console.log('📋 Configuration:', JSON.stringify(soketiConfig, null, 2));
+            console.log('🔑 Clé Soketi:', soketiConfig.key || '(vide)');
+            console.log('🏠 Host:', soketiConfig.frontendHost);
+            console.log('🚪 Port:', soketiConfig.frontendPort);
+            console.log('🔒 Scheme:', soketiConfig.frontendScheme);
+
+            var expectedWsUrl = (soketiConfig.frontendScheme === 'https' ? 'wss://' : 'ws://') +
+                soketiConfig.frontendHost + '/app/' + soketiConfig.key;
+            console.log('🔗 URL WebSocket:', expectedWsUrl);
+            console.log('📦 Echo:', typeof Echo !== 'undefined' ? '✅' : '❌');
+            console.log('📦 Pusher:', typeof Pusher !== 'undefined' ? '✅' : '❌');
+            console.groupEnd();
+
+            // Mock channel for fallback
             var mockChannel = {
                 listen: function() { return this; },
                 listenForWhisper: function() { return this; },
@@ -1017,28 +1043,87 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                 error: function() { return this; }
             };
 
-            window.Echo = {
-                channel: function() { return mockChannel; },
-                private: function() { return mockChannel; },
-                encryptedPrivate: function() { return mockChannel; },
-                presence: function() { return mockChannel; },
-                join: function() { return mockChannel; },
-                leave: function() {},
-                leaveChannel: function() {},
-                leaveAllChannels: function() {},
-                socketId: function() { return null; },
-                connector: {
-                    pusher: {
-                        connection: {
-                            state: 'unavailable',
-                            bind: function() {}
+            if (typeof Echo !== 'undefined' && typeof Pusher !== 'undefined' && soketiConfig.key && soketiConfig.key !== 'app-key') {
+                Pusher.logToConsole = true;
+
+                var useTLS = soketiConfig.frontendScheme === 'https';
+                var echoConfig = {
+                    broadcaster: 'pusher',
+                    key: soketiConfig.key,
+                    wsHost: soketiConfig.frontendHost,
+                    wsPort: useTLS ? 443 : soketiConfig.frontendPort,
+                    wssPort: useTLS ? 443 : soketiConfig.frontendPort,
+                    forceTLS: useTLS,
+                    encrypted: useTLS,
+                    disableStats: true,
+                    enabledTransports: ['ws', 'wss'],
+                    cluster: soketiConfig.cluster
+                };
+
+                console.log('🔧 Echo Config:', JSON.stringify(echoConfig, null, 2));
+
+                window.Echo = new Echo(echoConfig);
+
+                window.Echo.connector.pusher.connection.bind('connecting', function() {
+                    console.log('🔄 Soketi: CONNECTING...');
+                });
+
+                window.Echo.connector.pusher.connection.bind('connected', function() {
+                    console.log('✅ Soketi: CONNECTED !');
+                });
+
+                window.Echo.connector.pusher.connection.bind('error', function(err) {
+                    console.error('❌ Soketi: ERROR', err);
+                });
+
+                window.Echo.connector.pusher.connection.bind('unavailable', function() {
+                    console.warn('⚠️ Soketi: UNAVAILABLE');
+                });
+
+                window.Echo.connector.pusher.connection.bind('state_change', function(states) {
+                    console.log('🔀 Soketi:', states.previous, '→', states.current);
+                });
+
+            } else {
+                console.group('⚠️ SOKETI NON CONFIGURÉ (Admin)');
+                if (!soketiConfig.key) console.warn('   Clé vide');
+                if (soketiConfig.key === 'app-key') console.warn('   Clé par défaut');
+                console.groupEnd();
+
+                window.Echo = {
+                    channel: function() { return mockChannel; },
+                    private: function() { return mockChannel; },
+                    encryptedPrivate: function() { return mockChannel; },
+                    presence: function() { return mockChannel; },
+                    join: function() { return mockChannel; },
+                    leave: function() {},
+                    leaveChannel: function() {},
+                    leaveAllChannels: function() {},
+                    socketId: function() { return null; },
+                    connector: {
+                        pusher: {
+                            connection: {
+                                state: 'unavailable',
+                                bind: function() {}
+                            }
                         }
                     }
-                }
-            };
+                };
+            }
 
-            console.log('⚠️ Echo mock chargé (WebSocket non configuré pour l\'admin)');
-        }
+            // Helper pour vérifier le statut
+            window.soketiStatus = function() {
+                console.group('📊 SOKETI STATUS (Admin)');
+                if (window.Echo && window.Echo.connector && window.Echo.connector.pusher) {
+                    console.log('État:', window.Echo.connector.pusher.connection.state);
+                    console.log('Socket ID:', window.Echo.socketId());
+                } else {
+                    console.log('Mode: Mock/Polling');
+                }
+                console.groupEnd();
+            };
+            console.log('💡 Tapez soketiStatus() pour voir l\'état');
+        })();
     </script>
     @endpush
 </x-filament-panels::page>
