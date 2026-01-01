@@ -1138,20 +1138,20 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                     console.log('📨 User message received via WebSocket:', data);
                     // Rafraîchir le composant Livewire pour afficher le nouveau message
                     if (typeof Livewire !== 'undefined') {
-                        Livewire.dispatch('refresh');
+                        Livewire.dispatch('refreshMessages');
                     }
                 })
                 .listen('.completed', function(data) {
                     console.log('🤖 AI response received via WebSocket:', data);
                     // Rafraîchir le composant Livewire pour afficher la réponse IA
                     if (typeof Livewire !== 'undefined') {
-                        Livewire.dispatch('refresh');
+                        Livewire.dispatch('refreshMessages');
                     }
                 })
                 .listen('.failed', function(data) {
                     console.log('❌ AI message failed via WebSocket:', data);
                     if (typeof Livewire !== 'undefined') {
-                        Livewire.dispatch('refresh');
+                        Livewire.dispatch('refreshMessages');
                     }
                 });
 
