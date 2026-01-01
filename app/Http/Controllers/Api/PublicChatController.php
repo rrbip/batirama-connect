@@ -495,7 +495,7 @@ class PublicChatController extends Controller
 
     /**
      * POST /c/{token}/email
-     * Enregistre l'email de l'utilisateur pour la session
+     * Enregistre l'email de l'utilisateur pour la session et envoie un email de confirmation.
      */
     public function saveEmail(Request $request, string $token): JsonResponse
     {
@@ -531,11 +531,24 @@ class PublicChatController extends Controller
             'email' => $email,
         ]);
 
+        // Envoyer un email de confirmation au client (si l'agent a une config SMTP)
+        $emailSent = false;
+        try {
+            $supportService = app(\App\Services\Support\SupportService::class);
+            $emailSent = $supportService->sendEmailConfirmationToUser($session);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send confirmation email', [
+                'session_id' => $session->uuid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return response()->json([
             'success' => true,
             'data' => [
                 'email' => $email,
                 'session_id' => $session->uuid,
+                'confirmation_email_sent' => $emailSent,
             ],
         ]);
     }

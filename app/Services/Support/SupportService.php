@@ -334,20 +334,37 @@ class SupportService
 
     /**
      * Envoie un email avec une configuration SMTP personnalisée.
+     *
+     * Supporte SSL (port 465) et TLS (port 587).
      */
     protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
     {
-        // Créer un transport SMTP personnalisé
-        $transport = new \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport(
+        $encryption = strtolower($smtpConfig['encryption'] ?? 'tls');
+        $port = (int) $smtpConfig['port'];
+
+        // Construire le DSN Symfony Mailer
+        // SSL (port 465): smtps://user:pass@host:465
+        // TLS (port 587): smtp://user:pass@host:587
+        $scheme = ($encryption === 'ssl' || $port === 465) ? 'smtps' : 'smtp';
+
+        $dsn = sprintf(
+            '%s://%s:%s@%s:%d',
+            $scheme,
+            urlencode($smtpConfig['username']),
+            urlencode($smtpConfig['password']),
             $smtpConfig['host'],
-            $smtpConfig['port'],
-            $smtpConfig['encryption'] === 'tls'
+            $port
         );
 
-        $transport->setUsername($smtpConfig['username']);
-        $transport->setPassword($smtpConfig['password']);
+        Log::debug('Creating SMTP transport', [
+            'scheme' => $scheme,
+            'host' => $smtpConfig['host'],
+            'port' => $port,
+            'encryption' => $encryption,
+        ]);
 
-        // Créer un mailer avec ce transport
+        // Créer le transport via DSN
+        $transport = \Symfony\Component\Mailer\Transport::fromDsn($dsn);
         $mailer = new \Symfony\Component\Mailer\Mailer($transport);
 
         // Configurer le from sur le mailable
@@ -364,5 +381,58 @@ class SupportService
             ->html($symfonyMessage);
 
         $mailer->send($email);
+    }
+
+    /**
+     * Envoie un email de confirmation au client après qu'il ait fourni son email.
+     */
+    public function sendEmailConfirmationToUser(AiSession $session): bool
+    {
+        if (!$session->user_email) {
+            Log::warning('Cannot send confirmation email: no user email on session', [
+                'session_id' => $session->id,
+            ]);
+            return false;
+        }
+
+        $agent = $session->agent;
+        if (!$agent) {
+            Log::warning('Cannot send confirmation email: no agent on session', [
+                'session_id' => $session->id,
+            ]);
+            return false;
+        }
+
+        try {
+            $mailable = new \App\Mail\Support\UserEmailConfirmationMail($session);
+            $smtpConfig = $agent->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($session->user_email, $mailable, $smtpConfig);
+                Log::info('Confirmation email sent to user via custom SMTP', [
+                    'session_id' => $session->id,
+                    'to' => $session->user_email,
+                    'smtp_host' => $smtpConfig['host'],
+                ]);
+            } else {
+                // Utiliser la config par défaut de Laravel
+                \Illuminate\Support\Facades\Mail::to($session->user_email)->send($mailable);
+                Log::info('Confirmation email sent to user via default mailer', [
+                    'session_id' => $session->id,
+                    'to' => $session->user_email,
+                ]);
+            }
+
+            return true;
+
+        } catch (\Throwable $e) {
+            Log::error('Failed to send confirmation email to user', [
+                'session_id' => $session->id,
+                'email' => $session->user_email,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return false;
+        }
     }
 }
