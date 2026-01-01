@@ -248,6 +248,7 @@ else
     php artisan cache:clear 2>/dev/null || true
     php artisan view:clear 2>/dev/null || true
     php artisan route:clear 2>/dev/null || true
+    php artisan livewire:discover 2>/dev/null || true
 
     # Régénérer l'autoloader si le code a changé
     if vendor_needs_update; then
