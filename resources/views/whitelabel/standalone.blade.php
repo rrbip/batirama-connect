@@ -948,6 +948,8 @@
                 var timeInfo = formatTime(message.created_at || new Date());
                 if (message.role === 'support' && message.sender_name) {
                     timeInfo = message.sender_name + ' · ' + timeInfo;
+                } else if (message.role === 'assistant') {
+                    timeInfo = 'IA · ' + timeInfo;
                 }
 
                 messageEl.innerHTML = '<div class="message-avatar">' + avatarContent + '</div>' +
