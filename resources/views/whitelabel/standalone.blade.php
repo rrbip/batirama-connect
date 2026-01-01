@@ -610,6 +610,8 @@
                 apiBase: @json($config['api_base']),
                 deploymentKey: @json($config['deployment_key'] ?? null),
                 tokenMode: @json($isLegacy ?? false),
+                isWidget: @json($isWidget ?? false),
+                widgetParams: @json($widgetParams ?? []),
                 maxMessageLength: @json($config['max_message_length'] ?? 2000),
                 attachmentsEnabled: @json($config['attachments_enabled'] ?? false),
                 branding: @json($branding)
@@ -775,6 +777,14 @@
             // Initialize session
             async function initSession() {
                 try {
+                    if (CONFIG.isWidget) {
+                        // Widget mode - create session on first message, not now
+                        // Just hide loading and wait for user input
+                        elements.loadingOverlay.style.display = 'none';
+                        state.isLoading = false;
+                        return;
+                    }
+
                     if (CONFIG.tokenMode) {
                         // Legacy public token mode
                         var startResponse = await apiRequest('POST', '/c/' + CONFIG.token + '/start');
@@ -811,12 +821,43 @@
                 }
             }
 
+            // Create session for widget mode (called on first message)
+            async function createWidgetSession() {
+                var params = CONFIG.widgetParams || {};
+                var sessionData = {};
+
+                if (params.external_id) sessionData.external_id = params.external_id;
+                if (params.particulier_email) sessionData.particulier_email = params.particulier_email;
+                if (params.particulier_name) sessionData.particulier_name = params.particulier_name;
+                if (params.context) sessionData.context = params.context;
+
+                var sessionResponse = await apiRequest('POST', '/whitelabel/sessions', sessionData);
+                state.session = sessionResponse;
+                return sessionResponse;
+            }
+
             // Send message
             async function sendMessage(content) {
                 var hasContent = content.trim().length > 0;
                 var hasFile = state.currentFile !== null;
 
-                if ((!hasContent && !hasFile) || state.isSending || !state.session) {
+                if ((!hasContent && !hasFile) || state.isSending) {
+                    return;
+                }
+
+                // Widget mode: create session on first message
+                if (CONFIG.isWidget && !state.session) {
+                    try {
+                        await createWidgetSession();
+                    } catch (error) {
+                        console.error('Session creation error:', error);
+                        showError('Erreur de connexion: ' + error.message);
+                        return;
+                    }
+                }
+
+                if (!state.session) {
+                    showError('Session non initialisée');
                     return;
                 }
 

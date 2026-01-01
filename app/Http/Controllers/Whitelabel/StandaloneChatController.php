@@ -141,6 +141,74 @@ class StandaloneChatController extends Controller
     }
 
     /**
+     * GET /widget?key=...
+     * Widget embed route - loads standalone view with deployment key
+     */
+    public function widget(Request $request): View
+    {
+        $deploymentKey = $request->query('key');
+
+        if (!$deploymentKey) {
+            return $this->errorView('Configuration manquante', 'Clé de déploiement requise.');
+        }
+
+        // Find deployment by key
+        $deployment = AgentDeployment::with(['agent', 'editor'])
+            ->where('deployment_key', $deploymentKey)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$deployment) {
+            return $this->errorView('Service non trouvé', 'Ce service n\'est pas disponible.');
+        }
+
+        // Get optional params for session context
+        $externalId = $request->query('external_id');
+        $particulierEmail = $request->query('particulier_email');
+        $particulierName = $request->query('particulier_name');
+        $context = $request->query('context');
+        $origin = $request->query('origin');
+
+        // Parse context if JSON string
+        if ($context && is_string($context)) {
+            try {
+                $context = json_decode($context, true);
+            } catch (\Exception $e) {
+                $context = [];
+            }
+        }
+
+        // Resolve branding
+        $branding = $this->brandingResolver->resolveForDeployment($deployment, null);
+
+        // Get agent
+        $agent = $deployment->agent;
+
+        return view('whitelabel.standalone', [
+            'token' => null,
+            'deployment' => $deployment,
+            'agent' => $agent,
+            'branding' => $branding,
+            'session' => null,
+            'isWidget' => true,
+            'widgetParams' => [
+                'deployment_key' => $deploymentKey,
+                'external_id' => $externalId,
+                'particulier_email' => $particulierEmail,
+                'particulier_name' => $particulierName,
+                'context' => $context,
+                'origin' => $origin,
+            ],
+            'config' => [
+                'api_base' => url('/api'),
+                'deployment_key' => $deployment->deployment_key,
+                'max_message_length' => $deployment->getConfigValue('max_message_length', 2000),
+                'attachments_enabled' => $deployment->getConfigValue('attachments_enabled', false),
+            ],
+        ]);
+    }
+
+    /**
      * Create error view
      */
     private function errorView(string $title, string $message): View
