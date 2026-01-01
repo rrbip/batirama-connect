@@ -7,15 +7,16 @@ namespace App\Events\Chat;
 use App\Models\AiMessage;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
  * Événement broadcasté quand un message utilisateur est reçu.
  * Permet à l'admin de voir le message immédiatement.
+ * Utilise ShouldBroadcastNow pour un envoi synchrone sans queue.
  */
-class UserMessageReceived implements ShouldBroadcast
+class UserMessageReceived implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;

@@ -7,15 +7,16 @@ namespace App\Events\Chat;
 use App\Models\AiMessage;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
 /**
  * Événement broadcasté quand un message IA est complété.
  * Utilisé pour le chat public (sans authentification).
+ * Utilise ShouldBroadcastNow pour un envoi synchrone.
  */
-class AiMessageCompleted implements ShouldBroadcast
+class AiMessageCompleted implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;
