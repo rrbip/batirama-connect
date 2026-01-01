@@ -24,6 +24,14 @@ Broadcast::channel('user.{id}', function (User $user, int $id) {
 });
 
 /**
+ * Canal privé pour les notifications Laravel/Livewire.
+ * Format standard utilisé par Laravel Echo et Filament.
+ */
+Broadcast::channel('App.Models.User.{id}', function (User $user, int $id) {
+    return $user->id === $id;
+});
+
+/**
  * Canal privé pour le support d'un agent IA spécifique.
  * Seuls les agents de support assignés peuvent écouter.
  */

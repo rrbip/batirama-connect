@@ -9,6 +9,7 @@ use App\Events\Support\SessionEscalated;
 use App\Listeners\Support\NotifyOnNewSupportMessage;
 use App\Listeners\Support\NotifySupportAgentsOnEscalation;
 use App\Listeners\Whitelabel\DispatchWebhookListener;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -27,6 +28,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Register broadcasting routes for Soketi/Pusher authentication
+        Broadcast::routes(['middleware' => ['web', 'auth']]);
+
+        // Load broadcast channel authorization callbacks
+        require base_path('routes/channels.php');
+
         // Register webhook event subscriber
         Event::subscribe(DispatchWebhookListener::class);
 
