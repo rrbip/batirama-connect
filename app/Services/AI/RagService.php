@@ -546,7 +546,12 @@ class RagService
         // Broadcast l'événement si c'est un message utilisateur
         // Permet à l'admin de voir le message immédiatement
         if ($role === 'user') {
-            event(new UserMessageReceived($message));
+            Log::info('Broadcasting UserMessageReceived', [
+                'message_id' => $message->uuid,
+                'session_id' => $session->uuid,
+                'channel' => 'chat.session.' . $session->uuid,
+            ]);
+            broadcast(new UserMessageReceived($message));
         }
 
         return $message;

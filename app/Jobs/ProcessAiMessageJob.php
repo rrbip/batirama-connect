@@ -100,6 +100,12 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             ]);
 
             // Broadcast completion event via WebSocket
+            $session = $this->message->session;
+            Log::info('Broadcasting AiMessageCompleted', [
+                'message_id' => $this->message->uuid,
+                'session_id' => $session->uuid,
+                'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
+            ]);
             broadcast(new AiMessageCompleted($this->message))->toOthers();
 
         } catch (\Exception $e) {
