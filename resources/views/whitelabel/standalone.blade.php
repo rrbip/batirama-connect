@@ -167,6 +167,7 @@
             padding: 12px 16px;
             border-radius: var(--radius);
             word-wrap: break-word;
+            white-space: pre-wrap;
         }
 
         .message.user .message-bubble {
