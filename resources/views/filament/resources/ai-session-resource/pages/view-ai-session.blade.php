@@ -707,33 +707,62 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                             </button>
                                                                         </div>
 
-                                                                        {{-- Aperçu du rapport en lecture humaine --}}
+                                                                        {{-- Aperçu complet du rapport en lecture humaine --}}
                                                                         <details class="mt-4">
                                                                             <summary class="text-sm text-indigo-600 dark:text-indigo-400 cursor-pointer hover:text-indigo-800 dark:hover:text-indigo-300 font-medium">
-                                                                                Voir l'aperçu du rapport
+                                                                                📄 Lire le rapport complet
                                                                             </summary>
-                                                                            <div class="mt-3 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-96 overflow-y-auto">
+                                                                            <div class="mt-3 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 max-h-[80vh] overflow-y-auto">
                                                                                 <div class="prose prose-sm dark:prose-invert max-w-none">
-                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mb-2">Question utilisateur</h4>
-                                                                                    <p class="text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-2 rounded">{{ $userQuestion ?: '(Non disponible)' }}</p>
+                                                                                    {{-- Question utilisateur --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mb-2">📝 Question utilisateur</h4>
+                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-3 rounded whitespace-pre-wrap">{{ $userQuestion ?: '(Non disponible)' }}</div>
 
-                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Réponse de l'IA</h4>
-                                                                                    <p class="text-gray-600 dark:text-gray-400 bg-green-50 dark:bg-green-900/20 p-2 rounded">{{ \Illuminate\Support\Str::limit($aiResponse, 300) }}</p>
+                                                                                    {{-- Réponse IA complète --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🤖 Réponse de l'IA</h4>
+                                                                                    <div class="text-gray-600 dark:text-gray-400 bg-green-50 dark:bg-green-900/20 p-3 rounded whitespace-pre-wrap">{{ $aiResponse ?: '(Non disponible)' }}</div>
 
-                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Résumé du contexte</h4>
-                                                                                    <ul class="text-sm text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1">
-                                                                                        <li>{{ count($documentSources) }} documents RAG</li>
-                                                                                        <li>{{ count($learnedSources) }} sources apprises</li>
-                                                                                        <li>{{ count($conversationHistory) }} messages d'historique</li>
-                                                                                        <li>Modèle: {{ $stats['agent_model'] ?? 'N/A' }}</li>
-                                                                                        <li>Filtrage catégorie: {{ ($stats['use_category_filtering'] ?? false) ? 'Activé' : 'Désactivé' }}</li>
-                                                                                        @if($catDetect)
-                                                                                            <li>Confiance détection: {{ round(($catDetect['confidence'] ?? 0) * 100) }}%</li>
+                                                                                    {{-- Prompt système --}}
+                                                                                    @if(!empty($systemPrompt))
+                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">⚙️ Prompt système</h4>
+                                                                                        <div class="text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 p-3 rounded text-xs whitespace-pre-wrap max-h-48 overflow-y-auto">{{ $systemPrompt }}</div>
+                                                                                    @endif
+
+                                                                                    {{-- Historique de conversation --}}
+                                                                                    @if(!empty($conversationHistory))
+                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">💬 Historique de conversation ({{ count($conversationHistory) }} messages)</h4>
+                                                                                        <div class="bg-gray-50 dark:bg-gray-700/50 p-3 rounded space-y-2 max-h-64 overflow-y-auto">
+                                                                                            @foreach($conversationHistory as $histMsg)
+                                                                                                <div class="text-xs border-l-2 {{ ($histMsg['role'] ?? '') === 'user' ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-green-500 bg-green-50 dark:bg-green-900/20' }} pl-3 py-2 rounded-r">
+                                                                                                    <span class="font-bold {{ ($histMsg['role'] ?? '') === 'user' ? 'text-blue-600 dark:text-blue-400' : 'text-green-600 dark:text-green-400' }}">
+                                                                                                        [{{ $histMsg['role'] ?? 'unknown' }}]
+                                                                                                    </span>
+                                                                                                    <div class="mt-1 text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ $histMsg['content'] ?? '' }}</div>
+                                                                                                </div>
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                    @endif
+
+                                                                                    {{-- Filtrage par catégorie --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🏷️ Filtrage par catégorie</h4>
+                                                                                    <div class="bg-purple-50 dark:bg-purple-900/20 p-3 rounded text-sm">
+                                                                                        @if(!($stats['use_category_filtering'] ?? false))
+                                                                                            <p class="text-gray-600 dark:text-gray-400">Statut: <strong>Désactivé</strong> pour cet agent</p>
+                                                                                        @elseif($catDetect)
+                                                                                            <ul class="space-y-1 text-gray-600 dark:text-gray-400">
+                                                                                                <li>Méthode: <strong>{{ $catDetect['method'] ?? 'N/A' }}</strong></li>
+                                                                                                <li>Confiance: <strong>{{ round(($catDetect['confidence'] ?? 0) * 100) }}%</strong></li>
+                                                                                                <li>Catégories: <strong>{{ !empty($catDetect['categories']) ? implode(', ', array_map(fn($c) => $c['name'] ?? $c, $catDetect['categories'])) : 'Aucune' }}</strong></li>
+                                                                                                <li>Résultats filtrés: {{ $catDetect['filtered_results_count'] ?? 0 }} / {{ $catDetect['total_results_count'] ?? 0 }}</li>
+                                                                                                <li>Fallback utilisé: {{ ($catDetect['used_fallback'] ?? false) ? 'Oui' : 'Non' }}</li>
+                                                                                            </ul>
+                                                                                        @else
+                                                                                            <p class="text-gray-600 dark:text-gray-400">Statut: Activé mais <strong>aucune catégorie détectée</strong></p>
                                                                                         @endif
-                                                                                    </ul>
+                                                                                    </div>
 
                                                                                     {{-- Évaluation Handoff --}}
-                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Évaluation Handoff</h4>
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">🚨 Évaluation Handoff Humain</h4>
                                                                                     <div class="p-3 rounded-lg {{ $wouldEscalate || $maxRagScore == 0 ? 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700' : 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700' }}">
                                                                                         <ul class="text-sm space-y-1">
                                                                                             <li class="flex items-center gap-2">
@@ -765,27 +794,75 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                         </span>
                                                                                                     @endif
                                                                                                 </li>
+                                                                                                <li class="flex items-center gap-2">
+                                                                                                    <span class="text-gray-600 dark:text-gray-400">Agents support:</span>
+                                                                                                    <span class="font-medium">{{ $agentForHandoff?->supportUsers()->count() ?? 0 }}</span>
+                                                                                                </li>
                                                                                             @endif
                                                                                         </ul>
                                                                                     </div>
 
+                                                                                    {{-- Documents RAG complets --}}
                                                                                     @if(!empty($documentSources))
-                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">Documents RAG (aperçu)</h4>
-                                                                                        @foreach(array_slice($documentSources, 0, 3) as $doc)
-                                                                                            <div class="text-xs p-2 mb-2 rounded {{ empty(trim($doc['content'] ?? '')) ? 'bg-red-50 dark:bg-red-900/20 border border-red-200' : 'bg-gray-100 dark:bg-gray-700' }}">
-                                                                                                <strong>#{{ $doc['index'] ?? $loop->iteration }}</strong> ({{ $doc['score'] ?? 0 }}%)
-                                                                                                - {{ $doc['type'] ?? 'unknown' }}
-                                                                                                @if(empty(trim($doc['content'] ?? '')))
-                                                                                                    <span class="text-red-600 dark:text-red-400">[CONTENU VIDE]</span>
-                                                                                                @else
-                                                                                                    : {{ \Illuminate\Support\Str::limit($doc['content'] ?? '', 100) }}
-                                                                                                @endif
-                                                                                            </div>
-                                                                                        @endforeach
-                                                                                        @if(count($documentSources) > 3)
-                                                                                            <p class="text-xs text-gray-500">... et {{ count($documentSources) - 3 }} autres documents</p>
-                                                                                        @endif
+                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">📚 Documents RAG ({{ count($documentSources) }} sources)</h4>
+                                                                                        <div class="space-y-3">
+                                                                                            @foreach($documentSources as $doc)
+                                                                                                <div class="p-3 rounded border {{ empty(trim($doc['content'] ?? '')) ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700' : 'bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-700' }}">
+                                                                                                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                                                                                                        <span class="font-bold text-sm">#{{ $doc['index'] ?? $loop->iteration }}</span>
+                                                                                                        <span class="px-2 py-0.5 rounded text-xs {{ empty(trim($doc['content'] ?? '')) ? 'bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-200' : 'bg-cyan-200 dark:bg-cyan-800 text-cyan-700 dark:text-cyan-200' }}">{{ $doc['score'] ?? 0 }}%</span>
+                                                                                                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ $doc['type'] ?? 'unknown' }}</span>
+                                                                                                        @if(!empty($doc['category']))
+                                                                                                            <span class="text-xs px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-800 text-purple-600 dark:text-purple-300">{{ $doc['category'] }}</span>
+                                                                                                        @endif
+                                                                                                    </div>
+                                                                                                    @if(!empty($doc['source_doc']))
+                                                                                                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Source: {{ $doc['source_doc'] }}</p>
+                                                                                                    @endif
+                                                                                                    @if(!empty($doc['question']))
+                                                                                                        <p class="text-xs text-gray-600 dark:text-gray-400 mb-2"><strong>Q:</strong> {{ $doc['question'] }}</p>
+                                                                                                    @endif
+                                                                                                    @if(empty(trim($doc['content'] ?? '')))
+                                                                                                        <div class="p-2 bg-red-100 dark:bg-red-900/50 rounded text-red-600 dark:text-red-300 text-sm flex items-center gap-2">
+                                                                                                            <x-heroicon-o-exclamation-triangle class="w-4 h-4 flex-shrink-0" />
+                                                                                                            <span>[CONTENU VIDE - problème d'indexation]</span>
+                                                                                                        </div>
+                                                                                                    @else
+                                                                                                        <div class="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 p-2 rounded whitespace-pre-wrap">{{ $doc['content'] }}</div>
+                                                                                                    @endif
+                                                                                                </div>
+                                                                                            @endforeach
+                                                                                        </div>
                                                                                     @endif
+
+                                                                                    {{-- Sources apprises complètes --}}
+                                                                                    @if(!empty($learnedSources))
+                                                                                        <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">💡 Sources apprises ({{ count($learnedSources) }} cas)</h4>
+                                                                                        <div class="space-y-3">
+                                                                                            @foreach($learnedSources as $learned)
+                                                                                                <div class="p-3 rounded border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20">
+                                                                                                    <div class="flex items-center gap-2 mb-2">
+                                                                                                        <span class="font-bold text-sm">#{{ $learned['index'] ?? $loop->iteration }}</span>
+                                                                                                        <span class="px-2 py-0.5 rounded text-xs bg-amber-200 dark:bg-amber-800 text-amber-700 dark:text-amber-200">{{ $learned['score'] ?? 0 }}%</span>
+                                                                                                    </div>
+                                                                                                    <p class="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">Q: {{ $learned['question'] ?? '' }}</p>
+                                                                                                    <div class="text-xs text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 p-2 rounded whitespace-pre-wrap">{{ $learned['answer'] ?? '' }}</div>
+                                                                                                </div>
+                                                                                            @endforeach
+                                                                                        </div>
+                                                                                    @endif
+
+                                                                                    {{-- Informations techniques --}}
+                                                                                    <h4 class="text-base font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2">⚡ Informations techniques</h4>
+                                                                                    <div class="bg-gray-100 dark:bg-gray-700 p-3 rounded text-sm">
+                                                                                        <ul class="space-y-1 text-gray-600 dark:text-gray-400">
+                                                                                            <li>Agent: <strong>{{ $stats['agent_slug'] ?? 'N/A' }}</strong></li>
+                                                                                            <li>Modèle: <strong>{{ $stats['agent_model'] ?? 'N/A' }}</strong></li>
+                                                                                            <li>Température: <strong>{{ $stats['temperature'] ?? 'N/A' }}</strong></li>
+                                                                                            <li>Fenêtre contexte: <strong>{{ $stats['context_window_size'] ?? 0 }}</strong> messages</li>
+                                                                                            <li>Type de réponse: <strong>{{ ($stats['response_type'] ?? '') === 'direct_qr_match' ? 'DIRECT Q/R (sans LLM)' : 'Génération LLM' }}</strong></li>
+                                                                                        </ul>
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                         </details>
