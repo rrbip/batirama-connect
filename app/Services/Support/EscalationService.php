@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services\Support;
 
+use App\Events\Support\SessionAssigned;
+use App\Events\Support\SessionEscalated;
+use App\Mail\Support\EscalationNotificationMail;
 use App\Models\Agent;
 use App\Models\AiSession;
 use App\Models\User;
-use App\Events\Support\SessionEscalated;
-use App\Events\Support\SessionAssigned;
-use App\Mail\Support\EscalationNotificationMail;
+use Filament\Notifications\Actions\Action;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -146,9 +148,58 @@ class EscalationService
             return;
         }
 
+        // Envoyer des notifications database Filament (cloche)
+        $this->sendDatabaseNotifications($session, $agents);
+
         // Si aucun agent n'est connecté, envoyer un email
         if (!$this->hasConnectedAgents($session)) {
             $this->sendEmailNotifications($session, $agents);
+        }
+    }
+
+    /**
+     * Envoie des notifications database Filament aux agents de support.
+     * Ces notifications apparaissent dans la cloche de l'interface admin.
+     */
+    protected function sendDatabaseNotifications(AiSession $session, Collection $agents): void
+    {
+        $reasonLabels = [
+            'ai_handoff_request' => "L'IA a demandé un transfert",
+            'user_explicit_request' => "L'utilisateur demande un humain",
+            'low_confidence' => 'Score de confiance trop bas',
+            'manual_request' => 'Demande de support humain',
+        ];
+
+        $reasonLabel = $reasonLabels[$session->escalation_reason] ?? $session->escalation_reason;
+        $agentName = $session->agent?->name ?? 'Agent IA';
+        $userName = $session->user_email ?? $session->user?->name ?? 'Visiteur';
+
+        foreach ($agents as $agent) {
+            try {
+                Notification::make()
+                    ->title('Nouvelle escalade support')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->iconColor('danger')
+                    ->body("{$reasonLabel}\n**{$agentName}** - De : {$userName}")
+                    ->actions([
+                        Action::make('view')
+                            ->label('Voir la session')
+                            ->url("/admin/ai-sessions/{$session->id}")
+                            ->markAsRead(),
+                    ])
+                    ->sendToDatabase($agent);
+
+                Log::debug('Database notification sent to support agent', [
+                    'session_id' => $session->id,
+                    'agent_id' => $agent->id,
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('Failed to send database notification', [
+                    'session_id' => $session->id,
+                    'agent_id' => $agent->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
