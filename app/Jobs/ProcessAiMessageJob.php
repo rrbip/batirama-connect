@@ -106,7 +106,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'session_id' => $session->uuid,
                 'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
             ]);
-            broadcast(new AiMessageCompleted($this->message))->toOthers();
+            broadcast(new AiMessageCompleted($this->message));
 
         } catch (\Exception $e) {
             Log::error('ProcessAiMessageJob: Processing failed', [
@@ -140,7 +140,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
         );
 
         // Broadcast failure event via WebSocket
-        broadcast(new AiMessageFailed($this->message))->toOthers();
+        broadcast(new AiMessageFailed($this->message));
     }
 
     /**
