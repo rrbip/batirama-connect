@@ -836,10 +836,13 @@ R: {{ addslashes($learned['answer'] ?? '') }}
 
                                                                 {{-- 3. Documents indexes (RAG) --}}
                                                                 @if(!empty($documentSources))
-                                                                    <div class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
+                                                                    @php
+                                                                        $problematicCount = collect($documentSources)->filter(fn($d) => empty(trim($d['content'] ?? '')) && ($d['score'] ?? 0) > 50)->count();
+                                                                    @endphp
+                                                                    <div class="bg-white dark:bg-gray-800 rounded-lg border {{ $problematicCount > 0 ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-600' }} overflow-hidden">
                                                                         <details open>
-                                                                            <summary class="px-4 py-3 cursor-pointer bg-cyan-50 dark:bg-cyan-950 border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
-                                                                                <span class="font-semibold text-cyan-700 dark:text-cyan-300 flex items-center gap-2">
+                                                                            <summary class="px-4 py-3 cursor-pointer {{ $problematicCount > 0 ? 'bg-red-50 dark:bg-red-950' : 'bg-cyan-50 dark:bg-cyan-950' }} border-b border-gray-200 dark:border-gray-600 hover:bg-cyan-100 dark:hover:bg-cyan-900 transition-colors">
+                                                                                <span class="font-semibold {{ $problematicCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-cyan-700 dark:text-cyan-300' }} flex items-center gap-2">
                                                                                     <x-heroicon-o-document-text class="w-5 h-5" />
                                                                                     3. Documents indexes - RAG ({{ count($documentSources) }})
                                                                                     @if(($stats['response_type'] ?? '') === 'direct_qr_match')
@@ -847,9 +850,33 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                             Réponse directe Q/R
                                                                                         </span>
                                                                                     @endif
+                                                                                    @if($problematicCount > 0)
+                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500 text-white">
+                                                                                            {{ $problematicCount }} source(s) vide(s)
+                                                                                        </span>
+                                                                                    @endif
                                                                                 </span>
                                                                             </summary>
                                                                             <div class="p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                                                                                @if($problematicCount > 0)
+                                                                                    <div class="p-3 mb-3 bg-red-50 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-700">
+                                                                                        <div class="flex items-start gap-2">
+                                                                                            <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                                                                                            <div>
+                                                                                                <p class="font-medium text-red-700 dark:text-red-300">
+                                                                                                    Problème de données détecté
+                                                                                                </p>
+                                                                                                <p class="text-sm text-red-600 dark:text-red-400 mt-1">
+                                                                                                    {{ $problematicCount }} document(s) ont été retournés par Qdrant avec un score élevé mais sans contenu.
+                                                                                                    Cela peut expliquer des réponses de mauvaise qualité.
+                                                                                                </p>
+                                                                                                <p class="text-xs text-red-500 dark:text-red-400 mt-2">
+                                                                                                    <strong>Solution:</strong> Réindexez les documents sources ou nettoyez la collection Qdrant de cet agent.
+                                                                                                </p>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                @endif
                                                                                 @foreach($documentSources as $doc)
                                                                                     @php
                                                                                         $docCategory = $doc['category'] ?? $doc['metadata']['chunk_category'] ?? $doc['metadata']['category'] ?? null;
@@ -859,8 +886,13 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                     @endphp
                                                                                     <div class="border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden">
                                                                                         <details {{ $loop->first ? 'open' : '' }}>
-                                                                                            <summary class="px-4 py-2 cursor-pointer bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
-                                                                                                <span class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                                                                                            @php
+                                                                                                        $hasEmptyContent = empty(trim($doc['content'] ?? ''));
+                                                                                                        $hasEmptyQuestion = empty(trim($docQuestion ?? ''));
+                                                                                                        $isProblematic = $hasEmptyContent && ($doc['score'] ?? 0) > 50;
+                                                                                                    @endphp
+                                                                                            <summary class="px-4 py-2 cursor-pointer {{ $isProblematic ? 'bg-red-50 dark:bg-red-950' : 'bg-white dark:bg-gray-800' }} hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center justify-between">
+                                                                                                <span class="font-medium text-gray-800 dark:text-gray-100 flex items-center gap-2 flex-wrap">
                                                                                                     Document #{{ $doc['index'] ?? $loop->iteration }}
                                                                                                     @if($docTitle)
                                                                                                         - {{ \Illuminate\Support\Str::limit($docTitle, 50) }}
@@ -883,8 +915,14 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                             {{ $docCategory }}
                                                                                                         </span>
                                                                                                     @endif
+                                                                                                    @if($isProblematic)
+                                                                                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-500 text-white animate-pulse" title="Ce document a un contenu vide mais un score élevé - problème de données">
+                                                                                                            <x-heroicon-o-exclamation-triangle class="w-3 h-3 mr-1" />
+                                                                                                            Contenu vide!
+                                                                                                        </span>
+                                                                                                    @endif
                                                                                                 </span>
-                                                                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100">
+                                                                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $isProblematic ? 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100' : 'bg-cyan-100 text-cyan-800 dark:bg-cyan-800 dark:text-cyan-100' }}">
                                                                                                     {{ $doc['score'] ?? 0 }}% pertinent
                                                                                                 </span>
                                                                                             </summary>
@@ -903,7 +941,25 @@ R: {{ addslashes($learned['answer'] ?? '') }}
                                                                                                 @endif
                                                                                                 <div>
                                                                                                     <p class="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide mb-1">Contenu / Réponse</p>
-                                                                                                    <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-white dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-600">{{ $doc['content'] ?? '' }}</pre>
+                                                                                                    @if($hasEmptyContent)
+                                                                                                        <div class="p-4 bg-red-50 dark:bg-red-900/30 rounded border-2 border-dashed border-red-300 dark:border-red-700">
+                                                                                                            <div class="flex items-center gap-2 text-red-700 dark:text-red-300">
+                                                                                                                <x-heroicon-o-exclamation-triangle class="w-5 h-5" />
+                                                                                                                <span class="font-medium">Contenu vide ou null</span>
+                                                                                                            </div>
+                                                                                                            <p class="mt-2 text-sm text-red-600 dark:text-red-400">
+                                                                                                                Ce document est retourné avec un score de {{ $doc['score'] ?? 0 }}% mais ne contient pas de données.
+                                                                                                                Cela indique un problème lors de l'indexation des documents.
+                                                                                                            </p>
+                                                                                                            <div class="mt-3 text-xs text-red-500 dark:text-red-400 space-y-1">
+                                                                                                                <p><strong>ID Qdrant:</strong> {{ $doc['id'] ?? 'N/A' }}</p>
+                                                                                                                <p><strong>Type:</strong> {{ $docType }}</p>
+                                                                                                                <p><strong>Actions suggérées:</strong> Réindexer le document source ou supprimer ce point dans Qdrant.</p>
+                                                                                                            </div>
+                                                                                                        </div>
+                                                                                                    @else
+                                                                                                        <pre class="text-sm text-gray-800 dark:text-gray-100 whitespace-pre-wrap font-sans leading-relaxed bg-white dark:bg-gray-800 p-3 rounded border border-gray-200 dark:border-gray-600">{{ $doc['content'] }}</pre>
+                                                                                                    @endif
                                                                                                 </div>
                                                                                             </div>
                                                                                         </details>
