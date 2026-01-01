@@ -66,17 +66,11 @@
     # ===========================================
     # Route /app/* vers Soketi pour les connexions WebSocket
     # Permet d'utiliser le même domaine et SSL que le site
-    @websocket {
-        path /app/*
-        path /apps/*
+    handle /app/* {
+        reverse_proxy soketi:6001
     }
-    handle @websocket {
-        reverse_proxy soketi:6001 {
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-        }
+    handle /apps/* {
+        reverse_proxy soketi:6001
     }
 
     # Routes nécessitant un timeout étendu (Livewire, API IA)
