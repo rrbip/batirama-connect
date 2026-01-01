@@ -478,6 +478,72 @@ class ViewAiSession extends ViewRecord
         return $this->record->messages()->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get();
     }
 
+    /**
+     * Récupère tous les messages fusionnés (IA + Support) dans une timeline unifiée.
+     *
+     * @return array Messages triés par date avec type normalisé
+     */
+    public function getUnifiedMessages(): array
+    {
+        $messages = [];
+
+        // Messages IA (user + assistant)
+        foreach ($this->record->messages()->orderBy('created_at', 'asc')->get() as $msg) {
+            $messages[] = [
+                'id' => 'ai_' . $msg->id,
+                'original_id' => $msg->id,
+                'source' => 'ai',
+                'type' => $msg->role === 'user' ? 'client' : 'ai',
+                'content' => $msg->content,
+                'created_at' => $msg->created_at,
+                'sender_name' => $msg->role === 'user' ? 'Client' : ($this->record->agent?->name ?? 'Assistant IA'),
+                'validation_status' => $msg->validation_status,
+                'model_used' => $msg->model_used,
+                'tokens' => ($msg->tokens_prompt ?? 0) + ($msg->tokens_completion ?? 0),
+                'generation_time_ms' => $msg->generation_time_ms,
+                'rag_context' => $msg->rag_context,
+                'corrected_content' => $msg->corrected_content,
+                'original' => $msg,
+                'is_pending_validation' => $msg->role === 'assistant' && $msg->validation_status === 'pending',
+            ];
+        }
+
+        // Messages de support (si escaladé)
+        if ($this->record->isEscalated()) {
+            foreach ($this->record->supportMessages()->with('agent', 'attachments')->orderBy('created_at', 'asc')->get() as $supportMsg) {
+                // Déterminer le type
+                $type = match ($supportMsg->sender_type) {
+                    'agent' => 'support',
+                    'system' => 'system',
+                    'user' => 'client',
+                    default => 'support',
+                };
+
+                $messages[] = [
+                    'id' => 'support_' . $supportMsg->id,
+                    'original_id' => $supportMsg->id,
+                    'source' => 'support',
+                    'type' => $type,
+                    'content' => $supportMsg->content,
+                    'created_at' => $supportMsg->created_at,
+                    'sender_name' => $type === 'support'
+                        ? ($supportMsg->agent?->name ?? 'Agent Support')
+                        : ($type === 'system' ? 'Système' : 'Client'),
+                    'channel' => $supportMsg->channel ?? 'chat',
+                    'was_ai_improved' => $supportMsg->was_ai_improved ?? false,
+                    'attachments' => $supportMsg->attachments ?? collect(),
+                    'original' => $supportMsg,
+                    'is_pending_validation' => false,
+                ];
+            }
+        }
+
+        // Trier par date
+        usort($messages, fn ($a, $b) => $a['created_at'] <=> $b['created_at']);
+
+        return $messages;
+    }
+
     public function getSessionStats(): array
     {
         $messages = $this->record->messages;
