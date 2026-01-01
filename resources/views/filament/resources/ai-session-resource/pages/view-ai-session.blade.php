@@ -283,13 +283,12 @@
                                                 {{-- Bouton "Utiliser comme modèle" (visible uniquement si session escaladée) --}}
                                                 @if($session->isEscalated())
                                                     @php
-                                                        // Nettoyer le contenu : supprimer [HANDOFF_NEEDED] et la phrase d'invitation au support
+                                                        // Nettoyer le contenu : supprimer [HANDOFF_NEEDED] et les phrases d'invitation au support
                                                         $cleanedContent = $message['content'] ?? '';
                                                         // Supprimer [HANDOFF_NEEDED] ou [HANDOFF\_NEEDED] (avec backslash d'échappement)
                                                         $cleanedContent = preg_replace('/\n*\[HANDOFF\\\\?_NEEDED\]\n*/i', '', $cleanedContent);
-                                                        $cleanedContent = preg_replace('/Si vous ne trouvez toujours pas.*support humain.*aide\.\s*/i', '', $cleanedContent);
-                                                        $cleanedContent = preg_replace('/je vous invite à contacter.*humain.*\.\s*/i', '', $cleanedContent);
-                                                        $cleanedContent = preg_replace('/Un conseiller pourra.*\.\s*/i', '', $cleanedContent);
+                                                        // Supprimer toute phrase contenant "contacter/parler à" + "humain/conseiller/support"
+                                                        $cleanedContent = preg_replace('/[^.!?\n]*(?:contacter|contactez|parler à|joindre).*(?:humain|conseiller|support)[^.!?\n]*[.!?]?\s*/i', '', $cleanedContent);
                                                         $cleanedContent = trim($cleanedContent);
                                                     @endphp
                                                     <button
