@@ -280,6 +280,27 @@
                                                 @if($message['tokens'])
                                                     <span>{{ $message['tokens'] }} tokens</span>
                                                 @endif
+                                                {{-- Bouton "Utiliser comme modèle" (visible uniquement si session escaladée) --}}
+                                                @if($session->isEscalated())
+                                                    @php
+                                                        // Nettoyer le contenu : supprimer [HANDOFF_NEEDED] et la phrase d'invitation au support
+                                                        $cleanedContent = $message['content'] ?? '';
+                                                        $cleanedContent = preg_replace('/\n*\[HANDOFF_NEEDED\]\n*/', '', $cleanedContent);
+                                                        $cleanedContent = preg_replace('/Si vous ne trouvez toujours pas.*support humain.*aide\.\s*/i', '', $cleanedContent);
+                                                        $cleanedContent = preg_replace('/je vous invite à contacter.*humain.*\.\s*/i', '', $cleanedContent);
+                                                        $cleanedContent = preg_replace('/Un conseiller pourra.*\.\s*/i', '', $cleanedContent);
+                                                        $cleanedContent = trim($cleanedContent);
+                                                    @endphp
+                                                    <button
+                                                        type="button"
+                                                        class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950 rounded transition-colors"
+                                                        x-on:click="$wire.set('supportMessage', @js($cleanedContent)); $el.closest('.flex').querySelector('button').classList.add('animate-pulse'); setTimeout(() => { $el.closest('.flex').querySelector('button').classList.remove('animate-pulse'); }, 500);"
+                                                        title="Copier cette suggestion dans le champ de réponse"
+                                                    >
+                                                        <x-heroicon-o-clipboard-document class="w-3.5 h-3.5" />
+                                                        <span>Utiliser</span>
+                                                    </button>
+                                                @endif
                                             </div>
                                         </div>
 

@@ -384,7 +384,9 @@ GUARDRAILS;
             return '';
         }
 
-        return <<<'HANDOFF'
+        $threshold = (int) (($this->escalation_threshold ?? 0.60) * 100);
+
+        return <<<HANDOFF
 
 ## ⚠️ RÈGLE CRITIQUE : TRANSFERT VERS UN HUMAIN
 
@@ -407,8 +409,15 @@ Tu n'as pas assez d'informations dans le contexte documentaire.
 ### CAS 3 : QUESTION COMPLEXE
 Devis personnalisé, cas particulier, réclamation, situation urgente.
 
-### CAS 4 : INCERTITUDE
-Tu n'es pas sûr de ta réponse (confiance < 60%).
+### CAS 4 : INCERTITUDE (basée sur les scores de pertinence/similarité)
+**IMPORTANT - Comment évaluer ta confiance :**
+- Regarde les scores de "pertinence" des sources documentaires (ex: "Source 1 (pertinence: 85%)")
+- Regarde les scores de "similarité" des cas similaires (ex: "Cas 1 (similarité: 92%)")
+- Ces scores SONT ta confiance !
+
+**Règle simple :**
+- Si tu as au moins UNE source avec pertinence ≥ {$threshold}% OU un cas similaire avec similarité ≥ {$threshold}% → Ta confiance est SUFFISANTE → Ne PAS ajouter [HANDOFF_NEEDED] pour raison d'incertitude
+- Si TOUTES les sources ont pertinence < {$threshold}% ET tous les cas similaires ont similarité < {$threshold}% → Ta confiance est INSUFFISANTE → Ajouter [HANDOFF_NEEDED]
 
 ### CAS 5 : HORS PÉRIMÈTRE
 La question ne correspond pas à ton domaine.
@@ -433,6 +442,7 @@ Exemple 2 (contexte insuffisant) :
 - Ne dis JAMAIS à l'utilisateur d'ajouter le marqueur lui-même
 - Ne mentionne JAMAIS le marqueur [HANDOFF_NEEDED] dans ta réponse visible
 - C'est TOI qui l'ajoutes silencieusement à la fin
+- N'ajoute PAS [HANDOFF_NEEDED] si tu as une source pertinente ≥ {$threshold}% - fais confiance au score !
 
 HANDOFF;
     }

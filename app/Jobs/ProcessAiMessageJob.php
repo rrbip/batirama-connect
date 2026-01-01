@@ -101,16 +101,31 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Déclencher l'escalade si:
             // 1. L'IA a ajouté le marqueur [HANDOFF_NEEDED]
             // 2. OU l'utilisateur a explicitement demandé un humain
-            if ($agent->human_support_enabled && ($needsHandoff || $userRequestsHuman)) {
-                $reason = $needsHandoff ? 'ai_handoff_request' : 'user_explicit_request';
-                $this->triggerEscalation($session, $reason);
+            // 3. OU le score RAG est inférieur au seuil d'escalade
+            if ($agent->human_support_enabled) {
+                $maxRagScore = $this->extractMaxRagScore($response->raw);
+                $escalationThreshold = $agent->escalation_threshold ?? 0.60;
+                $scoreBelowThreshold = $maxRagScore < $escalationThreshold;
 
-                Log::info('ProcessAiMessageJob: Handoff triggered', [
-                    'session_id' => $session->id,
-                    'reason' => $reason,
-                    'ai_marker' => $needsHandoff,
-                    'user_request' => $userRequestsHuman,
-                ]);
+                if ($needsHandoff || $userRequestsHuman || $scoreBelowThreshold) {
+                    $reason = match (true) {
+                        $userRequestsHuman => 'user_explicit_request',
+                        $needsHandoff => 'ai_handoff_request',
+                        $scoreBelowThreshold => 'low_rag_score',
+                        default => 'unknown',
+                    };
+                    $this->triggerEscalation($session, $reason, $maxRagScore);
+
+                    Log::info('ProcessAiMessageJob: Handoff triggered', [
+                        'session_id' => $session->id,
+                        'reason' => $reason,
+                        'ai_marker' => $needsHandoff,
+                        'user_request' => $userRequestsHuman,
+                        'max_rag_score' => $maxRagScore,
+                        'escalation_threshold' => $escalationThreshold,
+                        'score_below_threshold' => $scoreBelowThreshold,
+                    ]);
+                }
             }
 
             Log::info('ProcessAiMessageJob: Completed successfully', [
@@ -293,7 +308,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
     /**
      * Déclenche l'escalade vers le support humain
      */
-    private function triggerEscalation(\App\Models\AiSession $session, string $reason): void
+    private function triggerEscalation(\App\Models\AiSession $session, string $reason, ?float $maxRagScore = null): void
     {
         // Ne pas escalader si déjà escaladé
         if ($session->isEscalated()) {
@@ -305,11 +320,12 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
 
         try {
             $escalationService = app(EscalationService::class);
-            $escalationService->escalate($session, $reason);
+            $escalationService->escalate($session, $reason, $maxRagScore);
 
             Log::info('ProcessAiMessageJob: Session escalated to human support', [
                 'session_id' => $session->id,
                 'reason' => $reason,
+                'max_rag_score' => $maxRagScore,
             ]);
         } catch (\Throwable $e) {
             Log::error('ProcessAiMessageJob: Failed to escalate session', [
@@ -317,5 +333,33 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Extrait le score RAG maximum depuis le contexte de la réponse
+     */
+    private function extractMaxRagScore(array $raw): float
+    {
+        $maxScore = 0.0;
+
+        $context = $raw['context'] ?? [];
+
+        // Vérifier les sources apprises (learned responses)
+        $learnedSources = $context['learned_sources'] ?? [];
+        foreach ($learnedSources as $source) {
+            // Les scores sont stockés en pourcentage (0-100), convertir en 0-1
+            $score = ($source['score'] ?? 0) / 100;
+            $maxScore = max($maxScore, $score);
+        }
+
+        // Vérifier les sources documentaires (RAG)
+        $documentSources = $context['document_sources'] ?? [];
+        foreach ($documentSources as $source) {
+            // Les scores sont stockés en pourcentage (0-100), convertir en 0-1
+            $score = ($source['score'] ?? 0) / 100;
+            $maxScore = max($maxScore, $score);
+        }
+
+        return $maxScore;
     }
 }
