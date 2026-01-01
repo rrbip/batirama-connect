@@ -402,6 +402,93 @@
             }
         }
 
+        /* Upload Button */
+        .upload-button {
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-light);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+
+        .upload-button:hover {
+            background: var(--border-color);
+        }
+
+        .upload-button svg {
+            color: var(--text-light);
+        }
+
+        /* File Preview */
+        .file-preview {
+            padding: 8px 16px;
+            background: var(--bg-light);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .file-preview-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background: white;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-color);
+        }
+
+        .file-remove {
+            background: none;
+            border: none;
+            color: var(--text-light);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+            line-height: 1;
+        }
+
+        .file-remove:hover {
+            color: #f44336;
+        }
+
+        /* Error Banner (persistent) */
+        .error-banner {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #f44336;
+            color: white;
+            padding: 12px 40px 12px 16px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+
+        .error-banner-close {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
         /* Responsive */
         @media (max-width: 520px) {
             body {
@@ -413,6 +500,11 @@
                 height: 100vh;
                 max-height: none;
                 border-radius: 0;
+            }
+
+            .upload-button {
+                width: 40px;
+                height: 40px;
             }
         }
     </style>
@@ -468,7 +560,22 @@
 
         <!-- Input Area -->
         <div class="input-container">
+            <!-- File preview area -->
+            <div class="file-preview" id="filePreview" style="display: none;">
+                <div class="file-preview-item" id="filePreviewItem">
+                    <span class="file-name" id="fileName"></span>
+                    <button class="file-remove" id="fileRemove" type="button">&times;</button>
+                </div>
+            </div>
             <div class="input-wrapper">
+                @if($config['attachments_enabled'] ?? false)
+                <label class="upload-button" for="fileInput" title="Joindre un fichier">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                        <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5c0-1.38 1.12-2.5 2.5-2.5s2.5 1.12 2.5 2.5v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5c0 1.38 1.12 2.5 2.5 2.5s2.5-1.12 2.5-2.5V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+                    </svg>
+                    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.gif,.doc,.docx,.xls,.xlsx,.txt,.csv" style="display: none;">
+                </label>
+                @endif
                 <textarea
                     class="input-field"
                     id="inputField"
@@ -512,7 +619,9 @@
                 session: null,
                 messages: [],
                 isLoading: true,
-                isSending: false
+                isSending: false,
+                currentFile: null,
+                uploadedAttachment: null
             };
 
             // DOM Elements
@@ -522,7 +631,11 @@
                 welcomeSection: document.getElementById('welcomeSection'),
                 typingIndicator: document.getElementById('typingIndicator'),
                 inputField: document.getElementById('inputField'),
-                sendButton: document.getElementById('sendButton')
+                sendButton: document.getElementById('sendButton'),
+                fileInput: document.getElementById('fileInput'),
+                filePreview: document.getElementById('filePreview'),
+                fileName: document.getElementById('fileName'),
+                fileRemove: document.getElementById('fileRemove')
             };
 
             // Helper functions
@@ -551,6 +664,48 @@
 
             function scrollToBottom() {
                 elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+            }
+
+            // File handling functions
+            function handleFileSelect(file) {
+                if (!file) return;
+
+                // Check file size (10MB max)
+                if (file.size > 10 * 1024 * 1024) {
+                    showError('Fichier trop volumineux (max 10 Mo)');
+                    return;
+                }
+
+                state.currentFile = file;
+                elements.fileName.textContent = file.name;
+                elements.filePreview.style.display = 'block';
+                updateSendButton();
+            }
+
+            function clearFile() {
+                state.currentFile = null;
+                state.uploadedAttachment = null;
+                if (elements.fileInput) elements.fileInput.value = '';
+                if (elements.filePreview) elements.filePreview.style.display = 'none';
+                updateSendButton();
+            }
+
+            async function uploadFile(file) {
+                var formData = new FormData();
+                formData.append('file', file);
+
+                var response = await fetch(CONFIG.apiBase + '/c/' + CONFIG.token + '/upload', {
+                    method: 'POST',
+                    headers: CONFIG.deploymentKey ? { 'X-Deployment-Key': CONFIG.deploymentKey } : {},
+                    body: formData
+                });
+
+                var json = await response.json();
+                if (!response.ok) {
+                    throw new Error(json.message || 'Erreur upload');
+                }
+
+                return json.data;
             }
 
             // Add message to UI
@@ -657,7 +812,10 @@
 
             // Send message
             async function sendMessage(content) {
-                if (!content.trim() || state.isSending || !state.session) {
+                var hasContent = content.trim().length > 0;
+                var hasFile = state.currentFile !== null;
+
+                if ((!hasContent && !hasFile) || state.isSending || !state.session) {
                     return;
                 }
 
@@ -666,21 +824,41 @@
                 elements.inputField.value = '';
                 autoResize();
 
+                // Build display message
+                var displayContent = content;
+                if (hasFile) {
+                    displayContent = content + (content ? '\n' : '') + '📎 ' + state.currentFile.name;
+                }
+
                 addMessage({
                     role: 'user',
-                    content: content,
+                    content: displayContent,
                     created_at: new Date().toISOString()
                 });
 
                 showTyping();
 
                 try {
+                    // Upload file if present
+                    var attachments = [];
+                    if (hasFile) {
+                        try {
+                            var uploadedFile = await uploadFile(state.currentFile);
+                            attachments.push(uploadedFile);
+                        } catch (uploadError) {
+                            console.error('Upload error:', uploadError);
+                            showError('Erreur upload: ' + uploadError.message);
+                        }
+                        clearFile();
+                    }
+
                     var response;
 
                     if (CONFIG.tokenMode) {
                         // Legacy mode - use /c/{token}/message
                         response = await apiRequest('POST', '/c/' + CONFIG.token + '/message', {
-                            message: content,
+                            message: content || 'Fichier joint',
+                            attachments: attachments,
                             async: false
                         });
 
@@ -692,7 +870,8 @@
                     } else {
                         // Whitelabel mode
                         response = await apiRequest('POST', '/whitelabel/sessions/' + state.session.session_id + '/messages', {
-                            message: content
+                            message: content || 'Fichier joint',
+                            attachments: attachments
                         });
 
                         addMessage({
@@ -709,6 +888,7 @@
                 } finally {
                     hideTyping();
                     state.isSending = false;
+                    clearFile();
                     updateSendButton();
                 }
             }
@@ -721,7 +901,9 @@
 
             // Update send button state
             function updateSendButton() {
-                elements.sendButton.disabled = !elements.inputField.value.trim() || state.isSending;
+                var hasContent = elements.inputField.value.trim().length > 0;
+                var hasFile = state.currentFile !== null;
+                elements.sendButton.disabled = (!hasContent && !hasFile) || state.isSending;
             }
 
             // Event listeners
@@ -729,6 +911,22 @@
                 autoResize();
                 updateSendButton();
             });
+
+            // File input event listeners
+            if (elements.fileInput) {
+                elements.fileInput.addEventListener('change', function(e) {
+                    var file = e.target.files[0];
+                    if (file) {
+                        handleFileSelect(file);
+                    }
+                });
+            }
+
+            if (elements.fileRemove) {
+                elements.fileRemove.addEventListener('click', function() {
+                    clearFile();
+                });
+            }
 
             elements.inputField.addEventListener('keydown', function(e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
