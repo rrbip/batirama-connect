@@ -524,6 +524,115 @@
             padding: 0 4px;
         }
 
+        /* Email Collection Form */
+        .email-form-overlay {
+            display: none;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(255,255,255,0.98) 80%, rgba(255,255,255,0.9));
+            padding: 20px;
+            border-top: 1px solid var(--border-color);
+            z-index: 50;
+            animation: slideUp 0.3s ease;
+        }
+
+        .email-form-overlay.visible {
+            display: block;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .email-form-title {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--text-color);
+        }
+
+        .email-form-subtitle {
+            font-size: 13px;
+            color: var(--text-light);
+            margin-bottom: 16px;
+        }
+
+        .email-form-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .email-form-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 22px;
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .email-form-input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(30, 136, 229, 0.1);
+        }
+
+        .email-form-input::placeholder {
+            color: #999;
+        }
+
+        .email-form-submit {
+            padding: 12px 24px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 22px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+
+        .email-form-submit:hover:not(:disabled) {
+            background: var(--primary-dark);
+        }
+
+        .email-form-submit:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .email-form-error {
+            color: #f44336;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .email-form-success {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #059669;
+            font-size: 14px;
+        }
+
+        .email-form-success svg {
+            width: 20px;
+            height: 20px;
+        }
+
         /* Responsive */
         @media (max-width: 520px) {
             body {
@@ -590,6 +699,25 @@
                 <span class="typing-dot"></span>
                 <span class="typing-dot"></span>
                 <span class="typing-dot"></span>
+            </div>
+        </div>
+
+        <!-- Email Collection Form (shown when escalated without email) -->
+        <div class="email-form-overlay" id="emailFormOverlay">
+            <div class="email-form-title">📧 Laissez-nous votre email</div>
+            <div class="email-form-subtitle">Un conseiller vous répondra dès que possible.</div>
+            <form id="emailForm">
+                <div class="email-form-wrapper">
+                    <input type="email" class="email-form-input" id="emailInput" placeholder="votre@email.com" required>
+                    <button type="submit" class="email-form-submit" id="emailSubmit">Envoyer</button>
+                </div>
+                <div class="email-form-error" id="emailError" style="display: none;"></div>
+            </form>
+            <div class="email-form-success" id="emailSuccess" style="display: none;">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+                <span>Merci ! Nous vous répondrons rapidement.</span>
             </div>
         </div>
 
@@ -846,7 +974,8 @@
                 isSending: false,
                 currentFile: null,
                 uploadedAttachment: null,
-                isHumanSupportActive: false  // True when escalated/assigned - hide AI typing
+                isHumanSupportActive: false,  // True when escalated/assigned - hide AI typing
+                userEmail: null  // User email (if provided)
             };
 
             // DOM Elements
@@ -860,7 +989,14 @@
                 fileInput: document.getElementById('fileInput'),
                 filePreview: document.getElementById('filePreview'),
                 fileName: document.getElementById('fileName'),
-                fileRemove: document.getElementById('fileRemove')
+                fileRemove: document.getElementById('fileRemove'),
+                // Email form elements
+                emailFormOverlay: document.getElementById('emailFormOverlay'),
+                emailForm: document.getElementById('emailForm'),
+                emailInput: document.getElementById('emailInput'),
+                emailSubmit: document.getElementById('emailSubmit'),
+                emailError: document.getElementById('emailError'),
+                emailSuccess: document.getElementById('emailSuccess')
             };
 
             // Helper functions
@@ -889,6 +1025,63 @@
 
             function scrollToBottom() {
                 elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+            }
+
+            // ═══════════════════════════════════════════════════════════════
+            // EMAIL COLLECTION FORM
+            // ═══════════════════════════════════════════════════════════════
+
+            // Show email collection form (only if no email set)
+            function showEmailForm() {
+                if (state.userEmail) {
+                    console.log('📧 Email already set:', state.userEmail);
+                    return;
+                }
+                console.log('📧 Showing email collection form');
+                elements.emailFormOverlay.classList.add('visible');
+                elements.emailInput.focus();
+            }
+
+            // Hide email collection form
+            function hideEmailForm() {
+                elements.emailFormOverlay.classList.remove('visible');
+            }
+
+            // Submit email
+            async function submitEmail(email) {
+                if (!email || !email.trim()) return;
+
+                elements.emailSubmit.disabled = true;
+                elements.emailError.style.display = 'none';
+
+                try {
+                    var response = await apiRequest('POST', '/c/' + CONFIG.token + '/email', {
+                        email: email.trim()
+                    });
+
+                    if (response.success) {
+                        state.userEmail = email.trim();
+                        console.log('📧 Email saved:', state.userEmail);
+
+                        // Show success message
+                        elements.emailForm.style.display = 'none';
+                        elements.emailSuccess.style.display = 'flex';
+
+                        // Hide the form after 3 seconds
+                        setTimeout(function() {
+                            hideEmailForm();
+                            // Reset form for potential future use
+                            elements.emailForm.style.display = 'block';
+                            elements.emailSuccess.style.display = 'none';
+                            elements.emailInput.value = '';
+                        }, 3000);
+                    }
+                } catch (error) {
+                    console.error('Email submission error:', error);
+                    elements.emailError.textContent = error.message || 'Erreur lors de l\'envoi';
+                    elements.emailError.style.display = 'block';
+                    elements.emailSubmit.disabled = false;
+                }
             }
 
             // File handling functions
@@ -1053,6 +1246,15 @@
                             state.isHumanSupportActive = true;
                             console.log('🔄 Restored human support mode from session:', historyResponse.data.support_status);
                         }
+                        // Capturer l'email utilisateur si présent
+                        if (historyResponse.data.user_email) {
+                            state.userEmail = historyResponse.data.user_email;
+                            console.log('📧 User email from session:', state.userEmail);
+                        }
+                        // Si escaladé sans email, montrer le formulaire
+                        if (historyResponse.data.support_status === 'escalated' && !historyResponse.data.user_email) {
+                            setTimeout(showEmailForm, 500);
+                        }
                     } else {
                         // Whitelabel mode - create session via whitelabel API
                         var sessionResponse = await apiRequest('POST', '/whitelabel/sessions', {
@@ -1138,6 +1340,10 @@
                         hideTyping(); // Cacher immédiatement le typing indicator
                         addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra prochainement.');
                         scrollToBottom();
+                        // Afficher le formulaire de collecte d'email si non renseigné
+                        if (!state.userEmail) {
+                            setTimeout(showEmailForm, 1000); // Délai pour laisser le message s'afficher
+                        }
                     })
                     // Listen for validated AI messages (after admin approval in human support mode)
                     .listen('.message.validated', function(data) {
@@ -1449,6 +1655,14 @@
             elements.sendButton.addEventListener('click', function() {
                 sendMessage(elements.inputField.value);
             });
+
+            // Email form event listeners
+            if (elements.emailForm) {
+                elements.emailForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    submitEmail(elements.emailInput.value);
+                });
+            }
 
             // Initialize
             initSession();

@@ -350,6 +350,7 @@ class PublicChatController extends Controller
                 'session_id' => $session->uuid,
                 'messages' => $history,
                 'support_status' => $session->support_status,
+                'user_email' => $session->user_email,
             ],
         ]);
     }
@@ -485,6 +486,53 @@ class PublicChatController extends Controller
         }
 
         return response()->json($response);
+    }
+
+    /**
+     * POST /c/{token}/email
+     * Enregistre l'email de l'utilisateur pour la session
+     */
+    public function saveEmail(Request $request, string $token): JsonResponse
+    {
+        $accessToken = PublicAccessToken::where('token', $token)->first();
+
+        if (!$accessToken) {
+            return response()->json([
+                'error' => 'token_not_found',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'no_session',
+                'message' => 'Aucune session active',
+            ], 404);
+        }
+
+        $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+        ]);
+
+        $email = $request->input('email');
+
+        // Sauvegarder l'email dans la session
+        $session->update(['user_email' => $email]);
+
+        Log::info('User email saved for session', [
+            'session_id' => $session->uuid,
+            'email' => $email,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'email' => $email,
+                'session_id' => $session->uuid,
+            ],
+        ]);
     }
 
     /**

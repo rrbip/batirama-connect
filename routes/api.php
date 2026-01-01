@@ -115,6 +115,7 @@ Route::prefix('c')->group(function () {
     Route::post('/{token}/end', [PublicChatController::class, 'end']);
     Route::get('/{token}/history', [PublicChatController::class, 'history']);
     Route::post('/{token}/upload', [PublicChatController::class, 'upload']);
+    Route::post('/{token}/email', [PublicChatController::class, 'saveEmail']);
 });
 
 // Message status endpoints (polling for async messages)
