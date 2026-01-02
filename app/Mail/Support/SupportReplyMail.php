@@ -25,7 +25,9 @@ class SupportReplyMail extends Mailable implements ShouldQueue
         public AiSession $session,
         public SupportMessage $message,
         public User $agent
-    ) {}
+    ) {
+        $this->onQueue('mail');
+    }
 
     /**
      * Get the message envelope.

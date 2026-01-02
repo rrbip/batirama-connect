@@ -21,7 +21,9 @@ class EscalationNotificationMail extends Mailable implements ShouldQueue
     public function __construct(
         public AiSession $session,
         public User $supportAgent
-    ) {}
+    ) {
+        $this->onQueue('mail');
+    }
 
     /**
      * Get the message envelope.

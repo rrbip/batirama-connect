@@ -26,7 +26,9 @@ class NewMessageNotificationMail extends Mailable implements ShouldQueue
         public AiSession $session,
         public string $messagePreview,
         public string $senderName,
-    ) {}
+    ) {
+        $this->onQueue('mail');
+    }
 
     public function envelope(): Envelope
     {
