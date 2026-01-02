@@ -1269,6 +1269,14 @@
                 Pusher.logToConsole = true;
 
                 var useTLS = soketiConfig.frontendScheme === 'https';
+
+                // Get CSRF token for auth endpoint
+                var csrfToken = document.querySelector('meta[name="csrf-token"]');
+                var authHeaders = {};
+                if (csrfToken) {
+                    authHeaders['X-CSRF-TOKEN'] = csrfToken.getAttribute('content');
+                }
+
                 var echoConfig = {
                     broadcaster: 'pusher',
                     key: soketiConfig.key,
@@ -1279,7 +1287,12 @@
                     encrypted: useTLS,
                     disableStats: true,
                     enabledTransports: ['ws', 'wss'],
-                    cluster: soketiConfig.cluster
+                    cluster: soketiConfig.cluster,
+                    // Required for presence channels authentication
+                    authEndpoint: '/broadcasting/auth',
+                    auth: {
+                        headers: authHeaders
+                    }
                 };
 
                 console.log('🔧 Echo Config:', JSON.stringify(echoConfig, null, 2));
