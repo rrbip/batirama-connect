@@ -919,6 +919,17 @@
                     wsConnectionFailed = false;
                     console.log('✅ Soketi: CONNECTED - WebSocket connecté !');
                     console.log('   Socket ID:', window.Echo.socketId());
+
+                    // Re-essayer l'abonnement aux canaux si la session est déjà initialisée
+                    if (state.session && state.session.session_id) {
+                        if (!sessionChannelSubscribed) {
+                            console.log('🔄 WebSocket connecté après init, abonnement aux canaux...');
+                            subscribeToSessionChannel();
+                        }
+                        // Rejoindre le canal de présence si pas déjà fait
+                        var sessionUuid = state.session.uuid || state.session.session_id;
+                        joinPresenceChannel(sessionUuid);
+                    }
                 });
 
                 window.Echo.connector.pusher.connection.bind('disconnected', function() {
@@ -1018,6 +1029,9 @@
                 userEmail: null,  // User email (if provided)
                 asyncMode: false  // True when outside support hours or no agents connected - show email form
             };
+
+            // Track session channel subscription status (déclaré ici pour être disponible dans les handlers WebSocket)
+            var sessionChannelSubscribed = false;
 
             // DOM Elements
             var elements = {
@@ -1445,18 +1459,29 @@
                     return;
                 }
 
-                if (!isWebSocketAvailable()) {
-                    console.warn('WebSocket not available, support messages will use polling');
+                // Ne pas s'abonner deux fois
+                if (sessionChannelSubscribed) {
+                    console.log('📡 Session channel already subscribed');
                     return;
                 }
 
                 var sessionUuid = state.session.uuid || state.session.session_id;
                 var channelName = 'chat.session.' + sessionUuid;
 
-                console.log('📡 Subscribing to session channel:', channelName);
+                // S'abonner même si WebSocket pas encore connecté - Echo gère la queue
+                // Si WebSocket échoue complètement, on utilisera le polling
+                if (!window.Echo || !window.Echo.channel) {
+                    console.warn('Echo not available, will retry on WebSocket connect');
+                    return;
+                }
 
-                // Rejoindre le canal de présence pour signaler qu'on est connecté
-                joinPresenceChannel(sessionUuid);
+                console.log('📡 Subscribing to session channel:', channelName);
+                sessionChannelSubscribed = true;
+
+                // Rejoindre le canal de présence si WebSocket disponible
+                if (isWebSocketAvailable()) {
+                    joinPresenceChannel(sessionUuid);
+                }
 
                 window.Echo.channel(channelName)
                     // Listen for support agent messages
