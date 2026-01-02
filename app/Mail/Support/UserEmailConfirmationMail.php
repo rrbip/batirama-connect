@@ -18,7 +18,6 @@ class UserEmailConfirmationMail extends Mailable
 
     public string $agentName;
     public string $supportEmail;
-    public string $subject;
 
     public function __construct(
         public AiSession $session
@@ -26,7 +25,6 @@ class UserEmailConfirmationMail extends Mailable
         $agent = $session->agent;
         $this->agentName = $agent?->name ?? 'Support';
         $this->supportEmail = $agent?->support_email ?? config('mail.from.address');
-        $this->subject = "Votre demande de support a bien été enregistrée - {$this->agentName}";
     }
 
     /**
@@ -35,7 +33,7 @@ class UserEmailConfirmationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: $this->subject,
+            subject: "Votre demande de support a bien été enregistrée - {$this->agentName}",
         );
     }
 
