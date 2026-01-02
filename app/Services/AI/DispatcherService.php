@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Services\AI;
 
 use App\DTOs\AI\LLMResponse;
+use App\Events\Support\NewSupportMessage;
 use App\Jobs\ProcessAiMessageJob;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
+use App\Models\SupportMessage;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -77,6 +79,11 @@ class DispatcherService
 
         // Sauvegarder le message utilisateur
         $this->ragService->saveMessage($session, 'user', $userMessage);
+
+        // Si la session est escaladée, créer aussi un message support pour notifier les agents
+        if ($session->support_status === 'escalated') {
+            $this->createSupportMessageForEscalatedSession($session, $userMessage);
+        }
 
         // Créer le message assistant en attente (contenu vide pour l'instant)
         $assistantMessage = AiMessage::create([
@@ -262,5 +269,39 @@ class DispatcherService
             'ended_at' => now(),
             'status' => 'completed',
         ]);
+    }
+
+    /**
+     * Crée un message support pour une session escaladée.
+     * Ceci permet de notifier les agents support quand l'utilisateur envoie un message
+     * via le chat standalone après escalade.
+     */
+    protected function createSupportMessageForEscalatedSession(AiSession $session, string $content): void
+    {
+        try {
+            $message = SupportMessage::create([
+                'session_id' => $session->id,
+                'sender_type' => 'user',
+                'channel' => 'chat',
+                'content' => $content,
+                'is_read' => false,
+            ]);
+
+            // Mettre à jour l'activité de la session
+            $session->touch('last_activity_at');
+
+            // Dispatcher l'événement pour notifier les agents support
+            event(new NewSupportMessage($message));
+
+            Log::info('DispatcherService: Support message created for escalated session', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DispatcherService: Failed to create support message', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
