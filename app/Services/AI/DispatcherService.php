@@ -83,14 +83,17 @@ class DispatcherService
         // Rafraîchir la session pour avoir le statut actuel (peut avoir été escaladée entre-temps)
         $session->refresh();
 
-        Log::debug('DispatcherService: Checking escalation status', [
+        // Vérifier si la session est en mode support (escalated ou assigned)
+        $isInSupportMode = in_array($session->support_status, ['escalated', 'assigned']);
+
+        Log::debug('DispatcherService: Checking support mode', [
             'session_id' => $session->id,
             'support_status' => $session->support_status,
-            'is_escalated' => $session->support_status === 'escalated',
+            'is_in_support_mode' => $isInSupportMode,
         ]);
 
-        // Si la session est escaladée, créer aussi un message support pour notifier les agents
-        if ($session->support_status === 'escalated') {
+        // Si la session est en mode support, créer aussi un message support pour notifier les agents
+        if ($isInSupportMode) {
             $this->createSupportMessageForEscalatedSession($session, $userMessage);
         }
 
