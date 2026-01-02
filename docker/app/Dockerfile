@@ -68,9 +68,9 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         opcache \
         pcntl
 
-# Installation de l'extension IMAP (nécessite configuration spéciale sur Alpine)
-RUN PHP_OPENSSL=yes docker-php-ext-configure imap --with-imap-ssl \
-    && docker-php-ext-install imap
+# Installation de l'extension IMAP
+# Note: Sur Alpine, imap-dev inclut déjà le support SSL
+RUN docker-php-ext-install imap
 
 # Installation de Redis extension
 RUN pecl install redis \
