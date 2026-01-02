@@ -39,7 +39,7 @@ class UserEmailConfirmationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: "[Réf: {$this->reference}] Votre demande de support a bien été enregistrée - {$this->agentName}",
+            subject: "Votre demande de support a bien été enregistrée - {$this->agentName} [Réf: {$this->reference}]",
         );
     }
 

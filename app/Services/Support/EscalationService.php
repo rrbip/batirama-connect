@@ -64,6 +64,9 @@ class EscalationService
             'max_rag_score' => $maxRagScore,
         ]);
 
+        // Créer le message système d'escalade pour l'historique
+        $this->createEscalationSystemMessage($session);
+
         // Dispatcher l'événement (pour WebSocket)
         event(new SessionEscalated($session));
 
@@ -71,6 +74,28 @@ class EscalationService
         $this->notifyAvailableAgents($session);
 
         return $session;
+    }
+
+    /**
+     * Crée un message système d'escalade dans l'historique.
+     */
+    protected function createEscalationSystemMessage(AiSession $session): void
+    {
+        $agent = $session->agent;
+        $asyncMode = $agent?->shouldUseAsyncSupport() ?? true;
+
+        $content = $asyncMode
+            ? 'Votre demande a été transmise à notre équipe. Un conseiller vous répondra dès que possible.'
+            : 'Votre demande a été transmise à notre équipe. Un conseiller va vous répondre.';
+
+        $message = $session->supportMessages()->create([
+            'sender_type' => 'system',
+            'channel' => 'chat',
+            'content' => $content,
+        ]);
+
+        // Broadcast le message pour les clients connectés
+        event(new \App\Events\Support\NewSupportMessage($message));
     }
 
     /**
