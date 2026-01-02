@@ -26,11 +26,6 @@ class FetchSupportEmailsJob implements ShouldQueue, ShouldBeUnique
     use SerializesModels;
 
     /**
-     * Queue dédiée pour les emails (ne pas bloquer les jobs IA).
-     */
-    public string $queue = 'emails';
-
-    /**
      * Nombre de tentatives max.
      */
     public int $tries = 2;
@@ -47,7 +42,8 @@ class FetchSupportEmailsJob implements ShouldQueue, ShouldBeUnique
 
     public function __construct()
     {
-        $this->onQueue('mail');
+        // Queue dédiée pour ne pas être bloqué par les jobs IA
+        $this->onQueue('emails');
     }
 
     /**
