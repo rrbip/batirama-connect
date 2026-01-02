@@ -496,9 +496,21 @@ class ViewAiSession extends ViewRecord
                     broadcast(new AiMessageValidated($message));
                 }
 
+                // Envoyer par email si le client a fourni son email (mode async)
+                // Le mail utilisera corrected_content automatiquement
+                if ($this->record->user_email) {
+                    app(SupportService::class)->sendValidatedAiMessageByEmail(
+                        $this->record,
+                        $message,
+                        auth()->user()
+                    );
+                }
+
                 Notification::make()
                     ->title('Correction enregistrée')
-                    ->body('La réponse corrigée a été indexée pour l\'apprentissage.')
+                    ->body($this->record->user_email
+                        ? 'La réponse corrigée a été indexée et envoyée par email au client.'
+                        : 'La réponse corrigée a été indexée pour l\'apprentissage.')
                     ->success()
                     ->send();
             } else {

@@ -110,11 +110,12 @@ class ValidatedAiResponseMail extends Mailable
 
     /**
      * Crée un proxy pour le message compatible avec le template.
+     * Utilise le contenu corrigé si disponible (bouton "Corriger").
      */
     protected function createMessageProxy(): object
     {
         return (object) [
-            'content' => $this->aiMessage->content,
+            'content' => $this->aiMessage->corrected_content ?? $this->aiMessage->content,
         ];
     }
 
