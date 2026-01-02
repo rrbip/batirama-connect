@@ -862,6 +862,9 @@
 
                 window.Echo = new Echo(echoConfig);
 
+                // Configurer l'auth guest pour les canaux de présence
+                setupGuestAuth();
+
                 // Log tous les états de connexion
                 window.Echo.connector.pusher.connection.bind('initialized', function() {
                     wsConnectionState = 'initialized';
@@ -1333,19 +1336,104 @@
                 });
             }
 
-            function sendPresencePing() {
-                if (!CONFIG.token) return;
+            // Rejoindre le canal de présence pour signaler qu'on est connecté
+            var presenceChannel = null;
+            function joinPresenceChannel(sessionUuid) {
+                if (!isWebSocketAvailable() || !CONFIG.tokenMode) {
+                    return;
+                }
 
-                fetch(CONFIG.baseUrl + '/c/' + CONFIG.token + '/ping', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    }
-                }).catch(function(error) {
-                    // Ignorer les erreurs de ping silencieusement
-                    console.debug('Ping failed:', error);
+                var presenceChannelName = 'chat.session.' + sessionUuid;
+
+                console.log('👤 Joining presence channel:', presenceChannelName);
+
+                // Configurer l'auth personnalisée pour les guests
+                // On utilise un authorizer custom pour ce canal de présence
+                var pusher = window.Echo.connector.pusher;
+
+                // Créer un canal de présence avec auth guest
+                presenceChannel = pusher.subscribe('presence-' + presenceChannelName);
+
+                presenceChannel.bind('pusher:subscription_succeeded', function(members) {
+                    console.log('✅ Presence channel joined, members:', members.count);
                 });
+
+                presenceChannel.bind('pusher:subscription_error', function(error) {
+                    console.warn('❌ Presence channel subscription error:', error);
+                    // Fallback sur le ping HTTP si le canal de présence ne fonctionne pas
+                    startPresencePing();
+                });
+
+                presenceChannel.bind('pusher:member_added', function(member) {
+                    console.log('👤 Member joined:', member);
+                });
+
+                presenceChannel.bind('pusher:member_removed', function(member) {
+                    console.log('👤 Member left:', member);
+                });
+            }
+
+            // Authentification guest pour les canaux de présence
+            function setupGuestAuth() {
+                if (!window.Echo || !window.Echo.connector || !window.Echo.connector.pusher) {
+                    return;
+                }
+
+                var pusher = window.Echo.connector.pusher;
+
+                // Override l'authorizer pour les canaux presence-chat.session.*
+                var originalAuthorize = pusher.config.authorizer;
+
+                pusher.config.authorizer = function(channel, options) {
+                    // Si c'est un canal de présence pour une session de chat, utiliser l'auth guest
+                    if (channel.name.startsWith('presence-chat.session.')) {
+                        return {
+                            authorize: function(socketId, callback) {
+                                var sessionUuid = state.session?.uuid || state.session?.session_id;
+
+                                fetch(CONFIG.baseUrl + '/broadcasting/auth/guest', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Accept': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                        socket_id: socketId,
+                                        channel_name: channel.name,
+                                        session_uuid: sessionUuid
+                                    })
+                                })
+                                .then(function(response) {
+                                    if (!response.ok) {
+                                        throw new Error('Auth failed: ' + response.status);
+                                    }
+                                    return response.json();
+                                })
+                                .then(function(data) {
+                                    console.log('✅ Guest auth success for presence channel');
+                                    callback(null, data);
+                                })
+                                .catch(function(error) {
+                                    console.error('❌ Guest auth failed:', error);
+                                    callback(error, null);
+                                });
+                            }
+                        };
+                    }
+
+                    // Pour les autres canaux, utiliser l'authorizer original
+                    if (originalAuthorize) {
+                        return originalAuthorize(channel, options);
+                    }
+
+                    return {
+                        authorize: function(socketId, callback) {
+                            callback(new Error('No authorizer configured'), null);
+                        }
+                    };
+                };
+
+                console.log('✅ Guest auth configured for presence channels');
             }
 
             // Subscribe to session WebSocket channel for support events
@@ -1364,6 +1452,9 @@
                 var channelName = 'chat.session.' + sessionUuid;
 
                 console.log('📡 Subscribing to session channel:', channelName);
+
+                // Rejoindre le canal de présence pour signaler qu'on est connecté
+                joinPresenceChannel(sessionUuid);
 
                 window.Echo.channel(channelName)
                     // Listen for support agent messages

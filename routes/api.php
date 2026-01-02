@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\GuestBroadcastAuthController;
 use App\Http\Controllers\Api\PartnerApiController;
 use App\Http\Controllers\Api\PublicChatController;
 use App\Http\Controllers\Api\Whitelabel\EditorController;
@@ -21,6 +22,9 @@ Route::get('/health', fn () => response()->json([
     'status' => 'ok',
     'timestamp' => now()->toIso8601String(),
 ]));
+
+// Guest broadcast auth (for anonymous chat users)
+Route::post('/broadcasting/auth/guest', [GuestBroadcastAuthController::class, 'authenticate']);
 
 // API v1
 Route::prefix('v1')->group(function () {

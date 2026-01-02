@@ -224,4 +224,45 @@ class PresenceService
             return false;
         }
     }
+
+    /**
+     * Vérifie si l'utilisateur du chat standalone est connecté à une session.
+     *
+     * @param string $sessionUuid UUID de la session
+     * @return bool True si au moins un guest est connecté au canal de présence
+     */
+    public function isSessionUserOnline(string $sessionUuid): bool
+    {
+        $channelName = "presence-chat.session.{$sessionUuid}";
+
+        try {
+            $members = $this->fetchChannelMembers($channelName);
+
+            // Filtrer pour ne garder que les guests (pas les agents de support)
+            $guests = array_filter($members, function ($member) {
+                $info = $member['user_info'] ?? $member;
+                return ($info['type'] ?? '') === 'guest';
+            });
+
+            $isOnline = count($guests) > 0;
+
+            Log::debug('PresenceService: Session user online check', [
+                'session_uuid' => $sessionUuid,
+                'channel' => $channelName,
+                'total_members' => count($members),
+                'guests_count' => count($guests),
+                'is_online' => $isOnline,
+            ]);
+
+            return $isOnline;
+
+        } catch (\Exception $e) {
+            Log::warning('PresenceService: Failed to check session user presence', [
+                'session_uuid' => $sessionUuid,
+                'error' => $e->getMessage(),
+            ]);
+            // En cas d'erreur, considérer l'utilisateur comme hors ligne (envoyer l'email)
+            return false;
+        }
+    }
 }

@@ -86,6 +86,57 @@ Broadcast::channel('presence-agent.{agentId}.support', function (User $user, int
 });
 
 /**
+ * Canal de PRÉSENCE pour les utilisateurs du chat standalone.
+ * Permet de détecter si l'utilisateur est connecté au chat.
+ *
+ * Accessible par les utilisateurs authentifiés ET les guests (via auth/guest).
+ */
+Broadcast::channel('presence-chat.session.{uuid}', function ($user, string $uuid) {
+    $session = AiSession::where('uuid', $uuid)->first();
+
+    if (!$session) {
+        return false;
+    }
+
+    // Si c'est un utilisateur authentifié
+    if ($user instanceof User) {
+        // L'utilisateur de la session peut rejoindre
+        if ($session->user_id === $user->id) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name ?? 'Utilisateur',
+                'type' => 'authenticated',
+            ];
+        }
+
+        // L'agent de support peut aussi rejoindre (pour voir la présence)
+        if ($session->support_agent_id === $user->id ||
+            $user->hasRole('super-admin') ||
+            $user->hasRole('admin') ||
+            ($session->agent && $session->agent->userCanHandleSupport($user))) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name,
+                'type' => 'support',
+            ];
+        }
+    }
+
+    // Pour les guests (utilisateurs anonymes du chat standalone)
+    // L'auth est gérée par le endpoint /broadcasting/auth/guest
+    // qui passe le socket_id et channel_name avec un user_id généré
+    if (is_array($user) && isset($user['id'])) {
+        return [
+            'id' => $user['id'],
+            'name' => $user['name'] ?? 'Visiteur',
+            'type' => 'guest',
+        ];
+    }
+
+    return false;
+});
+
+/**
  * Canal privé pour une session spécifique.
  * Utilisé pour la communication en temps réel user <-> agent.
  */

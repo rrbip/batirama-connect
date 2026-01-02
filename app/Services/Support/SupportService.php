@@ -16,7 +16,8 @@ class SupportService
 {
     public function __construct(
         protected EscalationService $escalationService,
-        protected DispatcherService $dispatcherService
+        protected DispatcherService $dispatcherService,
+        protected PresenceService $presenceService
     ) {}
 
     /**
@@ -58,11 +59,15 @@ class SupportService
 
         // Envoyer par email si l'utilisateur a fourni son email ET n'est pas connecté au chat
         $hasEmail = !empty($session->user_email);
-        $isUserOnline = $session->isUserOnline();
+
+        // Vérifier la présence via Soketi (canal de présence WebSocket)
+        $isUserOnline = $this->presenceService->isSessionUserOnline($session->uuid);
+
         $shouldSendEmail = $sendEmailIfAvailable && $hasEmail && $channel === 'chat' && !$isUserOnline;
 
         Log::debug('SupportService: Email notification check', [
             'session_id' => $session->id,
+            'session_uuid' => $session->uuid,
             'message_id' => $message->id,
             'send_email_if_available' => $sendEmailIfAvailable,
             'user_email' => $session->user_email,
@@ -74,7 +79,7 @@ class SupportService
         if ($shouldSendEmail) {
             $this->sendEmailNotificationForMessage($session, $message, $agent);
         } elseif ($hasEmail && $isUserOnline) {
-            Log::debug('SupportService: User online, skipping email', [
+            Log::debug('SupportService: User online via Soketi, skipping email', [
                 'session_id' => $session->id,
                 'message_id' => $message->id,
             ]);
