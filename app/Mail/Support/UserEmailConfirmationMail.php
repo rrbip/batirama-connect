@@ -18,6 +18,7 @@ class UserEmailConfirmationMail extends Mailable
 
     public string $agentName;
     public string $supportEmail;
+    public string $reference;
 
     public function __construct(
         public AiSession $session
@@ -25,6 +26,11 @@ class UserEmailConfirmationMail extends Mailable
         $agent = $session->agent;
         $this->agentName = $agent?->name ?? 'Support';
         $this->supportEmail = $agent?->support_email ?? config('mail.from.address');
+
+        // Générer la référence à partir du support_access_token (6 derniers caractères)
+        $this->reference = $session->support_access_token
+            ? strtoupper(substr($session->support_access_token, -6))
+            : strtoupper(substr($session->uuid, -6));
     }
 
     /**
@@ -33,7 +39,7 @@ class UserEmailConfirmationMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: "Votre demande de support a bien été enregistrée - {$this->agentName}",
+            subject: "[Réf: {$this->reference}] Votre demande de support a bien été enregistrée - {$this->agentName}",
         );
     }
 
@@ -48,6 +54,7 @@ class UserEmailConfirmationMail extends Mailable
                 'agentName' => $this->agentName,
                 'supportEmail' => $this->supportEmail,
                 'userName' => $this->session->user?->name ?? 'Bonjour',
+                'reference' => $this->reference,
             ],
         );
     }

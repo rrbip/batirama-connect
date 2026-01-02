@@ -5,6 +5,8 @@
 
 Nous avons bien reçu votre demande d'assistance. Un conseiller de **{{ $agentName }}** vous répondra dans les plus brefs délais.
 
+**Référence de votre demande : {{ $reference }}**
+
 ## Que se passe-t-il ensuite ?
 
 Notre équipe de support va examiner votre demande et vous répondre directement par email à cette adresse.
