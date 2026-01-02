@@ -98,7 +98,27 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Incrémenter le compteur de messages de la session
             $session->increment('message_count');
 
-            // Déclencher l'escalade si:
+            Log::info('ProcessAiMessageJob: Completed successfully', [
+                'message_id' => $this->message->id,
+                'message_uuid' => $this->message->uuid,
+                'model' => $response->model,
+                'used_fallback' => $response->usedFallback,
+                'generation_time_ms' => $response->generationTimeMs,
+                'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
+                'needs_handoff' => $needsHandoff,
+            ]);
+
+            // Broadcast completion event via WebSocket AVANT l'escalade
+            // Cela garantit que le message IA est affiché avant le message d'escalade
+            $session = $this->message->session;
+            Log::info('Broadcasting AiMessageCompleted', [
+                'message_id' => $this->message->uuid,
+                'session_id' => $session->uuid,
+                'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
+            ]);
+            broadcast(new AiMessageCompleted($this->message));
+
+            // Déclencher l'escalade APRÈS le broadcast du message IA
             // 1. L'IA a ajouté le marqueur [HANDOFF_NEEDED]
             // 2. OU l'utilisateur a explicitement demandé un humain
             // 3. OU le score RAG est inférieur au seuil d'escalade
@@ -127,25 +147,6 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                     ]);
                 }
             }
-
-            Log::info('ProcessAiMessageJob: Completed successfully', [
-                'message_id' => $this->message->id,
-                'message_uuid' => $this->message->uuid,
-                'model' => $response->model,
-                'used_fallback' => $response->usedFallback,
-                'generation_time_ms' => $response->generationTimeMs,
-                'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
-                'needs_handoff' => $needsHandoff,
-            ]);
-
-            // Broadcast completion event via WebSocket
-            $session = $this->message->session;
-            Log::info('Broadcasting AiMessageCompleted', [
-                'message_id' => $this->message->uuid,
-                'session_id' => $session->uuid,
-                'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
-            ]);
-            broadcast(new AiMessageCompleted($this->message));
 
         } catch (\Exception $e) {
             Log::error('ProcessAiMessageJob: Processing failed', [

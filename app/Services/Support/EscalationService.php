@@ -152,10 +152,9 @@ class EscalationService
         // Envoyer des notifications database Filament (cloche)
         $this->sendDatabaseNotifications($session, $agents);
 
-        // Si aucun agent n'est connecté, envoyer un email
-        if (!$this->hasConnectedAgents($session)) {
-            $this->sendEmailNotifications($session, $agents);
-        }
+        // Toujours envoyer un email lors de l'escalade
+        // L'admin peut être "connecté" (panel ouvert) mais pas forcément attentif
+        $this->sendEmailNotifications($session, $agents);
     }
 
     /**
