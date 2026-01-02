@@ -82,6 +82,18 @@ class NotifyOnNewSupportMessage implements ShouldQueue
             $supportUsers = $agent->supportUsers;
         }
 
+        // Fallback: si toujours vide, notifier les admins/super-admins
+        if ($supportUsers->isEmpty()) {
+            $supportUsers = User::whereHas('roles', function ($query) {
+                $query->whereIn('name', ['super-admin', 'admin']);
+            })->get();
+
+            Log::info('NewSupportMessage: Using admin fallback', [
+                'session_id' => $session->id,
+                'admin_count' => $supportUsers->count(),
+            ]);
+        }
+
         Log::info('NewSupportMessage: Sending notifications', [
             'session_id' => $session->id,
             'message_id' => $message->id,
