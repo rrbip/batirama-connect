@@ -456,17 +456,35 @@ class SupportService
         // Configurer le from sur le mailable
         $mailable->from($smtpConfig['from_address'], $smtpConfig['from_name']);
 
+        // Extraire le sujet de l'Envelope avant le render
+        $subject = 'Support';
+        if (method_exists($mailable, 'envelope')) {
+            $envelope = $mailable->envelope();
+            $subject = $envelope->subject ?? $subject;
+        }
+
         // Rendre le mailable et envoyer
         $symfonyMessage = $mailable->to($to)->render();
+
+        Log::debug('Sending email via custom SMTP', [
+            'to' => $to,
+            'subject' => $subject,
+            'from' => $smtpConfig['from_address'],
+        ]);
 
         // Créer un email Symfony à partir du mailable Laravel
         $email = (new \Symfony\Component\Mime\Email())
             ->from(new \Symfony\Component\Mime\Address($smtpConfig['from_address'], $smtpConfig['from_name']))
             ->to($to)
-            ->subject($mailable->subject ?? 'Support')
+            ->subject($subject)
             ->html($symfonyMessage);
 
         $mailer->send($email);
+
+        Log::info('Email sent via custom SMTP', [
+            'to' => $to,
+            'subject' => $subject,
+        ]);
     }
 
     /**

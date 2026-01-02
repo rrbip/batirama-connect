@@ -194,6 +194,16 @@ class ImapService
                 return null;
             }
 
+            // Mettre à jour l'email de l'utilisateur sur la session si pas déjà fait
+            // Cela permet de répondre par email quand l'agent envoie un message
+            if (!$session->user_email && $from) {
+                $session->update(['user_email' => $from]);
+                Log::info('Updated session user_email from incoming email', [
+                    'session_id' => $session->id,
+                    'user_email' => $from,
+                ]);
+            }
+
             // Nettoyer le contenu de l'email
             $isHtml = empty($message->getTextBody()) && !empty($message->getHTMLBody());
             $cleanedBody = $this->emailParser->parse($body ?? '', $isHtml);
