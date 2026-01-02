@@ -118,7 +118,8 @@ class ImapService
                 'username' => $config['username'],
                 'password' => $config['password'],
                 'protocol' => 'imap',
-                'authentication' => null,
+                'timeout' => 30,
+                'authentication' => null, // Auto-detect
             ]);
 
             $client->connect();

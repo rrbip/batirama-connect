@@ -349,19 +349,25 @@ class EmailConfigTestService
 
             $clientManager = new ClientManager();
 
+            $encryption = strtolower($config['encryption'] ?? 'ssl');
+            $port = (int) ($config['port'] ?? 993);
+
+            Log::debug('Testing IMAP connection', [
+                'host' => $config['host'],
+                'port' => $port,
+                'encryption' => $encryption,
+            ]);
+
             $client = $clientManager->make([
                 'host' => $config['host'],
-                'port' => (int) ($config['port'] ?? 993),
-                'encryption' => strtolower($config['encryption'] ?? 'ssl'),
+                'port' => $port,
+                'encryption' => $encryption,
                 'validate_cert' => $config['validate_cert'] ?? false,
                 'username' => $config['username'],
                 'password' => $config['password'],
                 'protocol' => 'imap',
-            ]);
-
-            Log::debug('Testing IMAP connection', [
-                'host' => $config['host'],
-                'port' => $config['port'] ?? 993,
+                'timeout' => 30,
+                'authentication' => null, // Auto-detect
             ]);
 
             $client->connect();
@@ -450,14 +456,19 @@ class EmailConfigTestService
 
             $clientManager = new ClientManager();
 
+            $encryption = strtolower($config['encryption'] ?? 'ssl');
+            $port = (int) ($config['port'] ?? 993);
+
             $client = $clientManager->make([
                 'host' => $config['host'],
-                'port' => (int) ($config['port'] ?? 993),
-                'encryption' => strtolower($config['encryption'] ?? 'ssl'),
+                'port' => $port,
+                'encryption' => $encryption,
                 'validate_cert' => $config['validate_cert'] ?? false,
                 'username' => $config['username'],
                 'password' => $config['password'],
                 'protocol' => 'imap',
+                'timeout' => 30,
+                'authentication' => null, // Auto-detect
             ]);
 
             $client->connect();
