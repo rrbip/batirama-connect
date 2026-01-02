@@ -411,9 +411,22 @@ class ViewAiSession extends ViewRecord
                 broadcast(new AiMessageValidated($message));
             }
 
+            // Envoyer par email si le client a fourni son email (mode async)
+            if ($this->record->user_email) {
+                // Créer un message support avec le contenu validé
+                app(SupportService::class)->sendAgentMessage(
+                    $this->record,
+                    auth()->user(),
+                    $message->content,
+                    'chat'
+                );
+            }
+
             Notification::make()
                 ->title('Réponse validée')
-                ->body('La réponse a été marquée comme correcte.')
+                ->body($this->record->user_email
+                    ? 'La réponse a été validée et envoyée par email au client.'
+                    : 'La réponse a été marquée comme correcte.')
                 ->success()
                 ->send();
 

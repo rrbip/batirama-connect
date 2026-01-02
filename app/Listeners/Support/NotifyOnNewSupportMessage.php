@@ -13,6 +13,10 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Mailer\Mailer;
+use Symfony\Component\Mailer\Transport;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 
 /**
  * Envoie des notifications Filament quand un nouveau message arrive dans une session support.
@@ -23,6 +27,11 @@ class NotifyOnNewSupportMessage implements ShouldQueue
     public function __construct(
         protected PresenceService $presenceService
     ) {}
+
+    /**
+     * The queue this job should run on.
+     */
+    public string $queue = 'default';
 
     /**
      * Handle the event.
@@ -113,12 +122,86 @@ class NotifyOnNewSupportMessage implements ShouldQueue
 
             $senderName = $session->user?->name ?? $session->metadata['visitor_name'] ?? 'Visiteur';
 
-            Mail::to($user->email)->queue(new NewMessageNotificationMail(
+            // Utiliser le SMTP personnalisé de l'agent IA si disponible
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            $mailable = new NewMessageNotificationMail(
                 session: $session,
                 messagePreview: $messageContent,
                 senderName: $senderName,
-            ));
+            );
+
+            try {
+                if ($smtpConfig) {
+                    $this->sendWithCustomSmtp($user->email, $mailable, $smtpConfig);
+                    Log::info('NewSupportMessage: Email sent via custom SMTP', [
+                        'user_id' => $user->id,
+                        'user_email' => $user->email,
+                        'session_id' => $session->id,
+                    ]);
+                } else {
+                    // Fallback au mailer par défaut
+                    Mail::to($user->email)->send($mailable);
+                    Log::info('NewSupportMessage: Email sent via default mailer', [
+                        'user_id' => $user->id,
+                        'user_email' => $user->email,
+                        'session_id' => $session->id,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                Log::error('NewSupportMessage: Failed to send email', [
+                    'user_id' => $user->id,
+                    'user_email' => $user->email,
+                    'session_id' => $session->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
+    }
+
+    /**
+     * Envoie un email avec une configuration SMTP personnalisée.
+     */
+    protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
+    {
+        $encryption = strtolower($smtpConfig['encryption'] ?? 'tls');
+        $port = (int) $smtpConfig['port'];
+
+        // SSL (port 465): smtps://user:pass@host:465
+        // TLS (port 587): smtp://user:pass@host:587
+        $scheme = ($encryption === 'ssl' || $port === 465) ? 'smtps' : 'smtp';
+
+        $dsn = sprintf(
+            '%s://%s:%s@%s:%d',
+            $scheme,
+            urlencode($smtpConfig['username']),
+            urlencode($smtpConfig['password']),
+            $smtpConfig['host'],
+            $port
+        );
+
+        $transport = Transport::fromDsn($dsn);
+        $mailer = new Mailer($transport);
+
+        // Extraire le sujet de l'Envelope
+        $subject = 'Nouveau message support';
+        if (method_exists($mailable, 'envelope')) {
+            $envelope = $mailable->envelope();
+            $subject = $envelope->subject ?? $subject;
+        }
+
+        // Rendre le contenu HTML
+        $mailable->from($smtpConfig['from_address'], $smtpConfig['from_name']);
+        $htmlContent = $mailable->to($to)->render();
+
+        // Créer et envoyer l'email Symfony
+        $email = (new Email())
+            ->from(new Address($smtpConfig['from_address'], $smtpConfig['from_name']))
+            ->to($to)
+            ->subject($subject)
+            ->html($htmlContent);
+
+        $mailer->send($email);
     }
 
     /**
