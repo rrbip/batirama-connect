@@ -80,6 +80,15 @@ class DispatcherService
         // Sauvegarder le message utilisateur
         $this->ragService->saveMessage($session, 'user', $userMessage);
 
+        // Rafraîchir la session pour avoir le statut actuel (peut avoir été escaladée entre-temps)
+        $session->refresh();
+
+        Log::debug('DispatcherService: Checking escalation status', [
+            'session_id' => $session->id,
+            'support_status' => $session->support_status,
+            'is_escalated' => $session->support_status === 'escalated',
+        ]);
+
         // Si la session est escaladée, créer aussi un message support pour notifier les agents
         if ($session->support_status === 'escalated') {
             $this->createSupportMessageForEscalatedSession($session, $userMessage);
