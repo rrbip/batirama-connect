@@ -248,14 +248,27 @@ class DispatcherService
                 'created_at' => $msg->created_at,
             ]);
 
-        // Messages de support (agent, system)
+        // Messages de support:
+        // - agent et system: toujours inclus
+        // - user: seulement si channel='email' (les channel='chat' sont des doublons de aiMessages)
         $supportMessages = $session->supportMessages()
+            ->where(function ($query) {
+                $query->whereIn('sender_type', ['agent', 'system'])
+                      ->orWhere(function ($q) {
+                          $q->where('sender_type', 'user')
+                            ->where('channel', 'email');
+                      });
+            })
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(fn($msg) => [
-                'role' => $msg->sender_type === 'agent' ? 'support' : 'system',
+                'role' => match($msg->sender_type) {
+                    'agent' => 'support',
+                    'user' => 'user',
+                    default => 'system',
+                },
                 'content' => $msg->content,
-                'sender_name' => $msg->sender?->name ?? null,
+                'sender_name' => $msg->agent?->name ?? null,
                 'created_at' => $msg->created_at,
             ]);
 
