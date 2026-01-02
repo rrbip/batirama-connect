@@ -8,13 +8,15 @@ use App\Models\AiSession;
 use App\Models\SupportMessage;
 use App\Models\User;
 use App\Events\Support\NewSupportMessage;
+use App\Services\AI\DispatcherService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Log;
 
 class SupportService
 {
     public function __construct(
-        protected EscalationService $escalationService
+        protected EscalationService $escalationService,
+        protected DispatcherService $dispatcherService
     ) {}
 
     /**
@@ -109,7 +111,8 @@ class SupportService
         AiSession $session,
         string $content,
         string $channel = 'chat',
-        ?array $emailMetadata = null
+        ?array $emailMetadata = null,
+        bool $triggerAiProcessing = true
     ): SupportMessage {
         $message = SupportMessage::create([
             'session_id' => $session->id,
@@ -135,10 +138,44 @@ class SupportService
             ]),
         ]);
 
-        // Dispatcher l'événement
+        // Dispatcher l'événement pour notifications temps réel
         event(new NewSupportMessage($message));
 
+        // Déclencher le traitement IA si demandé
+        if ($triggerAiProcessing && $session->agent) {
+            $this->triggerAiProcessing($session, $content);
+        }
+
         return $message;
+    }
+
+    /**
+     * Déclenche le traitement IA pour un message utilisateur.
+     * L'IA génère une réponse qui sera visible par l'agent support.
+     */
+    protected function triggerAiProcessing(AiSession $session, string $userMessage): void
+    {
+        try {
+            Log::info('Triggering AI processing for support message', [
+                'session_id' => $session->id,
+                'agent_id' => $session->agent_id,
+            ]);
+
+            // Dispatcher de manière asynchrone pour ne pas bloquer
+            $this->dispatcherService->dispatchAsync(
+                $userMessage,
+                $session->agent,
+                $session->user,
+                $session,
+                'support-email'
+            );
+        } catch (\Throwable $e) {
+            Log::error('Failed to trigger AI processing for support message', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+            // Ne pas lever l'exception - le message support a déjà été créé
+        }
     }
 
     /**
