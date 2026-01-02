@@ -79,15 +79,35 @@ fi
 echo "🔒 Configuration des permissions..."
 mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
 
-# Essayer chown d'abord (fonctionne si root)
-if chown -R www-data:www-data storage bootstrap/cache 2>/dev/null; then
-    chmod -R 775 storage bootstrap/cache
-    echo "   ✅ Permissions configurées (chown)"
+# TOUJOURS appliquer chmod 777 pour les bind mounts (solution la plus fiable)
+# Les bind mounts ne supportent pas bien chown quand l'UID diffère
+chmod -R 777 storage bootstrap/cache 2>/dev/null || {
+    echo "   ⚠️  chmod storage échoué, essai fichier par fichier..."
+    find storage -type d -exec chmod 777 {} \; 2>/dev/null || true
+    find storage -type f -exec chmod 666 {} \; 2>/dev/null || true
+    find bootstrap/cache -type d -exec chmod 777 {} \; 2>/dev/null || true
+    find bootstrap/cache -type f -exec chmod 666 {} \; 2>/dev/null || true
+}
+
+# Double vérification des dossiers critiques
+for dir in storage/framework/views storage/framework/cache storage/framework/sessions storage/logs bootstrap/cache; do
+    if [ -d "$dir" ]; then
+        chmod 777 "$dir" 2>/dev/null || true
+    fi
+done
+
+# Test d'écriture pour valider
+if touch storage/framework/views/.perm_test 2>/dev/null; then
+    rm -f storage/framework/views/.perm_test
+    echo "   ✅ Permissions configurées et validées"
 else
-    # Fallback: chmod 777 si chown échoue (volume monté avec UID différent)
-    chmod -R 777 storage bootstrap/cache 2>/dev/null || true
-    echo "   ✅ Permissions configurées (chmod 777 fallback)"
+    echo "   ❌ ATTENTION: Impossible d'écrire dans storage/framework/views"
+    echo "   ℹ️  Lancez manuellement: docker exec aim_app chmod -R 777 storage bootstrap/cache"
+    ls -la storage/framework/
 fi
+
+# Optionnel: chown pour les cas où ça fonctionne
+chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
 
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
