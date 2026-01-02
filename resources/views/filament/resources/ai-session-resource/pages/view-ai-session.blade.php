@@ -242,7 +242,8 @@
                                 showCorrection: false,
                                 validationQuestion: @js($previousQuestion),
                                 correctionQuestion: @js($previousQuestion),
-                                correctedContent: @js($message['content'])
+                                correctedContent: @js($message['content']),
+                                requiresHandoff: false
                             }">
                                 <div class="max-w-[75%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
@@ -362,19 +363,30 @@
                                                             placeholder="Question du client..."
                                                         ></textarea>
                                                     </div>
+                                                    <div>
+                                                        <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                x-model="requiresHandoff"
+                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
+                                                            />
+                                                            <span>Nécessite toujours un suivi humain</span>
+                                                            <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
+                                                        </label>
+                                                    </div>
                                                     <div class="flex gap-2">
                                                         <x-filament::button
                                                             size="xs"
                                                             color="success"
                                                             icon="heroicon-o-check"
-                                                            x-on:click="$wire.validateMessageWithQuestion({{ $message['original_id'] }}, validationQuestion); showValidation = false"
+                                                            x-on:click="$wire.validateMessageWithQuestion({{ $message['original_id'] }}, validationQuestion, requiresHandoff); showValidation = false; requiresHandoff = false"
                                                         >
                                                             Enregistrer
                                                         </x-filament::button>
                                                         <x-filament::button
                                                             size="xs"
                                                             color="gray"
-                                                            x-on:click="showValidation = false"
+                                                            x-on:click="showValidation = false; requiresHandoff = false"
                                                         >
                                                             Annuler
                                                         </x-filament::button>
@@ -401,19 +413,30 @@
                                                             placeholder="Réponse à enseigner à l'IA..."
                                                         ></textarea>
                                                     </div>
+                                                    <div>
+                                                        <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                x-model="requiresHandoff"
+                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
+                                                            />
+                                                            <span>Nécessite toujours un suivi humain</span>
+                                                            <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
+                                                        </label>
+                                                    </div>
                                                     <div class="flex gap-2">
                                                         <x-filament::button
                                                             size="xs"
                                                             color="primary"
                                                             icon="heroicon-o-check"
-                                                            x-on:click="$wire.learnFromMessageWithQuestion({{ $message['original_id'] }}, correctionQuestion, correctedContent); showCorrection = false"
+                                                            x-on:click="$wire.learnFromMessageWithQuestion({{ $message['original_id'] }}, correctionQuestion, correctedContent, requiresHandoff); showCorrection = false; requiresHandoff = false"
                                                         >
                                                             Enregistrer
                                                         </x-filament::button>
                                                         <x-filament::button
                                                             size="xs"
                                                             color="gray"
-                                                            x-on:click="showCorrection = false"
+                                                            x-on:click="showCorrection = false; requiresHandoff = false"
                                                         >
                                                             Annuler
                                                         </x-filament::button>

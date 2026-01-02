@@ -268,6 +268,7 @@ class RagService
                 'source' => $qr['source'],
                 'category' => $qr['category'],
                 'is_faq' => $qr['is_faq'],
+                'requires_handoff' => $qr['requires_handoff'] ?? false,
                 'context' => $fullContext,
             ]
         );

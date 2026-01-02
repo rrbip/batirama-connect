@@ -26,7 +26,8 @@ class LearningService
         AiMessage $message,
         User $validator,
         ?string $correctedContent = null,
-        ?string $customQuestion = null
+        ?string $customQuestion = null,
+        bool $requiresHandoff = false
     ): bool {
         // Le message doit être une réponse assistant
         if ($message->role !== 'assistant') {
@@ -63,7 +64,8 @@ class LearningService
             agentId: $message->session->agent_id,
             agentSlug: $message->session->agent->slug,
             messageId: $message->id,
-            validatorId: $validator->id
+            validatorId: $validator->id,
+            requiresHandoff: $requiresHandoff
         );
     }
 
@@ -76,7 +78,8 @@ class LearningService
         int $agentId,
         string $agentSlug,
         int $messageId,
-        int $validatorId
+        int $validatorId,
+        bool $requiresHandoff = false
     ): bool {
         // S'assurer que la collection existe
         $this->ensureCollectionExists();
@@ -102,6 +105,7 @@ class LearningService
                     'answer' => $answer,
                     'validated_by' => $validatorId,
                     'validated_at' => now()->toIso8601String(),
+                    'requires_handoff' => $requiresHandoff,
                 ],
             ]
         ]);
@@ -115,7 +119,7 @@ class LearningService
             // 2. Double indexation : indexer aussi dans la collection de l'agent
             $agent = Agent::find($agentId);
             if ($agent) {
-                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId);
+                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId, $requiresHandoff);
             }
         } else {
             Log::error('Failed to upsert learned response to Qdrant', [
@@ -135,7 +139,8 @@ class LearningService
         Agent $agent,
         string $question,
         string $answer,
-        ?int $messageId = null
+        ?int $messageId = null,
+        bool $requiresHandoff = false
     ): ?string {
         if (empty($agent->qdrant_collection)) {
             Log::warning('LearningService: Agent has no Qdrant collection', [
@@ -163,6 +168,7 @@ class LearningService
                 'is_faq' => true,
                 'message_id' => $messageId,
                 'indexed_at' => now()->toIso8601String(),
+                'requires_handoff' => $requiresHandoff,
             ],
         ]]);
 
@@ -189,7 +195,8 @@ class LearningService
         Agent $agent,
         string $question,
         string $answer,
-        int $userId
+        int $userId,
+        bool $requiresHandoff = false
     ): bool {
         // S'assurer que la collection learned_responses existe
         $this->ensureCollectionExists();
@@ -212,6 +219,7 @@ class LearningService
                     'validated_by' => $userId,
                     'validated_at' => now()->toIso8601String(),
                     'source' => 'manual',
+                    'requires_handoff' => $requiresHandoff,
                 ],
             ]
         ]);
@@ -222,7 +230,7 @@ class LearningService
             ]);
 
             // 2. Double indexation : indexer aussi dans la collection de l'agent
-            $this->indexFaqInAgentCollection($agent, $question, $answer, null);
+            $this->indexFaqInAgentCollection($agent, $question, $answer, null, $requiresHandoff);
         }
 
         return $result;
@@ -272,10 +280,10 @@ class LearningService
      * Valide un message ET l'ajoute à la base d'apprentissage
      * (la réponse originale est considérée comme correcte)
      */
-    public function validate(AiMessage $message, int $validatorId, ?string $customQuestion = null): bool
+    public function validate(AiMessage $message, int $validatorId, ?string $customQuestion = null, bool $requiresHandoff = false): bool
     {
-        // Si c'est un direct_qr_match avec une question modifiée, on ré-indexe avec la nouvelle question
-        if ($message->model_used === 'direct_qr_match' && empty($customQuestion)) {
+        // Si c'est un direct_qr_match avec une question modifiée ou un flag handoff, on ré-indexe
+        if ($message->model_used === 'direct_qr_match' && empty($customQuestion) && !$requiresHandoff) {
             Log::info('Skip learning for direct_qr_match - already in learned_responses', [
                 'message_id' => $message->id,
             ]);
@@ -296,7 +304,7 @@ class LearningService
         }
 
         // Valider ET apprendre (sans correction = réponse originale, avec question optionnelle)
-        return $this->validateAndLearn($message, $validator, null, $customQuestion);
+        return $this->validateAndLearn($message, $validator, null, $customQuestion, $requiresHandoff);
     }
 
     /**
@@ -314,14 +322,14 @@ class LearningService
     /**
      * Apprend d'un message corrigé
      */
-    public function learn(AiMessage $message, string $correctedContent, int $validatorId): bool
+    public function learn(AiMessage $message, string $correctedContent, int $validatorId, bool $requiresHandoff = false): bool
     {
         $validator = User::find($validatorId);
         if (!$validator) {
             return false;
         }
 
-        return $this->validateAndLearn($message, $validator, $correctedContent);
+        return $this->validateAndLearn($message, $validator, $correctedContent, null, $requiresHandoff);
     }
 
     /**
@@ -331,14 +339,15 @@ class LearningService
         AiMessage $message,
         string $customQuestion,
         string $correctedContent,
-        int $validatorId
+        int $validatorId,
+        bool $requiresHandoff = false
     ): bool {
         $validator = User::find($validatorId);
         if (!$validator) {
             return false;
         }
 
-        return $this->validateAndLearn($message, $validator, $correctedContent, $customQuestion);
+        return $this->validateAndLearn($message, $validator, $correctedContent, $customQuestion, $requiresHandoff);
     }
 
     /**

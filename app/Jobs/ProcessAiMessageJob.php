@@ -122,15 +122,21 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // 1. L'IA a ajouté le marqueur [HANDOFF_NEEDED]
             // 2. OU l'utilisateur a explicitement demandé un humain
             // 3. OU le score RAG est inférieur au seuil d'escalade
+            // 4. OU la réponse apprise a été marquée comme nécessitant un handoff
             if ($agent->human_support_enabled) {
                 $maxRagScore = $this->extractMaxRagScore($response->raw);
                 $escalationThreshold = $agent->escalation_threshold ?? 0.60;
                 $scoreBelowThreshold = $maxRagScore < $escalationThreshold;
 
-                if ($needsHandoff || $userRequestsHuman || $scoreBelowThreshold) {
+                // Vérifier si c'est un direct_qr_match avec requires_handoff
+                $isDirectQrWithHandoff = ($response->raw['direct_qr'] ?? false)
+                    && ($response->raw['requires_handoff'] ?? false);
+
+                if ($needsHandoff || $userRequestsHuman || $scoreBelowThreshold || $isDirectQrWithHandoff) {
                     $reason = match (true) {
                         $userRequestsHuman => 'user_explicit_request',
                         $needsHandoff => 'ai_handoff_request',
+                        $isDirectQrWithHandoff => 'learned_response_handoff',
                         $scoreBelowThreshold => 'low_rag_score',
                         default => 'unknown',
                     };
@@ -144,6 +150,7 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                         'max_rag_score' => $maxRagScore,
                         'escalation_threshold' => $escalationThreshold,
                         'score_below_threshold' => $scoreBelowThreshold,
+                        'is_direct_qr_with_handoff' => $isDirectQrWithHandoff,
                     ]);
                 }
             }

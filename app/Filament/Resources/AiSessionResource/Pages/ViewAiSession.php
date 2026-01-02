@@ -464,7 +464,7 @@ class ViewAiSession extends ViewRecord
         }
     }
 
-    public function learnFromMessage(int $messageId, string $correctedContent): void
+    public function learnFromMessage(int $messageId, string $correctedContent, bool $requiresHandoff = false): void
     {
         $message = AiMessage::findOrFail($messageId);
 
@@ -485,7 +485,8 @@ class ViewAiSession extends ViewRecord
             $result = app(LearningService::class)->learn(
                 $message,
                 $correctedContent,
-                auth()->id()
+                auth()->id(),
+                $requiresHandoff
             );
 
             if ($result) {
@@ -533,7 +534,7 @@ class ViewAiSession extends ViewRecord
     /**
      * Valide un message avec possibilité de modifier la question pour l'apprentissage.
      */
-    public function validateMessageWithQuestion(int $messageId, string $question): void
+    public function validateMessageWithQuestion(int $messageId, string $question, bool $requiresHandoff = false): void
     {
         $message = AiMessage::findOrFail($messageId);
 
@@ -551,7 +552,7 @@ class ViewAiSession extends ViewRecord
         }
 
         try {
-            app(LearningService::class)->validate($message, auth()->id(), trim($question));
+            app(LearningService::class)->validate($message, auth()->id(), trim($question), $requiresHandoff);
 
             // Broadcast au standalone si support humain actif
             $message->refresh();
@@ -588,7 +589,7 @@ class ViewAiSession extends ViewRecord
     /**
      * Apprend d'un message avec question et réponse modifiées.
      */
-    public function learnFromMessageWithQuestion(int $messageId, string $question, string $answer): void
+    public function learnFromMessageWithQuestion(int $messageId, string $question, string $answer, bool $requiresHandoff = false): void
     {
         $message = AiMessage::findOrFail($messageId);
 
@@ -610,7 +611,8 @@ class ViewAiSession extends ViewRecord
                 $message,
                 trim($question),
                 trim($answer),
-                auth()->id()
+                auth()->id(),
+                $requiresHandoff
             );
 
             if ($result) {
