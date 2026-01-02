@@ -1261,6 +1261,14 @@
                             state.asyncMode = historyResponse.data.async_mode;
                             console.log('📧 Async mode:', state.asyncMode, '(within hours:', historyResponse.data.within_support_hours, ')');
                         }
+                        // Ajouter le message système d'escalade si nécessaire (pour les sessions restaurées)
+                        if (state.isHumanSupportActive) {
+                            if (state.asyncMode) {
+                                addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller vous répondra dès que possible.');
+                            } else {
+                                addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller va vous répondre.');
+                            }
+                        }
                         // Si escaladé en mode async sans email, montrer le formulaire
                         if (historyResponse.data.support_status === 'escalated' && historyResponse.data.async_mode && !historyResponse.data.user_email) {
                             setTimeout(showEmailForm, 500);
@@ -1281,6 +1289,8 @@
                         if (sessionResponse.support_status && ['escalated', 'assigned'].includes(sessionResponse.support_status)) {
                             state.isHumanSupportActive = true;
                             console.log('🔄 Restored human support mode from session:', sessionResponse.support_status);
+                            // Ajouter le message système d'escalade
+                            addSystemMessage('Votre demande a été transmise à notre équipe. Un conseiller va vous répondre.');
                         }
                     }
 
