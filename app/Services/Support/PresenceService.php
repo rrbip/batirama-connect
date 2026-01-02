@@ -64,7 +64,21 @@ class PresenceService
     public function getConnectedAgents(int $agentId): array
     {
         $channelName = "presence-agent.{$agentId}.support";
-        return $this->fetchChannelMembers($channelName);
+
+        Log::info('PresenceService: Fetching connected agents', [
+            'agent_id' => $agentId,
+            'channel' => $channelName,
+        ]);
+
+        $members = $this->fetchChannelMembers($channelName);
+
+        Log::info('PresenceService: Connected agents result', [
+            'agent_id' => $agentId,
+            'members_count' => count($members),
+            'members' => $members,
+        ]);
+
+        return $members;
     }
 
     /**
@@ -157,17 +171,35 @@ class PresenceService
                     'auth_signature' => $authSignature,
                 ]);
 
+            Log::debug('PresenceService: Soketi API response', [
+                'channel' => $channelName,
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
             if ($response->successful()) {
                 $data = $response->json();
-                return $data['users'] ?? [];
+                $users = $data['users'] ?? [];
+
+                Log::info('PresenceService: Soketi returned users', [
+                    'channel' => $channelName,
+                    'users_count' => count($users),
+                    'raw_users' => $users,
+                ]);
+
+                return $users;
             }
 
             // Canal inexistant = aucun membre
             if ($response->status() === 404) {
+                Log::info('PresenceService: Channel not found (no members)', [
+                    'channel' => $channelName,
+                ]);
                 return [];
             }
 
             Log::warning('Soketi API returned error', [
+                'channel' => $channelName,
                 'status' => $response->status(),
                 'body' => $response->body(),
             ]);
