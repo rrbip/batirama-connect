@@ -1,0 +1,50 @@
+# ===========================================
+# Docker Ignore - Accélère le build
+# ===========================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Dependencies (installées dans le conteneur)
+/vendor
+/node_modules
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# Cache et logs locaux
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/bootstrap/cache/*
+
+# Tests et développement
+/tests
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache
+
+# Documentation
+*.md
+!README.md
+/docs
+
+# Docker (évite boucle récursive)
+docker-compose*.yml
+Dockerfile*
+
+# Autres
+.DS_Store
+Thumbs.db
+*.log
