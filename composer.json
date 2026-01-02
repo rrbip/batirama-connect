@@ -22,7 +22,8 @@
         "pusher/pusher-php-server": "^7.2",
         "smalot/pdfparser": "^2.12",
         "symfony/dom-crawler": "^7.0",
-        "thiagoalessio/tesseract_ocr": "^2.13"
+        "thiagoalessio/tesseract_ocr": "^2.13",
+        "webklex/php-imap": "^6.2"
     },
     "require-dev": {
         "darkaonline/l5-swagger": "^9.0",

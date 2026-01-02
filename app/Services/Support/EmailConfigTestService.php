@@ -10,6 +10,7 @@ use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Email;
+use Webklex\PHPIMAP\ClientManager;
 
 class EmailConfigTestService
 {
@@ -153,7 +154,7 @@ class EmailConfigTestService
         // Vérifications de base
         $diagnostics[] = "";
         $diagnostics[] = "Extension OpenSSL : " . (extension_loaded('openssl') ? "✓ Installée" : "✗ Manquante");
-        $diagnostics[] = "Extension IMAP    : " . (function_exists('imap_open') ? "✓ Installée" : "✗ Manquante");
+        $diagnostics[] = "Librairie IMAP    : ✓ webklex/php-imap (PHP pur)";
         $diagnostics[] = "";
 
         // Suggestions basées sur les erreurs SMTP
@@ -195,7 +196,7 @@ class EmailConfigTestService
             $diagnostics[] = "";
             $diagnostics[] = "💡 SUGGESTIONS IMAP :";
 
-            if (str_contains($imapError, 'Authentication') || str_contains($imapError, 'LOGIN')) {
+            if (str_contains($imapError, 'Authentication') || str_contains($imapError, 'LOGIN') || str_contains($imapError, 'authentication')) {
                 $diagnostics[] = "   • Mêmes identifiants que SMTP généralement";
                 $diagnostics[] = "   • Vérifiez que l'accès IMAP est activé sur la boîte mail";
             }
@@ -214,11 +215,6 @@ class EmailConfigTestService
 
     /**
      * Teste la configuration email complète (SMTP + IMAP).
-     *
-     * @param array $smtpConfig Configuration SMTP
-     * @param array $imapConfig Configuration IMAP
-     * @param string $testEmail Email de destination (généralement le même que l'email de support)
-     * @return array Résultats des tests
      */
     public function testFullConfiguration(array $smtpConfig, array $imapConfig, string $testEmail): array
     {
@@ -263,45 +259,33 @@ class EmailConfigTestService
                 ];
             }
 
-            // Construire le DSN Symfony Mailer
-            // - smtps:// = SSL implicite (port 465)
-            // - smtp:// = STARTTLS ou plain text (port 587, 25)
             $encryption = strtolower($config['encryption'] ?? 'tls');
             $port = (int) $config['port'];
 
-            // Déterminer le schéma
             if ($encryption === 'ssl' || $port === 465) {
                 $scheme = 'smtps';
-                $queryParams = '';
             } else {
                 $scheme = 'smtp';
-                // Pour TLS (STARTTLS), on utilise smtp:// et Symfony détecte automatiquement
-                // Mais on peut forcer avec verify_peer=0 si problème de certificat
-                $queryParams = '';
             }
 
             $dsn = sprintf(
-                '%s://%s:%s@%s:%d%s',
+                '%s://%s:%s@%s:%d',
                 $scheme,
                 urlencode($config['username']),
                 urlencode($config['password']),
                 $config['host'],
-                $port,
-                $queryParams
+                $port
             );
 
             Log::debug('Testing SMTP connection', [
                 'host' => $config['host'],
                 'port' => $port,
                 'scheme' => $scheme,
-                'encryption' => $encryption,
             ]);
 
-            // Créer le transport et le mailer
             $transport = Transport::fromDsn($dsn);
             $mailer = new Mailer($transport);
 
-            // Créer l'email de test
             $email = (new Email())
                 ->from($config['from_address'] ?? $config['username'])
                 ->to($testEmail)
@@ -309,13 +293,11 @@ class EmailConfigTestService
                 ->text("Ceci est un email de test automatique.\n\nID: {$this->testMessageId}\nDate: " . now()->format('d/m/Y H:i:s'))
                 ->html("<p>Ceci est un email de test automatique.</p><p><strong>ID:</strong> {$this->testMessageId}<br><strong>Date:</strong> " . now()->format('d/m/Y H:i:s') . '</p>');
 
-            // Envoyer
             $mailer->send($email);
 
             Log::info('SMTP test successful', [
                 'host' => $config['host'],
                 'to' => $testEmail,
-                'test_id' => $this->testMessageId,
             ]);
 
             return [
@@ -330,7 +312,6 @@ class EmailConfigTestService
             Log::error('SMTP test failed', [
                 'host' => $config['host'] ?? 'unknown',
                 'error' => $e->getMessage(),
-                'parsed_error' => $errorMessage,
             ]);
 
             return [
@@ -341,11 +322,6 @@ class EmailConfigTestService
             ];
 
         } catch (\Throwable $e) {
-            Log::error('SMTP test failed with unexpected error', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
             return [
                 'success' => false,
                 'message' => 'Erreur inattendue: ' . $e->getMessage(),
@@ -357,20 +333,11 @@ class EmailConfigTestService
 
     /**
      * Teste la connexion IMAP et vérifie si l'email de test a été reçu.
+     * Utilise webklex/php-imap (librairie PHP pure).
      */
     public function testImapReception(array $config): array
     {
-        // Vérifier si l'extension IMAP est disponible
-        if (!function_exists('imap_open')) {
-            return [
-                'success' => false,
-                'message' => 'L\'extension PHP IMAP n\'est pas installée sur le serveur.',
-                'error_type' => 'extension_missing',
-            ];
-        }
-
         try {
-            // Valider la configuration
             $validation = $this->validateImapConfig($config);
             if (!$validation['valid']) {
                 return [
@@ -380,100 +347,87 @@ class EmailConfigTestService
                 ];
             }
 
-            $encryption = strtolower($config['encryption'] ?? 'ssl');
-            $port = (int) ($config['port'] ?? 993);
-            $folder = $config['folder'] ?? 'INBOX';
+            $clientManager = new ClientManager();
 
-            // Construire la chaîne de connexion IMAP
-            $flags = '/imap';
-            if ($encryption === 'ssl') {
-                $flags .= '/ssl';
-            } elseif ($encryption === 'tls') {
-                $flags .= '/tls';
-            }
-            $flags .= '/novalidate-cert';
-
-            $mailbox = '{' . $config['host'] . ':' . $port . $flags . '}' . $folder;
+            $client = $clientManager->make([
+                'host' => $config['host'],
+                'port' => (int) ($config['port'] ?? 993),
+                'encryption' => strtolower($config['encryption'] ?? 'ssl'),
+                'validate_cert' => $config['validate_cert'] ?? false,
+                'username' => $config['username'],
+                'password' => $config['password'],
+                'protocol' => 'imap',
+            ]);
 
             Log::debug('Testing IMAP connection', [
                 'host' => $config['host'],
-                'port' => $port,
-                'mailbox' => $mailbox,
+                'port' => $config['port'] ?? 993,
             ]);
 
-            // Connexion IMAP
-            $connection = @imap_open(
-                $mailbox,
-                $config['username'],
-                $config['password'],
-                0,
-                1, // Nombre de tentatives
-                ['DISABLE_AUTHENTICATOR' => 'GSSAPI']
-            );
+            $client->connect();
 
-            if (!$connection) {
-                $error = imap_last_error();
+            $folder = $client->getFolder($config['folder'] ?? 'INBOX');
+
+            if (!$folder) {
+                $client->disconnect();
                 return [
                     'success' => false,
-                    'message' => $this->parseImapError($error),
-                    'error_type' => 'connection',
-                    'raw_error' => $error,
+                    'message' => 'Dossier IMAP introuvable',
+                    'error_type' => 'folder_not_found',
                 ];
             }
 
             // Chercher l'email de test
-            $emails = imap_search($connection, 'SUBJECT "' . $this->testMessageId . '"');
+            $messages = $folder->query()
+                ->subject($this->testMessageId)
+                ->get();
 
-            $testEmailFound = !empty($emails);
+            $testEmailFound = $messages->count() > 0;
 
             // Si trouvé, supprimer l'email de test
             if ($testEmailFound) {
-                foreach ($emails as $emailNum) {
-                    imap_delete($connection, $emailNum);
+                foreach ($messages as $message) {
+                    $message->delete();
                 }
-                imap_expunge($connection);
             }
 
-            // Récupérer quelques infos sur la boîte
-            $check = imap_check($connection);
-            $messageCount = $check->Nmsgs ?? 0;
+            // Compter les messages
+            $allMessages = $folder->query()->all()->count();
 
-            imap_close($connection);
+            $client->disconnect();
 
             Log::info('IMAP test completed', [
                 'host' => $config['host'],
                 'test_email_found' => $testEmailFound,
-                'message_count' => $messageCount,
-                'test_id' => $this->testMessageId,
+                'message_count' => $allMessages,
             ]);
 
             if ($testEmailFound) {
                 return [
                     'success' => true,
-                    'message' => "Connexion IMAP réussie et email de test reçu ({$messageCount} messages dans la boîte)",
+                    'message' => "Connexion IMAP réussie et email de test reçu ({$allMessages} messages dans la boîte)",
                     'email_found' => true,
-                    'message_count' => $messageCount,
+                    'message_count' => $allMessages,
                 ];
             } else {
                 return [
                     'success' => true,
-                    'message' => "Connexion IMAP réussie ({$messageCount} messages). L'email de test n'est pas encore arrivé (peut prendre quelques secondes).",
+                    'message' => "Connexion IMAP réussie ({$allMessages} messages). L'email de test n'est pas encore arrivé.",
                     'email_found' => false,
                     'warning' => true,
-                    'message_count' => $messageCount,
+                    'message_count' => $allMessages,
                 ];
             }
 
         } catch (\Throwable $e) {
-            Log::error('IMAP test failed with unexpected error', [
+            Log::error('IMAP test failed', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
                 'success' => false,
                 'message' => $this->parseImapError($e->getMessage()),
-                'error_type' => 'unexpected',
+                'error_type' => 'connection',
                 'raw_error' => $e->getMessage(),
             ];
         }
@@ -484,14 +438,6 @@ class EmailConfigTestService
      */
     public function testImapConnection(array $config): array
     {
-        if (!function_exists('imap_open')) {
-            return [
-                'success' => false,
-                'message' => 'L\'extension PHP IMAP n\'est pas installée sur le serveur.',
-                'error_type' => 'extension_missing',
-            ];
-        }
-
         try {
             $validation = $this->validateImapConfig($config);
             if (!$validation['valid']) {
@@ -502,42 +448,24 @@ class EmailConfigTestService
                 ];
             }
 
-            $encryption = strtolower($config['encryption'] ?? 'ssl');
-            $port = (int) ($config['port'] ?? 993);
-            $folder = $config['folder'] ?? 'INBOX';
+            $clientManager = new ClientManager();
 
-            $flags = '/imap';
-            if ($encryption === 'ssl') {
-                $flags .= '/ssl';
-            } elseif ($encryption === 'tls') {
-                $flags .= '/tls';
-            }
-            $flags .= '/novalidate-cert';
+            $client = $clientManager->make([
+                'host' => $config['host'],
+                'port' => (int) ($config['port'] ?? 993),
+                'encryption' => strtolower($config['encryption'] ?? 'ssl'),
+                'validate_cert' => $config['validate_cert'] ?? false,
+                'username' => $config['username'],
+                'password' => $config['password'],
+                'protocol' => 'imap',
+            ]);
 
-            $mailbox = '{' . $config['host'] . ':' . $port . $flags . '}' . $folder;
+            $client->connect();
 
-            $connection = @imap_open(
-                $mailbox,
-                $config['username'],
-                $config['password'],
-                0,
-                1,
-                ['DISABLE_AUTHENTICATOR' => 'GSSAPI']
-            );
+            $folder = $client->getFolder($config['folder'] ?? 'INBOX');
+            $messageCount = $folder ? $folder->query()->all()->count() : 0;
 
-            if (!$connection) {
-                $error = imap_last_error();
-                return [
-                    'success' => false,
-                    'message' => $this->parseImapError($error),
-                    'error_type' => 'connection',
-                    'raw_error' => $error,
-                ];
-            }
-
-            $check = imap_check($connection);
-            $messageCount = $check->Nmsgs ?? 0;
-            imap_close($connection);
+            $client->disconnect();
 
             return [
                 'success' => true,
@@ -601,16 +529,14 @@ class EmailConfigTestService
     {
         $message = $e->getMessage();
 
-        // Erreurs de connexion
         if (str_contains($message, 'Connection refused') || str_contains($message, 'Connection timed out')) {
-            return 'Impossible de se connecter au serveur SMTP. Vérifiez l\'adresse du serveur et le port.';
+            return 'Impossible de se connecter au serveur SMTP. Vérifiez l\'adresse et le port.';
         }
 
         if (str_contains($message, 'getaddrinfo') || str_contains($message, 'could not be resolved')) {
-            return 'Adresse du serveur SMTP invalide ou introuvable. Vérifiez le nom du serveur.';
+            return 'Adresse du serveur SMTP invalide ou introuvable.';
         }
 
-        // Erreurs d'authentification
         if (str_contains($message, 'Authentication failed') || str_contains($message, '535')) {
             return 'Authentification SMTP échouée. Vérifiez l\'identifiant et le mot de passe.';
         }
@@ -619,14 +545,8 @@ class EmailConfigTestService
             return 'Identifiant ou mot de passe incorrect. Pour Gmail, utilisez un mot de passe d\'application.';
         }
 
-        // Erreurs SSL/TLS
         if (str_contains($message, 'SSL') || str_contains($message, 'TLS') || str_contains($message, 'certificate')) {
-            return 'Erreur de chiffrement SSL/TLS. Vérifiez le type de chiffrement et le port (SSL=465, TLS=587).';
-        }
-
-        // Erreur de port
-        if (str_contains($message, 'port')) {
-            return 'Erreur de port. Vérifiez que le port correspond au chiffrement (SSL=465, TLS=587, None=25).';
+            return 'Erreur de chiffrement SSL/TLS. Vérifiez le type de chiffrement et le port.';
         }
 
         return 'Erreur SMTP: ' . Str::limit($message, 200);
@@ -637,37 +557,26 @@ class EmailConfigTestService
      */
     protected function parseImapError(string $error): string
     {
-        // Erreurs de connexion
-        if (str_contains($error, 'Connection refused') || str_contains($error, 'Connection timed out')) {
-            return 'Impossible de se connecter au serveur IMAP. Vérifiez l\'adresse du serveur et le port.';
+        $errorLower = strtolower($error);
+
+        if (str_contains($errorLower, 'connection refused') || str_contains($errorLower, 'connection timed out')) {
+            return 'Impossible de se connecter au serveur IMAP. Vérifiez l\'adresse et le port.';
         }
 
-        if (str_contains($error, 'getaddrinfo') || str_contains($error, 'could not be resolved') || str_contains($error, 'Unknown host')) {
-            return 'Adresse du serveur IMAP invalide ou introuvable. Vérifiez le nom du serveur.';
+        if (str_contains($errorLower, 'getaddrinfo') || str_contains($errorLower, 'unknown host')) {
+            return 'Adresse du serveur IMAP invalide ou introuvable.';
         }
 
-        // Erreurs d'authentification
-        if (str_contains($error, 'AUTHENTICATIONFAILED') || str_contains($error, 'Invalid credentials') || str_contains($error, 'authentication failed')) {
+        if (str_contains($errorLower, 'authentication') || str_contains($errorLower, 'login failed') || str_contains($errorLower, 'invalid credentials')) {
             return 'Authentification IMAP échouée. Vérifiez l\'identifiant et le mot de passe.';
         }
 
-        if (str_contains($error, 'LOGIN failed') || str_contains($error, 'NO LOGIN')) {
-            return 'Connexion refusée. Vérifiez vos identifiants ou activez l\'accès IMAP dans les paramètres de votre boîte mail.';
+        if (str_contains($errorLower, 'ssl') || str_contains($errorLower, 'tls') || str_contains($errorLower, 'certificate')) {
+            return 'Erreur de chiffrement SSL/TLS. Vérifiez le type de chiffrement et le port.';
         }
 
-        // Erreurs SSL/TLS
-        if (str_contains($error, 'SSL') || str_contains($error, 'TLS') || str_contains($error, 'certificate')) {
-            return 'Erreur de chiffrement SSL/TLS. Vérifiez le type de chiffrement et le port (SSL=993, TLS=143).';
-        }
-
-        // Dossier introuvable
-        if (str_contains($error, 'Mailbox') || str_contains($error, 'folder') || str_contains($error, 'INBOX')) {
-            return 'Dossier mail introuvable. Vérifiez le nom du dossier (généralement INBOX).';
-        }
-
-        // Can't open mailbox
-        if (str_contains($error, "Can't open mailbox") || str_contains($error, 'can not open')) {
-            return 'Impossible d\'ouvrir la boîte mail. Vérifiez le serveur, le port et les identifiants.';
+        if (str_contains($errorLower, 'mailbox') || str_contains($errorLower, 'folder')) {
+            return 'Dossier mail introuvable. Vérifiez le nom du dossier.';
         }
 
         return 'Erreur IMAP: ' . Str::limit($error, 200);
