@@ -51,7 +51,10 @@ class NotifySupportAgentsOnEscalation implements ShouldQueue
         }
 
         // Notifier également les super-admins
-        $superAdmins = \App\Models\User::role('super-admin')->get();
+        $superAdmins = \App\Models\User::whereHas('roles', function ($query) {
+            $query->where('name', 'super-admin');
+        })->get();
+
         foreach ($superAdmins as $admin) {
             // Éviter les doublons si l'admin est aussi agent support
             if (!$supportUsers->contains('id', $admin->id)) {
