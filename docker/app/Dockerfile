@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # PDF utilities
     poppler-utils \
     # IMAP pour réception des emails de support
-    libc-client-dev \
+    libc-client2007e-dev \
     libkrb5-dev \
     && rm -rf /var/lib/apt/lists/*
 
