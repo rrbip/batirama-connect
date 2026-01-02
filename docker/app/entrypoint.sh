@@ -73,10 +73,21 @@ else
     echo "✅ Dépendances à jour"
 fi
 
-# Créer les dossiers Laravel et fixer les permissions
+# ===========================================
+# PERMISSIONS (critique pour les volumes montés)
+# ===========================================
+echo "🔒 Configuration des permissions..."
 mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
-chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
-chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
+# Essayer chown d'abord (fonctionne si root)
+if chown -R www-data:www-data storage bootstrap/cache 2>/dev/null; then
+    chmod -R 775 storage bootstrap/cache
+    echo "   ✅ Permissions configurées (chown)"
+else
+    # Fallback: chmod 777 si chown échoue (volume monté avec UID différent)
+    chmod -R 777 storage bootstrap/cache 2>/dev/null || true
+    echo "   ✅ Permissions configurées (chmod 777 fallback)"
+fi
 
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
