@@ -25,7 +25,8 @@ class LearningService
     public function validateAndLearn(
         AiMessage $message,
         User $validator,
-        ?string $correctedContent = null
+        ?string $correctedContent = null,
+        ?string $customQuestion = null
     ): bool {
         // Le message doit être une réponse assistant
         if ($message->role !== 'assistant') {
@@ -43,9 +44,9 @@ class LearningService
             throw new \RuntimeException("Aucune question utilisateur trouvée avant ce message assistant (ID: {$message->id})");
         }
 
-        // Contenu à apprendre
+        // Contenu à apprendre (question personnalisée ou originale)
         $answerContent = $correctedContent ?? $message->content;
-        $question = $questionMessage->content;
+        $question = $customQuestion ?? $questionMessage->content;
 
         // Mettre à jour le statut du message
         $message->update([
@@ -271,11 +272,10 @@ class LearningService
      * Valide un message ET l'ajoute à la base d'apprentissage
      * (la réponse originale est considérée comme correcte)
      */
-    public function validate(AiMessage $message, int $validatorId): bool
+    public function validate(AiMessage $message, int $validatorId, ?string $customQuestion = null): bool
     {
-        // Si c'est un direct_qr_match, la réponse vient déjà de learned_responses
-        // Donc on ne ré-indexe pas, on marque juste comme validé
-        if ($message->model_used === 'direct_qr_match') {
+        // Si c'est un direct_qr_match avec une question modifiée, on ré-indexe avec la nouvelle question
+        if ($message->model_used === 'direct_qr_match' && empty($customQuestion)) {
             Log::info('Skip learning for direct_qr_match - already in learned_responses', [
                 'message_id' => $message->id,
             ]);
@@ -295,8 +295,8 @@ class LearningService
             ]);
         }
 
-        // Valider ET apprendre (sans correction = réponse originale)
-        return $this->validateAndLearn($message, $validator, null);
+        // Valider ET apprendre (sans correction = réponse originale, avec question optionnelle)
+        return $this->validateAndLearn($message, $validator, null, $customQuestion);
     }
 
     /**
@@ -322,6 +322,23 @@ class LearningService
         }
 
         return $this->validateAndLearn($message, $validator, $correctedContent);
+    }
+
+    /**
+     * Apprend d'un message avec question et réponse personnalisées
+     */
+    public function learnWithQuestion(
+        AiMessage $message,
+        string $customQuestion,
+        string $correctedContent,
+        int $validatorId
+    ): bool {
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return false;
+        }
+
+        return $this->validateAndLearn($message, $validator, $correctedContent, $customQuestion);
     }
 
     /**

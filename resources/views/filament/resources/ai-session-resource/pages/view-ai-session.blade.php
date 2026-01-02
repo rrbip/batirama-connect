@@ -230,7 +230,20 @@
 
                         {{-- Message IA (gauche, gris) --}}
                         @elseif($isAi)
-                            <div class="flex justify-start" x-data="{ showCorrection: false, correctedContent: @js($message['content']) }">
+                            @php
+                                // Trouver la question utilisateur (message précédent)
+                                $previousQuestion = '';
+                                if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
+                                    $previousQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
+                                }
+                            @endphp
+                            <div class="flex justify-start" x-data="{
+                                showValidation: false,
+                                showCorrection: false,
+                                validationQuestion: @js($previousQuestion),
+                                correctionQuestion: @js($previousQuestion),
+                                correctedContent: @js($message['content'])
+                            }">
                                 <div class="max-w-[75%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
                                         {{-- Header IA --}}
@@ -312,7 +325,7 @@
                                                         size="xs"
                                                         color="success"
                                                         icon="heroicon-o-check"
-                                                        wire:click="validateMessage({{ $message['original_id'] }})"
+                                                        x-on:click="showValidation = !showValidation; showCorrection = false"
                                                     >
                                                         Valider
                                                     </x-filament::button>
@@ -321,7 +334,7 @@
                                                         size="xs"
                                                         color="primary"
                                                         icon="heroicon-o-pencil"
-                                                        x-on:click="showCorrection = !showCorrection"
+                                                        x-on:click="showCorrection = !showCorrection; showValidation = false"
                                                     >
                                                         Corriger
                                                     </x-filament::button>
@@ -338,19 +351,62 @@
                                                     @endif
                                                 </div>
 
-                                                {{-- Formulaire de correction --}}
-                                                <div x-show="showCorrection" x-cloak class="mt-3 space-y-2">
-                                                    <textarea
-                                                        x-model="correctedContent"
-                                                        rows="4"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                        placeholder="Entrez la réponse corrigée..."
-                                                    ></textarea>
+                                                {{-- Formulaire de validation (avec question modifiable) --}}
+                                                <div x-show="showValidation" x-cloak class="mt-3 pt-3 border-t border-success-200 dark:border-success-700 space-y-3">
+                                                    <div>
+                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question (du client)</label>
+                                                        <textarea
+                                                            x-model="validationQuestion"
+                                                            rows="2"
+                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                            placeholder="Question du client..."
+                                                        ></textarea>
+                                                    </div>
+                                                    <div class="flex gap-2">
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="success"
+                                                            icon="heroicon-o-check"
+                                                            x-on:click="$wire.validateMessageWithQuestion({{ $message['original_id'] }}, validationQuestion); showValidation = false"
+                                                        >
+                                                            Enregistrer
+                                                        </x-filament::button>
+                                                        <x-filament::button
+                                                            size="xs"
+                                                            color="gray"
+                                                            x-on:click="showValidation = false"
+                                                        >
+                                                            Annuler
+                                                        </x-filament::button>
+                                                    </div>
+                                                </div>
+
+                                                {{-- Formulaire de correction (question + réponse modifiables) --}}
+                                                <div x-show="showCorrection" x-cloak class="mt-3 pt-3 border-t border-primary-200 dark:border-primary-700 space-y-3">
+                                                    <div>
+                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question (du client)</label>
+                                                        <textarea
+                                                            x-model="correctionQuestion"
+                                                            rows="2"
+                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                            placeholder="Question du client..."
+                                                        ></textarea>
+                                                    </div>
+                                                    <div>
+                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Réponse (à enseigner)</label>
+                                                        <textarea
+                                                            x-model="correctedContent"
+                                                            rows="4"
+                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                            placeholder="Réponse à enseigner à l'IA..."
+                                                        ></textarea>
+                                                    </div>
                                                     <div class="flex gap-2">
                                                         <x-filament::button
                                                             size="xs"
                                                             color="primary"
-                                                            x-on:click="$wire.learnFromMessage({{ $message['original_id'] }}, correctedContent); showCorrection = false"
+                                                            icon="heroicon-o-check"
+                                                            x-on:click="$wire.learnFromMessageWithQuestion({{ $message['original_id'] }}, correctionQuestion, correctedContent); showCorrection = false"
                                                         >
                                                             Enregistrer
                                                         </x-filament::button>

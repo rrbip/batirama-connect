@@ -531,6 +531,129 @@ class ViewAiSession extends ViewRecord
     }
 
     /**
+     * Valide un message avec possibilité de modifier la question pour l'apprentissage.
+     */
+    public function validateMessageWithQuestion(int $messageId, string $question): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty(trim($question))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question ne peut pas être vide.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            app(LearningService::class)->validate($message, auth()->id(), trim($question));
+
+            // Broadcast au standalone si support humain actif
+            $message->refresh();
+            if ($this->record->isEscalated()) {
+                broadcast(new AiMessageValidated($message));
+            }
+
+            // Envoyer par email si le client a fourni son email (mode async)
+            if ($this->record->user_email) {
+                app(SupportService::class)->sendValidatedAiMessageByEmail(
+                    $this->record,
+                    $message,
+                    auth()->user()
+                );
+            }
+
+            Notification::make()
+                ->title('Réponse validée')
+                ->body($this->record->user_email
+                    ? 'La réponse a été validée avec la question modifiée et envoyée par email.'
+                    : 'La réponse a été validée avec la question modifiée.')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Apprend d'un message avec question et réponse modifiées.
+     */
+    public function learnFromMessageWithQuestion(int $messageId, string $question, string $answer): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty(trim($question)) || empty(trim($answer))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question et la réponse ne peuvent pas être vides.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $result = app(LearningService::class)->learnWithQuestion(
+                $message,
+                trim($question),
+                trim($answer),
+                auth()->id()
+            );
+
+            if ($result) {
+                // Broadcast au standalone si support humain actif
+                $message->refresh();
+                if ($this->record->isEscalated()) {
+                    broadcast(new AiMessageValidated($message));
+                }
+
+                // Envoyer par email si le client a fourni son email (mode async)
+                if ($this->record->user_email) {
+                    app(SupportService::class)->sendValidatedAiMessageByEmail(
+                        $this->record,
+                        $message,
+                        auth()->user()
+                    );
+                }
+
+                Notification::make()
+                    ->title('Correction enregistrée')
+                    ->body($this->record->user_email
+                        ? 'La question et réponse corrigées ont été indexées et envoyées par email.'
+                        : 'La question et réponse corrigées ont été indexées pour l\'apprentissage.')
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Impossible d\'indexer la correction.')
+                    ->danger()
+                    ->send();
+            }
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
      * Apprend à l'IA avec question et réponse éditées par l'admin.
      */
     public function learnFromSupportMessageWithEdit(int $supportMessageId, string $question, string $answer): void
