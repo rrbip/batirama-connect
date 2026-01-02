@@ -1171,8 +1171,21 @@
                 return json.data;
             }
 
+            // Track displayed message IDs to prevent duplicates
+            var displayedMessageIds = new Set();
+
             // Add message to UI
             function addMessage(message) {
+                // Créer un identifiant unique pour ce message (pour déduplication)
+                var messageKey = message.id || (message.role + '_' + message.content + '_' + (message.created_at || ''));
+
+                // Vérifier si ce message a déjà été affiché
+                if (displayedMessageIds.has(messageKey)) {
+                    console.log('⚠️ Duplicate message skipped:', messageKey.substring(0, 50));
+                    return;
+                }
+                displayedMessageIds.add(messageKey);
+
                 state.messages.push(message);
                 elements.welcomeSection.style.display = 'none';
 
