@@ -528,7 +528,7 @@ class SupportService
      *
      * Cette méthode est utilisée quand on valide un message IA : on envoie juste l'email
      * sans créer de SupportMessage car le message IA existe déjà.
-     * L'email est toujours envoyé si l'utilisateur a un email (le message WebSocket est aussi envoyé).
+     * L'email n'est envoyé que si l'utilisateur n'est pas connecté au chat (détection via Soketi).
      */
     public function sendValidatedAiMessageByEmail(
         AiSession $session,
@@ -540,6 +540,18 @@ class SupportService
                 'session_id' => $session->id,
             ]);
             return false;
+        }
+
+        // Vérifier la présence via Soketi (canal de présence WebSocket)
+        $isUserOnline = $this->presenceService->isSessionUserOnline($session->uuid);
+
+        if ($isUserOnline) {
+            Log::debug('Validated AI message: User online via Soketi, skipping email', [
+                'session_id' => $session->id,
+                'session_uuid' => $session->uuid,
+                'ai_message_id' => $aiMessage->id,
+            ]);
+            return true; // Considéré comme succès car l'utilisateur verra le message en temps réel
         }
 
         // Générer un token d'accès si pas encore fait
