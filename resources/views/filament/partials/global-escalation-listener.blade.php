@@ -275,13 +275,15 @@
             try {
                 var channel = window.Echo.join(channelName)
                     .here(function(members) {
-                        console.log('👥 [Agent ' + agentId + '] Connected agents:', members.length, members.map(function(m) { return m.name; }));
+                        // Pusher stores user data in member.info (from channel auth callback)
+                        var names = members.map(function(m) { return m.info?.name || m.name || 'Unknown'; });
+                        console.log('👥 [Agent ' + agentId + '] Connected agents:', members.length, names);
                     })
                     .joining(function(member) {
-                        console.log('👥 [Agent ' + agentId + '] Agent joined:', member.name);
+                        console.log('👥 [Agent ' + agentId + '] Agent joined:', member.info?.name || member.name);
                     })
                     .leaving(function(member) {
-                        console.log('👥 [Agent ' + agentId + '] Agent left:', member.name);
+                        console.log('👥 [Agent ' + agentId + '] Agent left:', member.info?.name || member.name);
                     })
                     .error(function(error) {
                         console.warn('👥 [Agent ' + agentId + '] Presence error:', error);
