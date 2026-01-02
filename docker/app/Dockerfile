@@ -1,14 +1,15 @@
 # ===========================================
 # AI-Manager CMS - PHP Application
 # ===========================================
-# Dockerfile optimisé avec cache de couches
+# Dockerfile optimisé avec cache de couches (Debian)
+# - Base Debian pour meilleure compatibilité
 # - Les dépendances système/PHP sont en haut (changent rarement)
 # - Composer est installé séparément (cache si composer.lock ne change pas)
 # - Le code applicatif est copié en dernier (change souvent)
 # ===========================================
 ARG PHP_VERSION=8.4
 
-FROM php:${PHP_VERSION}-fpm-alpine
+FROM php:${PHP_VERSION}-fpm
 
 # Arguments de build
 ARG APP_ENV=production
@@ -22,41 +23,42 @@ LABEL description="AI-Manager CMS Application"
 ENV APP_ENV=${APP_ENV}
 ENV COMPOSER_ALLOW_SUPERUSER=1
 ENV COMPOSER_HOME=/composer
+ENV DEBIAN_FRONTEND=noninteractive
 
 # ===========================================
 # COUCHE 1: Dépendances système (change rarement)
 # ===========================================
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
     libzip-dev \
     zip \
     unzip \
-    icu-dev \
-    postgresql-dev \
-    linux-headers \
-    bash \
-    poppler-utils \
+    libicu-dev \
+    libpq-dev \
     # OCR Tesseract pour extraction texte d'images
     tesseract-ocr \
-    tesseract-ocr-data-fra \
-    tesseract-ocr-data-eng \
+    tesseract-ocr-fra \
+    tesseract-ocr-eng \
     # ImageMagick pour manipulation d'images (Vision extraction)
     imagemagick \
-    imagemagick-libs \
+    libmagickwand-dev \
+    # PDF utilities
+    poppler-utils \
     # IMAP pour réception des emails de support
-    imap-dev \
-    openssl-dev \
-    $PHPIZE_DEPS
+    libc-client-dev \
+    libkrb5-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # ===========================================
 # COUCHE 2: Extensions PHP (change rarement)
 # ===========================================
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure intl \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
     && docker-php-ext-install -j$(nproc) \
         pdo \
         pdo_pgsql \
@@ -66,11 +68,8 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         intl \
         bcmath \
         opcache \
-        pcntl
-
-# Installation de l'extension IMAP
-# Note: Sur Alpine, imap-dev inclut déjà le support SSL
-RUN docker-php-ext-install imap
+        pcntl \
+        imap
 
 # Installation de Redis extension
 RUN pecl install redis \
