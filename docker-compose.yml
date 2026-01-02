@@ -13,6 +13,8 @@ services:
     container_name: aim_app
     restart: unless-stopped
     working_dir: /var/www/html
+    # Utiliser le même UID/GID que l'hôte pour éviter les problèmes de permissions
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     volumes:
       - .:/var/www/html
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
@@ -219,6 +221,7 @@ services:
     container_name: aim_scheduler
     restart: unless-stopped
     working_dir: /var/www/html
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     command: ["php", "artisan", "schedule:work"]
     volumes:
       - .:/var/www/html
@@ -239,6 +242,7 @@ services:
     container_name: aim_queue
     restart: unless-stopped
     working_dir: /var/www/html
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     command: ["php", "artisan", "queue:work", "--queue=ai-messages,mail,default,pipeline,llm-chunking", "--sleep=3", "--tries=3", "--max-time=3600"]
     volumes:
       - .:/var/www/html
