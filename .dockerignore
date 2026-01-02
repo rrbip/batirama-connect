@@ -22,12 +22,15 @@
 .env.*
 !.env.example
 
-# Cache et logs locaux
-/storage/logs/*
-/storage/framework/cache/*
-/storage/framework/sessions/*
-/storage/framework/views/*
-/bootstrap/cache/*
+# ===========================================
+# IMPORTANT: Exclure TOUT le dossier storage
+# Les dossiers sont créés par l'entrypoint au runtime
+# avec les bonnes permissions (www-data UID 33)
+# ===========================================
+/storage
+
+# Bootstrap cache (recréé au runtime)
+/bootstrap/cache
 
 # Tests et développement
 /tests

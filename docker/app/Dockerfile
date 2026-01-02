@@ -95,18 +95,14 @@ WORKDIR /var/www/html
 # Copier UNIQUEMENT les fichiers de dépendances en premier
 COPY composer.json composer.lock ./
 
-# Créer les dossiers Laravel nécessaires AVANT composer install
-# Note: Ces dossiers sont créés pour le build, mais seront écrasés par le bind mount en dev
+# Créer les dossiers nécessaires pour composer install (PAS storage - créé au runtime)
+# Note: storage/ est exclu via .dockerignore et créé par l'entrypoint avec les bonnes permissions
 RUN mkdir -p bootstrap/cache \
-    && mkdir -p storage/framework/sessions \
-    && mkdir -p storage/framework/views \
-    && mkdir -p storage/framework/cache \
-    && mkdir -p storage/logs \
     && mkdir -p resources/views \
     && mkdir -p database/factories \
     && mkdir -p database/seeders \
-    && chown -R www-data:www-data bootstrap storage resources \
-    && chmod -R 775 bootstrap storage
+    && chown -R www-data:www-data bootstrap resources \
+    && chmod -R 775 bootstrap
 
 # Installer les dépendances Composer (cette couche est mise en cache
 # tant que composer.json et composer.lock ne changent pas)
@@ -119,7 +115,7 @@ RUN if [ "$APP_ENV" = "production" ]; then \
 # ===========================================
 # COUCHE 5: Code applicatif (change souvent)
 # ===========================================
-# Copier le reste du code source
+# Copier le reste du code source (storage/ exclu via .dockerignore)
 COPY --chown=www-data:www-data . .
 
 # Exécuter les scripts post-install de Composer (autoload, etc.)
@@ -129,9 +125,9 @@ RUN composer dump-autoload --optimize
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Permissions finales
-RUN chown -R www-data:www-data storage bootstrap/cache resources \
-    && chmod -R 775 storage bootstrap/cache
+# Permissions finales (storage créé par entrypoint, pas ici)
+RUN chown -R www-data:www-data bootstrap/cache resources \
+    && chmod -R 775 bootstrap/cache
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
