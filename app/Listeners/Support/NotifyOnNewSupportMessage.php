@@ -23,6 +23,9 @@ use Symfony\Component\Mime\Email;
 /**
  * Envoie des notifications Filament quand un nouveau message arrive dans une session support.
  * Si l'agent support n'est pas connecté au backoffice, un email lui est envoyé.
+ *
+ * Uses cache-based deduplication to prevent duplicate notifications when the same
+ * event is processed multiple times (queue retry, race conditions, etc.)
  */
 class NotifyOnNewSupportMessage implements ShouldQueue
 {
@@ -42,6 +45,22 @@ class NotifyOnNewSupportMessage implements ShouldQueue
     {
         $message = $event->message;
         $session = $message->session;
+
+        // Prevent duplicate notifications using cache lock
+        $cacheKey = "notify-support-message-{$message->id}";
+        $cache = app('cache');
+
+        // If already processed within last 60 seconds, skip
+        if ($cache->has($cacheKey)) {
+            Log::debug('NewSupportMessage: Skipping duplicate notification', [
+                'message_id' => $message->id,
+                'session_id' => $session->id ?? null,
+            ]);
+            return;
+        }
+
+        // Mark as being processed
+        $cache->put($cacheKey, true, 60);
 
         // Ne notifier que pour les messages utilisateurs (pas les messages agents ou système)
         if ($message->sender_type !== 'user') {
