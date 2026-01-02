@@ -40,11 +40,16 @@ RUN apk add --no-cache \
     # ImageMagick pour manipulation d'images (Vision extraction)
     imagemagick \
     imagemagick-libs \
+    # IMAP pour réception des emails de support
+    imap-dev \
+    openssl-dev \
+    krb5-dev \
     $PHPIZE_DEPS
 
 # Configuration et installation des extensions PHP
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure intl \
+    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
     && docker-php-ext-install -j$(nproc) \
         pdo \
         pdo_pgsql \
@@ -54,7 +59,8 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         intl \
         bcmath \
         opcache \
-        pcntl
+        pcntl \
+        imap
 
 # Installation de Redis extension
 RUN pecl install redis \
