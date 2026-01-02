@@ -239,9 +239,11 @@ class PresenceService
             $members = $this->fetchChannelMembers($channelName);
 
             // Filtrer pour ne garder que les guests (pas les agents de support)
+            // Soketi ne retourne que les IDs, pas les user_info complets
+            // Les guests ont des IDs qui commencent par "guest_"
             $guests = array_filter($members, function ($member) {
-                $info = $member['user_info'] ?? $member;
-                return ($info['type'] ?? '') === 'guest';
+                $userId = $member['id'] ?? ($member['user_id'] ?? '');
+                return str_starts_with($userId, 'guest_');
             });
 
             $isOnline = count($guests) > 0;
