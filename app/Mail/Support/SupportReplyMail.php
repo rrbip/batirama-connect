@@ -7,8 +7,6 @@ namespace App\Mail\Support;
 use App\Models\AiSession;
 use App\Models\SupportMessage;
 use App\Models\User;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
@@ -16,18 +14,19 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Mail\Mailables\Headers;
 use Illuminate\Queue\SerializesModels;
 
-class SupportReplyMail extends Mailable implements ShouldQueue
+/**
+ * Email envoyé à l'utilisateur quand un agent de support répond.
+ * Envoi synchrone pour garantir la livraison immédiate.
+ */
+class SupportReplyMail extends Mailable
 {
-    use Queueable;
     use SerializesModels;
 
     public function __construct(
         public AiSession $session,
         public SupportMessage $message,
         public User $agent
-    ) {
-        $this->onQueue('mail');
-    }
+    ) {}
 
     /**
      * Get the message envelope.
