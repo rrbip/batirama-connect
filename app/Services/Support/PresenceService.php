@@ -5,29 +5,33 @@ declare(strict_types=1);
 namespace App\Services\Support;
 
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Pusher\Pusher;
 
 /**
  * Service pour gérer la présence des agents de support via Soketi.
  *
- * Utilise l'API HTTP de Soketi pour vérifier les membres des canaux de présence.
+ * Utilise le SDK Pusher pour vérifier les membres des canaux de présence.
  */
 class PresenceService
 {
-    private string $host;
-    private int $port;
-    private string $appId;
-    private string $key;
-    private string $secret;
+    private Pusher $pusher;
 
     public function __construct()
     {
-        $this->host = config('broadcasting.connections.pusher.options.host', 'soketi');
-        $this->port = (int) config('broadcasting.connections.pusher.options.port', 6001);
-        $this->appId = config('broadcasting.connections.pusher.app_id', 'batirama-app');
-        $this->key = config('broadcasting.connections.pusher.key', 'batirama-key');
-        $this->secret = config('broadcasting.connections.pusher.secret', 'batirama-secret');
+        $config = config('broadcasting.connections.pusher');
+
+        $this->pusher = new Pusher(
+            $config['key'],
+            $config['secret'],
+            $config['app_id'],
+            [
+                'host' => $config['options']['host'] ?? '127.0.0.1',
+                'port' => $config['options']['port'] ?? 6001,
+                'scheme' => $config['options']['scheme'] ?? 'http',
+                'useTLS' => $config['options']['useTLS'] ?? false,
+            ]
+        );
     }
 
     /**
@@ -139,47 +143,22 @@ class PresenceService
     }
 
     /**
-     * Interroge l'API Soketi pour obtenir les membres d'un canal de présence.
-     *
-     * @see https://docs.soketi.app/api/channels
+     * Interroge l'API Soketi via le SDK Pusher pour obtenir les membres d'un canal de présence.
      */
     private function fetchChannelMembers(string $channelName): array
     {
         try {
-            $path = "/apps/{$this->appId}/channels/{$channelName}/users";
-            $url = "http://{$this->host}:{$this->port}{$path}";
+            // Utiliser le SDK Pusher pour l'API (gère l'authentification automatiquement)
+            $response = $this->pusher->getPresenceUsers($channelName);
 
-            // Générer la signature pour l'authentification
-            $authTimestamp = time();
-            $authVersion = '1.0';
-            $bodyMd5 = md5('');
-
-            $stringToSign = implode("\n", [
-                'GET',
-                $path,
-                "auth_key={$this->key}&auth_timestamp={$authTimestamp}&auth_version={$authVersion}&body_md5={$bodyMd5}",
-            ]);
-
-            $authSignature = hash_hmac('sha256', $stringToSign, $this->secret);
-
-            $response = Http::timeout(5)
-                ->get($url, [
-                    'auth_key' => $this->key,
-                    'auth_timestamp' => $authTimestamp,
-                    'auth_version' => $authVersion,
-                    'body_md5' => $bodyMd5,
-                    'auth_signature' => $authSignature,
-                ]);
-
-            Log::debug('PresenceService: Soketi API response', [
+            Log::debug('PresenceService: Pusher SDK response', [
                 'channel' => $channelName,
-                'status' => $response->status(),
-                'body' => $response->body(),
+                'response' => $response,
             ]);
 
-            if ($response->successful()) {
-                $data = $response->json();
-                $users = $data['users'] ?? [];
+            // Le SDK retourne un objet avec la propriété 'users'
+            if (is_object($response) && isset($response->users)) {
+                $users = $response->users;
 
                 Log::info('PresenceService: Soketi returned users', [
                     'channel' => $channelName,
@@ -187,27 +166,35 @@ class PresenceService
                     'raw_users' => $users,
                 ]);
 
-                return $users;
+                // Convertir les objets en tableaux si nécessaire
+                return array_map(function ($user) {
+                    return is_object($user) ? (array) $user : $user;
+                }, $users);
             }
 
-            // Canal inexistant = aucun membre
-            if ($response->status() === 404) {
+            Log::info('PresenceService: No users in channel', [
+                'channel' => $channelName,
+            ]);
+
+            return [];
+
+        } catch (\Pusher\ApiErrorException $e) {
+            // Canal inexistant = aucun membre (pas une erreur)
+            if (str_contains($e->getMessage(), 'Unknown channel')) {
                 Log::info('PresenceService: Channel not found (no members)', [
                     'channel' => $channelName,
                 ]);
                 return [];
             }
 
-            Log::warning('Soketi API returned error', [
+            Log::warning('PresenceService: Pusher API error', [
                 'channel' => $channelName,
-                'status' => $response->status(),
-                'body' => $response->body(),
+                'error' => $e->getMessage(),
             ]);
-
             return [];
 
         } catch (\Exception $e) {
-            Log::warning('Failed to fetch channel members from Soketi', [
+            Log::warning('PresenceService: Failed to fetch channel members', [
                 'channel' => $channelName,
                 'error' => $e->getMessage(),
             ]);
@@ -221,33 +208,10 @@ class PresenceService
     public function channelHasMembers(string $channelName): bool
     {
         try {
-            $path = "/apps/{$this->appId}/channels/{$channelName}";
-            $url = "http://{$this->host}:{$this->port}{$path}";
+            $response = $this->pusher->getChannelInfo($channelName, ['info' => 'subscription_count']);
 
-            $authTimestamp = time();
-            $authVersion = '1.0';
-            $bodyMd5 = md5('');
-
-            $stringToSign = implode("\n", [
-                'GET',
-                $path,
-                "auth_key={$this->key}&auth_timestamp={$authTimestamp}&auth_version={$authVersion}&body_md5={$bodyMd5}",
-            ]);
-
-            $authSignature = hash_hmac('sha256', $stringToSign, $this->secret);
-
-            $response = Http::timeout(5)
-                ->get($url, [
-                    'auth_key' => $this->key,
-                    'auth_timestamp' => $authTimestamp,
-                    'auth_version' => $authVersion,
-                    'body_md5' => $bodyMd5,
-                    'auth_signature' => $authSignature,
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json();
-                return ($data['subscription_count'] ?? 0) > 0;
+            if (is_object($response) && isset($response->subscription_count)) {
+                return $response->subscription_count > 0;
             }
 
             return false;
