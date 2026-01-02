@@ -57,7 +57,6 @@ RUN apk add --no-cache \
 # ===========================================
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure intl \
-    && docker-php-ext-configure imap --with-imap-ssl \
     && docker-php-ext-install -j$(nproc) \
         pdo \
         pdo_pgsql \
@@ -67,8 +66,11 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         intl \
         bcmath \
         opcache \
-        pcntl \
-        imap
+        pcntl
+
+# Installation de l'extension IMAP (nécessite configuration spéciale sur Alpine)
+RUN PHP_OPENSSL=yes docker-php-ext-configure imap --with-imap-ssl \
+    && docker-php-ext-install imap
 
 # Installation de Redis extension
 RUN pecl install redis \
