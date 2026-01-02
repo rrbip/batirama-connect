@@ -6,9 +6,7 @@ namespace App\Services\Support;
 
 use App\Models\Agent;
 use App\Models\AiSession;
-use App\Models\SupportMessage;
 use Illuminate\Support\Facades\Log;
-use Webklex\IMAP\Facades\Client;
 
 class ImapService
 {
@@ -26,6 +24,11 @@ class ImapService
      */
     public function fetchNewEmails(Agent $agent): array
     {
+        if (!function_exists('imap_open')) {
+            Log::error('PHP IMAP extension is not installed');
+            return [];
+        }
+
         $config = $agent->getImapConfig();
 
         if (!$config || !$this->isConfigValid($config)) {
@@ -36,27 +39,38 @@ class ImapService
         }
 
         try {
-            $client = $this->createClient($config);
-            $client->connect();
+            $connection = $this->connect($config);
 
-            $folder = $client->getFolder($config['folder'] ?? 'INBOX');
-            $messages = $folder->query()
-                ->unseen()
-                ->since(now()->subDays(7))
-                ->get();
+            if (!$connection) {
+                Log::error('Failed to connect to IMAP server', [
+                    'agent_id' => $agent->id,
+                    'error' => imap_last_error(),
+                ]);
+                return [];
+            }
+
+            // Récupérer les emails non lus des 7 derniers jours
+            $since = date('d-M-Y', strtotime('-7 days'));
+            $emails = imap_search($connection, 'UNSEEN SINCE "' . $since . '"');
+
+            if (!$emails) {
+                imap_close($connection);
+                Log::debug('No new emails found', ['agent_id' => $agent->id]);
+                return [];
+            }
 
             $processedEmails = [];
 
-            foreach ($messages as $message) {
-                $result = $this->processEmail($agent, $message);
+            foreach ($emails as $emailNum) {
+                $result = $this->processEmail($agent, $connection, $emailNum);
                 if ($result) {
                     $processedEmails[] = $result;
-                    // Marquer comme lu après traitement
-                    $message->setFlag('Seen');
+                    // Marquer comme lu
+                    imap_setflag_full($connection, (string) $emailNum, '\\Seen');
                 }
             }
 
-            $client->disconnect();
+            imap_close($connection);
 
             Log::info('IMAP fetch completed', [
                 'agent_id' => $agent->id,
@@ -75,16 +89,54 @@ class ImapService
     }
 
     /**
+     * Établit une connexion IMAP.
+     */
+    protected function connect(array $config): mixed
+    {
+        $encryption = strtolower($config['encryption'] ?? 'ssl');
+        $port = (int) ($config['port'] ?? 993);
+        $folder = $config['folder'] ?? 'INBOX';
+
+        $flags = '/imap';
+        if ($encryption === 'ssl') {
+            $flags .= '/ssl';
+        } elseif ($encryption === 'tls') {
+            $flags .= '/tls';
+        }
+        $flags .= '/novalidate-cert';
+
+        $mailbox = '{' . $config['host'] . ':' . $port . $flags . '}' . $folder;
+
+        return @imap_open(
+            $mailbox,
+            $config['username'],
+            $config['password'],
+            0,
+            1,
+            ['DISABLE_AUTHENTICATOR' => 'GSSAPI']
+        );
+    }
+
+    /**
      * Traite un email entrant.
      */
-    protected function processEmail(Agent $agent, $message): ?array
+    protected function processEmail(Agent $agent, mixed $connection, int $emailNum): ?array
     {
-        $subject = $message->getSubject();
-        $body = $message->getTextBody() ?? $message->getHTMLBody();
-        $from = $message->getFrom()[0]?->mail ?? null;
-        $messageId = $message->getMessageId();
-        $inReplyTo = $message->getInReplyTo();
-        $references = $message->getReferences();
+        $header = imap_headerinfo($connection, $emailNum);
+        $structure = imap_fetchstructure($connection, $emailNum);
+
+        if (!$header) {
+            return null;
+        }
+
+        $subject = $this->decodeHeader($header->subject ?? '');
+        $from = $header->from[0]->mailbox . '@' . $header->from[0]->host;
+        $messageId = $header->message_id ?? null;
+        $inReplyTo = $header->in_reply_to ?? null;
+        $references = $header->references ?? null;
+
+        // Récupérer le corps du message
+        $body = $this->getBody($connection, $emailNum, $structure);
 
         // Chercher le token de session dans le sujet ou les headers
         $sessionToken = $this->extractSessionToken($subject, $inReplyTo, $references);
@@ -120,7 +172,14 @@ class ImapService
         }
 
         // Nettoyer le contenu de l'email
-        $cleanedBody = $this->cleanEmailBody($body);
+        $cleanedBody = $this->emailParser->parse($body, str_contains($body, '<'));
+
+        if (empty(trim($cleanedBody))) {
+            Log::debug('Empty email body after parsing', [
+                'session_id' => $session->id,
+            ]);
+            return null;
+        }
 
         // Créer le message de support
         $supportMessage = $this->supportService->receiveUserMessage(
@@ -135,24 +194,75 @@ class ImapService
             ]
         );
 
-        // Traiter les pièces jointes
-        $attachments = [];
-        foreach ($message->getAttachments() as $attachment) {
-            $attachments[] = [
-                'name' => $attachment->getName(),
-                'mime' => $attachment->getMimeType(),
-                'size' => $attachment->getSize(),
-                'content' => $attachment->getContent(),
-            ];
-        }
-
         return [
             'session_id' => $session->id,
             'message_id' => $supportMessage->id,
             'from' => $from,
             'subject' => $subject,
-            'attachments_count' => count($attachments),
         ];
+    }
+
+    /**
+     * Récupère le corps du message.
+     */
+    protected function getBody(mixed $connection, int $emailNum, object $structure): string
+    {
+        $body = '';
+
+        if ($structure->type === 0) {
+            // Simple message
+            $body = imap_fetchbody($connection, $emailNum, '1');
+            $body = $this->decodeBody($body, $structure->encoding ?? 0);
+        } elseif ($structure->type === 1) {
+            // Multipart
+            foreach ($structure->parts as $partNum => $part) {
+                if ($part->subtype === 'PLAIN') {
+                    $body = imap_fetchbody($connection, $emailNum, (string) ($partNum + 1));
+                    $body = $this->decodeBody($body, $part->encoding ?? 0);
+                    break;
+                }
+                if ($part->subtype === 'HTML' && empty($body)) {
+                    $body = imap_fetchbody($connection, $emailNum, (string) ($partNum + 1));
+                    $body = $this->decodeBody($body, $part->encoding ?? 0);
+                }
+            }
+        }
+
+        // Convertir le charset si nécessaire
+        if (isset($structure->parameters)) {
+            foreach ($structure->parameters as $param) {
+                if (strtolower($param->attribute) === 'charset' && strtolower($param->value) !== 'utf-8') {
+                    $body = mb_convert_encoding($body, 'UTF-8', $param->value);
+                }
+            }
+        }
+
+        return $body;
+    }
+
+    /**
+     * Décode le corps selon l'encodage.
+     */
+    protected function decodeBody(string $body, int $encoding): string
+    {
+        return match ($encoding) {
+            3 => base64_decode($body), // BASE64
+            4 => quoted_printable_decode($body), // QUOTED-PRINTABLE
+            default => $body,
+        };
+    }
+
+    /**
+     * Décode un header MIME.
+     */
+    protected function decodeHeader(string $header): string
+    {
+        $elements = imap_mime_header_decode($header);
+        $decoded = '';
+        foreach ($elements as $element) {
+            $decoded .= $element->text;
+        }
+        return $decoded;
     }
 
     /**
@@ -175,16 +285,6 @@ class ImapService
     }
 
     /**
-     * Nettoie le corps de l'email (retire les citations, signatures, etc.).
-     */
-    protected function cleanEmailBody(string $body): string
-    {
-        $isHtml = str_contains($body, '<html') || str_contains($body, '<body') || str_contains($body, '<div');
-
-        return $this->emailParser->parse($body, $isHtml);
-    }
-
-    /**
      * Vérifie si la configuration IMAP est valide.
      */
     protected function isConfigValid(?array $config): bool
@@ -196,31 +296,21 @@ class ImapService
     }
 
     /**
-     * Crée un client IMAP avec la configuration.
-     */
-    protected function createClient(array $config): \Webklex\IMAP\Client
-    {
-        return Client::make([
-            'host' => $config['host'],
-            'port' => $config['port'] ?? 993,
-            'encryption' => $config['encryption'] ?? 'ssl',
-            'validate_cert' => $config['validate_cert'] ?? true,
-            'username' => $config['username'],
-            'password' => $config['password'],
-            'protocol' => 'imap',
-        ]);
-    }
-
-    /**
      * Teste la connexion IMAP.
      */
     public function testConnection(array $config): bool
     {
+        if (!function_exists('imap_open')) {
+            return false;
+        }
+
         try {
-            $client = $this->createClient($config);
-            $client->connect();
-            $client->disconnect();
-            return true;
+            $connection = $this->connect($config);
+            if ($connection) {
+                imap_close($connection);
+                return true;
+            }
+            return false;
         } catch (\Throwable $e) {
             Log::error('IMAP connection test failed', [
                 'host' => $config['host'] ?? 'unknown',

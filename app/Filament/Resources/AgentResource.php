@@ -684,6 +684,107 @@ class AgentResource extends Resource
                                             ])
                                             ->columns(3),
 
+                                        Forms\Components\Actions::make([
+                                            Forms\Components\Actions\Action::make('testEmailConfig')
+                                                ->label('Tester la configuration email')
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('info')
+                                                ->requiresConfirmation()
+                                                ->modalHeading('Tester la configuration email')
+                                                ->modalDescription('Ce test va envoyer un email via SMTP puis vérifier sa réception via IMAP. Assurez-vous d\'avoir enregistré les modifications avant de tester.')
+                                                ->modalSubmitActionLabel('Lancer le test')
+                                                ->action(function ($record, $livewire) {
+                                                    if (!$record) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Erreur')
+                                                            ->body('Veuillez d\'abord enregistrer l\'agent avant de tester.')
+                                                            ->danger()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    $testService = app(\App\Services\Support\EmailConfigTestService::class);
+
+                                                    $smtpConfig = $record->getSmtpConfig();
+                                                    $imapConfig = $record->getImapConfig();
+                                                    $testEmail = $record->support_email;
+
+                                                    if (!$smtpConfig) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Configuration SMTP incomplète')
+                                                            ->body('Veuillez renseigner tous les champs SMTP (serveur, port, identifiant, mot de passe).')
+                                                            ->warning()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    if (!$testEmail) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Email de support manquant')
+                                                            ->body('Veuillez renseigner l\'email de support pour effectuer le test.')
+                                                            ->warning()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    // Test SMTP uniquement si pas d'IMAP configuré
+                                                    if (!$imapConfig) {
+                                                        $smtpResult = $testService->testSmtp($smtpConfig, $testEmail);
+
+                                                        if ($smtpResult['success']) {
+                                                            \Filament\Notifications\Notification::make()
+                                                                ->title('Test SMTP réussi')
+                                                                ->body($smtpResult['message'] . "\n\n⚠️ IMAP non configuré - impossible de vérifier la réception.")
+                                                                ->success()
+                                                                ->duration(10000)
+                                                                ->send();
+                                                        } else {
+                                                            \Filament\Notifications\Notification::make()
+                                                                ->title('Échec SMTP')
+                                                                ->body($smtpResult['message'])
+                                                                ->danger()
+                                                                ->duration(15000)
+                                                                ->send();
+                                                        }
+                                                        return;
+                                                    }
+
+                                                    // Test complet SMTP + IMAP
+                                                    $results = $testService->testFullConfiguration($smtpConfig, $imapConfig, $testEmail);
+
+                                                    $smtpStatus = $results['smtp']['success'] ? '✅' : '❌';
+                                                    $imapStatus = $results['imap']['success'] ? '✅' : '❌';
+
+                                                    $body = "**SMTP** {$smtpStatus}: {$results['smtp']['message']}\n\n**IMAP** {$imapStatus}: {$results['imap']['message']}";
+
+                                                    if ($results['smtp']['success'] && $results['imap']['success']) {
+                                                        $notification = \Filament\Notifications\Notification::make()
+                                                            ->title('Configuration email validée')
+                                                            ->success();
+
+                                                        if ($results['imap']['email_found'] ?? false) {
+                                                            $notification->body("L'email de test a été envoyé ET reçu avec succès.");
+                                                        } else {
+                                                            $notification->body("SMTP OK. IMAP OK mais l'email de test n'est pas encore arrivé (délai de propagation possible).");
+                                                        }
+                                                    } elseif ($results['smtp']['success']) {
+                                                        $notification = \Filament\Notifications\Notification::make()
+                                                            ->title('SMTP OK, problème IMAP')
+                                                            ->body("L'envoi fonctionne mais la réception a échoué:\n\n" . $results['imap']['message'])
+                                                            ->warning();
+                                                    } else {
+                                                        $notification = \Filament\Notifications\Notification::make()
+                                                            ->title('Échec du test email')
+                                                            ->body($body)
+                                                            ->danger();
+                                                    }
+
+                                                    $notification->duration(15000)->send();
+                                                })
+                                                ->visible(fn ($record) => $record !== null),
+                                        ])
+                                            ->columnSpanFull(),
+
                                         Forms\Components\Placeholder::make('email_help')
                                             ->label('')
                                             ->content('💡 Les emails entrants sont récupérés automatiquement. Pour Gmail, créez un mot de passe d\'application dans les paramètres de sécurité Google.')
