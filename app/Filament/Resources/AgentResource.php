@@ -739,11 +739,14 @@ class AgentResource extends Resource
                                                                 ->duration(10000)
                                                                 ->send();
                                                         } else {
+                                                            $rawError = $smtpResult['raw_error'] ?? '';
+                                                            $debugInfo = $rawError ? "\n\n[Debug: {$rawError}]" : '';
+
                                                             \Filament\Notifications\Notification::make()
                                                                 ->title('Échec SMTP')
-                                                                ->body($smtpResult['message'])
+                                                                ->body($smtpResult['message'] . $debugInfo)
                                                                 ->danger()
-                                                                ->duration(15000)
+                                                                ->duration(20000)
                                                                 ->send();
                                                         }
                                                         return;
@@ -773,13 +776,17 @@ class AgentResource extends Resource
                                                             ->body("L'envoi fonctionne mais la réception a échoué:\n\n" . $results['imap']['message'])
                                                             ->warning();
                                                     } else {
+                                                        // Afficher l'erreur brute pour le debug
+                                                        $rawError = $results['smtp']['raw_error'] ?? '';
+                                                        $debugInfo = $rawError ? "\n\n[Debug: {$rawError}]" : '';
+
                                                         $notification = \Filament\Notifications\Notification::make()
                                                             ->title('Échec du test email')
-                                                            ->body($body)
+                                                            ->body($results['smtp']['message'] . $debugInfo)
                                                             ->danger();
                                                     }
 
-                                                    $notification->duration(15000)->send();
+                                                    $notification->duration(20000)->send();
                                                 })
                                                 ->visible(fn ($record) => $record !== null),
                                         ])

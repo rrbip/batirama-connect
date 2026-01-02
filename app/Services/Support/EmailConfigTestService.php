@@ -79,24 +79,38 @@ class EmailConfigTestService
                 ];
             }
 
-            // Construire le DSN
+            // Construire le DSN Symfony Mailer
+            // - smtps:// = SSL implicite (port 465)
+            // - smtp:// = STARTTLS ou plain text (port 587, 25)
             $encryption = strtolower($config['encryption'] ?? 'tls');
             $port = (int) $config['port'];
-            $scheme = ($encryption === 'ssl' || $port === 465) ? 'smtps' : 'smtp';
+
+            // Déterminer le schéma
+            if ($encryption === 'ssl' || $port === 465) {
+                $scheme = 'smtps';
+                $queryParams = '';
+            } else {
+                $scheme = 'smtp';
+                // Pour TLS (STARTTLS), on utilise smtp:// et Symfony détecte automatiquement
+                // Mais on peut forcer avec verify_peer=0 si problème de certificat
+                $queryParams = '';
+            }
 
             $dsn = sprintf(
-                '%s://%s:%s@%s:%d',
+                '%s://%s:%s@%s:%d%s',
                 $scheme,
                 urlencode($config['username']),
                 urlencode($config['password']),
                 $config['host'],
-                $port
+                $port,
+                $queryParams
             );
 
             Log::debug('Testing SMTP connection', [
                 'host' => $config['host'],
                 'port' => $port,
                 'scheme' => $scheme,
+                'encryption' => $encryption,
             ]);
 
             // Créer le transport et le mailer
