@@ -118,6 +118,16 @@ RUN if [ "$APP_ENV" = "production" ]; then \
 # Copier le reste du code source (storage/ exclu via .dockerignore)
 COPY --chown=www-data:www-data . .
 
+# Créer la structure storage APRÈS le COPY (car exclu par .dockerignore)
+# Ces dossiers sont nécessaires pour composer dump-autoload (scripts Laravel)
+# Ils seront écrasés par le bind mount en dev, recréés par entrypoint en prod
+RUN mkdir -p storage/framework/sessions \
+    && mkdir -p storage/framework/views \
+    && mkdir -p storage/framework/cache \
+    && mkdir -p storage/logs \
+    && chown -R www-data:www-data storage \
+    && chmod -R 775 storage
+
 # Exécuter les scripts post-install de Composer (autoload, etc.)
 RUN composer dump-autoload --optimize
 
@@ -125,9 +135,9 @@ RUN composer dump-autoload --optimize
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Permissions finales (storage créé par entrypoint, pas ici)
-RUN chown -R www-data:www-data bootstrap/cache resources \
-    && chmod -R 775 bootstrap/cache
+# Permissions finales
+RUN chown -R www-data:www-data bootstrap/cache resources storage \
+    && chmod -R 775 bootstrap/cache storage
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
