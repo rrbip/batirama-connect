@@ -405,8 +405,9 @@ class AiStatusPage extends Page
     public function fetchSupportEmails(): void
     {
         try {
-            \Artisan::call('support:fetch-emails');
-            $output = \Artisan::output();
+            // Exécuter le job de manière synchrone pour un retour immédiat
+            $job = new \App\Jobs\FetchSupportEmailsJob();
+            dispatch_sync($job);
 
             // Sauvegarder la date de dernière exécution
             Cache::put('support:fetch-emails:last_run', now()->format('Y-m-d H:i:s'), now()->addHours(24));
@@ -415,7 +416,7 @@ class AiStatusPage extends Page
 
             Notification::make()
                 ->title('Emails récupérés')
-                ->body($output ?: 'Commande exécutée avec succès')
+                ->body('Synchronisation IMAP terminée')
                 ->success()
                 ->send();
         } catch (\Exception $e) {
