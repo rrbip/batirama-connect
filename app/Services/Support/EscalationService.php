@@ -214,17 +214,25 @@ class EscalationService
     {
         // Vérifier si une notification email a été envoyée dans les 60 dernières secondes
         // pour éviter d'envoyer un email d'escalade juste après un email de nouveau message
-        $lastNotificationAt = $session->support_metadata['email_notification_sent_at'] ?? null;
-        if ($lastNotificationAt) {
-            $lastNotification = \Carbon\Carbon::parse($lastNotificationAt);
-            if ($lastNotification->diffInSeconds(now()) < 60) {
-                Log::info('Skipping escalation email - recent notification already sent', [
-                    'session_id' => $session->id,
-                    'last_notification_at' => $lastNotificationAt,
-                    'seconds_ago' => $lastNotification->diffInSeconds(now()),
-                ]);
-                return;
+        try {
+            $lastNotificationAt = $session->support_metadata['email_notification_sent_at'] ?? null;
+            if ($lastNotificationAt) {
+                $lastNotification = \Carbon\Carbon::parse($lastNotificationAt);
+                $secondsAgo = abs($lastNotification->diffInSeconds(now()));
+                if ($secondsAgo < 60) {
+                    Log::info('Skipping escalation email - recent notification already sent', [
+                        'session_id' => $session->id,
+                        'last_notification_at' => $lastNotificationAt,
+                        'seconds_ago' => $secondsAgo,
+                    ]);
+                    return;
+                }
             }
+        } catch (\Throwable $e) {
+            Log::warning('Error checking notification timestamp, continuing anyway', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         foreach ($agents as $agent) {
