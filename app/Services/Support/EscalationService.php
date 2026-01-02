@@ -158,6 +158,12 @@ class EscalationService
         try {
             $presenceService = app(PresenceService::class);
             $connectedUsers = $presenceService->getConnectedAgents($session->agent_id);
+
+            Log::debug('EscalationService: Raw connected users from Soketi', [
+                'agent_id' => $session->agent_id,
+                'raw_data' => $connectedUsers,
+            ]);
+
             return collect($connectedUsers)->pluck('id')->filter();
         } catch (\Throwable $e) {
             Log::warning('EscalationService: Failed to get connected users', [
@@ -191,7 +197,8 @@ class EscalationService
         Log::info('EscalationService: Notifying agents', [
             'session_id' => $session->id,
             'agents_count' => $agents->count(),
-            'connected_users_count' => $connectedUserIds->count(),
+            'agents_ids' => $agents->pluck('id')->toArray(),
+            'connected_user_ids' => $connectedUserIds->toArray(),
         ]);
 
         $emailsSent = 0;
@@ -202,6 +209,14 @@ class EscalationService
 
             // Si l'agent n'est pas connecté, envoyer aussi un email
             $isConnected = $connectedUserIds->contains($agent->id);
+
+            Log::debug('EscalationService: Agent notification check', [
+                'agent_id' => $agent->id,
+                'agent_email' => $agent->email,
+                'is_connected' => $isConnected,
+                'will_send_email' => !$isConnected && $agent->email,
+            ]);
+
             if (!$isConnected && $agent->email) {
                 $this->sendEmailNotificationToUser($session, $agent);
                 $emailsSent++;
@@ -270,12 +285,22 @@ class EscalationService
     protected function sendEmailNotificationToUser(AiSession $session, User $user): void
     {
         try {
-            Mail::to($user->email)->queue(new EscalationNotificationMail($session, $user));
+            $mailable = new EscalationNotificationMail($session, $user);
+
+            // Utiliser le SMTP personnalisé de l'agent IA si disponible
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($user->email, $mailable, $smtpConfig);
+            } else {
+                Mail::to($user->email)->send($mailable);
+            }
 
             Log::info('Escalation email sent to support agent', [
                 'session_id' => $session->id,
                 'user_id' => $user->id,
                 'user_email' => $user->email,
+                'custom_smtp' => (bool) $smtpConfig,
             ]);
         } catch (\Throwable $e) {
             Log::error('Failed to send escalation email', [
@@ -285,6 +310,30 @@ class EscalationService
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Envoie un email via un SMTP personnalisé.
+     */
+    protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
+    {
+        $transport = new \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport(
+            $smtpConfig['host'],
+            $smtpConfig['port'],
+            $smtpConfig['encryption'] === 'tls'
+        );
+        $transport->setUsername($smtpConfig['username']);
+        $transport->setPassword($smtpConfig['password']);
+
+        $mailer = new \Symfony\Component\Mailer\Mailer($transport);
+        $symfonyMailer = new \Illuminate\Mail\Mailer(
+            'custom',
+            app('view'),
+            $mailer,
+            app('events')
+        );
+
+        $symfonyMailer->to($to)->send($mailable);
     }
 
     /**

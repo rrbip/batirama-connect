@@ -6,24 +6,20 @@ namespace App\Mail\Support;
 
 use App\Models\AiSession;
 use App\Models\User;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class EscalationNotificationMail extends Mailable implements ShouldQueue
+class EscalationNotificationMail extends Mailable
 {
-    use Queueable;
     use SerializesModels;
 
     public function __construct(
         public AiSession $session,
         public User $supportAgent
-    ) {
-        $this->onQueue('mail');
-    }
+    ) {}
+
 
     /**
      * Get the message envelope.
