@@ -115,6 +115,14 @@ else
     fi
 fi
 
+# ===========================================
+# COMPOSER AUTOLOAD (après création de storage)
+# ===========================================
+# Exécuter dump-autoload pour générer l'autoloader et découvrir les packages
+# Ceci doit être fait APRÈS la création de storage car les scripts Laravel en ont besoin
+echo "🔄 Génération de l'autoloader Composer..."
+composer dump-autoload --optimize --quiet 2>/dev/null || composer dump-autoload --optimize
+
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
 
