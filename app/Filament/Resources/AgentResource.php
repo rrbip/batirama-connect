@@ -693,7 +693,7 @@ class AgentResource extends Resource
                                                 ->modalHeading('Tester la configuration email')
                                                 ->modalDescription('Ce test va envoyer un email via SMTP puis vérifier sa réception via IMAP. Assurez-vous d\'avoir enregistré les modifications avant de tester.')
                                                 ->modalSubmitActionLabel('Lancer le test')
-                                                ->action(function ($record, $livewire) {
+                                                ->action(function ($record, $livewire, \Filament\Forms\Components\Actions\Action $action) {
                                                     if (!$record) {
                                                         \Filament\Notifications\Notification::make()
                                                             ->title('Erreur')
@@ -727,69 +727,51 @@ class AgentResource extends Resource
                                                         return;
                                                     }
 
-                                                    // Test SMTP uniquement si pas d'IMAP configuré
+                                                    // Exécuter les tests
                                                     if (!$imapConfig) {
                                                         $smtpResult = $testService->testSmtp($smtpConfig, $testEmail);
-
-                                                        if ($smtpResult['success']) {
-                                                            \Filament\Notifications\Notification::make()
-                                                                ->title('Test SMTP réussi')
-                                                                ->body($smtpResult['message'] . "\n\n⚠️ IMAP non configuré - impossible de vérifier la réception.")
-                                                                ->success()
-                                                                ->duration(10000)
-                                                                ->send();
-                                                        } else {
-                                                            $rawError = $smtpResult['raw_error'] ?? '';
-                                                            $debugInfo = $rawError ? "\n\n[Debug: {$rawError}]" : '';
-
-                                                            \Filament\Notifications\Notification::make()
-                                                                ->title('Échec SMTP')
-                                                                ->body($smtpResult['message'] . $debugInfo)
-                                                                ->danger()
-                                                                ->duration(20000)
-                                                                ->send();
-                                                        }
-                                                        return;
-                                                    }
-
-                                                    // Test complet SMTP + IMAP
-                                                    $results = $testService->testFullConfiguration($smtpConfig, $imapConfig, $testEmail);
-
-                                                    $smtpStatus = $results['smtp']['success'] ? '✅' : '❌';
-                                                    $imapStatus = $results['imap']['success'] ? '✅' : '❌';
-
-                                                    $body = "**SMTP** {$smtpStatus}: {$results['smtp']['message']}\n\n**IMAP** {$imapStatus}: {$results['imap']['message']}";
-
-                                                    if ($results['smtp']['success'] && $results['imap']['success']) {
-                                                        $notification = \Filament\Notifications\Notification::make()
-                                                            ->title('Configuration email validée')
-                                                            ->success();
-
-                                                        if ($results['imap']['email_found'] ?? false) {
-                                                            $notification->body("L'email de test a été envoyé ET reçu avec succès.");
-                                                        } else {
-                                                            $notification->body("SMTP OK. IMAP OK mais l'email de test n'est pas encore arrivé (délai de propagation possible).");
-                                                        }
-                                                    } elseif ($results['smtp']['success']) {
-                                                        $notification = \Filament\Notifications\Notification::make()
-                                                            ->title('SMTP OK, problème IMAP')
-                                                            ->body("L'envoi fonctionne mais la réception a échoué:\n\n" . $results['imap']['message'])
-                                                            ->warning();
+                                                        $results = [
+                                                            'smtp' => $smtpResult,
+                                                            'imap' => ['skipped' => true, 'message' => 'IMAP non configuré'],
+                                                        ];
                                                     } else {
-                                                        // Afficher l'erreur brute pour le debug
-                                                        $rawError = $results['smtp']['raw_error'] ?? '';
-                                                        $debugInfo = $rawError ? "\n\n[Debug: {$rawError}]" : '';
-
-                                                        $notification = \Filament\Notifications\Notification::make()
-                                                            ->title('Échec du test email')
-                                                            ->body($results['smtp']['message'] . $debugInfo)
-                                                            ->danger();
+                                                        $results = $testService->testFullConfiguration($smtpConfig, $imapConfig, $testEmail);
                                                     }
 
-                                                    $notification->duration(20000)->send();
+                                                    // Générer le rapport
+                                                    $report = $testService->generateReport($smtpConfig, $imapConfig, $testEmail, $results);
+
+                                                    // Stocker le rapport dans la session pour l'afficher
+                                                    session(['email_test_report' => $report, 'email_test_results' => $results]);
+
+                                                    // Notification de résultat
+                                                    $smtpSuccess = $results['smtp']['success'] ?? false;
+                                                    $imapSuccess = $results['imap']['success'] ?? true;
+                                                    $imapSkipped = $results['imap']['skipped'] ?? false;
+
+                                                    if ($smtpSuccess && ($imapSuccess || $imapSkipped)) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Test terminé')
+                                                            ->body('Consultez le rapport détaillé ci-dessous.')
+                                                            ->success()
+                                                            ->send();
+                                                    } else {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Test terminé avec erreurs')
+                                                            ->body('Consultez le rapport détaillé ci-dessous pour diagnostiquer le problème.')
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+
+                                                    // Forcer le rafraîchissement pour afficher le rapport
+                                                    $livewire->dispatch('email-test-completed', report: $report);
                                                 })
                                                 ->visible(fn ($record) => $record !== null),
                                         ])
+                                            ->columnSpanFull(),
+
+                                        // Zone d'affichage du rapport de test
+                                        Forms\Components\View::make('filament.forms.components.email-test-report')
                                             ->columnSpanFull(),
 
                                         Forms\Components\Placeholder::make('email_help')

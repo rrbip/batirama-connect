@@ -29,6 +29,190 @@ class EmailConfigTestService
     protected string $testMessageId;
 
     /**
+     * Génère un rapport de diagnostic complet et formaté.
+     */
+    public function generateReport(array $smtpConfig, ?array $imapConfig, string $testEmail, array $results): string
+    {
+        $timestamp = now()->format('Y-m-d H:i:s');
+        $phpVersion = PHP_VERSION;
+        $osInfo = php_uname('s') . ' ' . php_uname('r');
+
+        $report = [];
+        $report[] = "╔══════════════════════════════════════════════════════════════╗";
+        $report[] = "║           RAPPORT DE TEST EMAIL - BATIRAMA CONNECT           ║";
+        $report[] = "╚══════════════════════════════════════════════════════════════╝";
+        $report[] = "";
+        $report[] = "Date du test : {$timestamp}";
+        $report[] = "PHP Version  : {$phpVersion}";
+        $report[] = "Système      : {$osInfo}";
+        $report[] = "";
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $report[] = "CONFIGURATION SMTP";
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $report[] = "Serveur      : " . ($smtpConfig['host'] ?? 'Non configuré');
+        $report[] = "Port         : " . ($smtpConfig['port'] ?? 'Non configuré');
+        $report[] = "Chiffrement  : " . strtoupper($smtpConfig['encryption'] ?? 'Non configuré');
+        $report[] = "Identifiant  : " . ($smtpConfig['username'] ?? 'Non configuré');
+        $report[] = "Mot de passe : " . (isset($smtpConfig['password']) ? str_repeat('*', min(strlen($smtpConfig['password']), 8)) : 'Non configuré');
+        $report[] = "Expéditeur   : " . ($smtpConfig['from_address'] ?? $smtpConfig['username'] ?? 'Non configuré');
+        $report[] = "Destinataire : {$testEmail}";
+        $report[] = "";
+
+        if ($imapConfig) {
+            $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            $report[] = "CONFIGURATION IMAP";
+            $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            $report[] = "Serveur      : " . ($imapConfig['host'] ?? 'Non configuré');
+            $report[] = "Port         : " . ($imapConfig['port'] ?? '993');
+            $report[] = "Chiffrement  : " . strtoupper($imapConfig['encryption'] ?? 'ssl');
+            $report[] = "Identifiant  : " . ($imapConfig['username'] ?? 'Non configuré');
+            $report[] = "Dossier      : " . ($imapConfig['folder'] ?? 'INBOX');
+            $report[] = "";
+        }
+
+        // Résultat SMTP
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $report[] = "RÉSULTAT TEST SMTP";
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $smtpResult = $results['smtp'] ?? [];
+        $smtpSuccess = $smtpResult['success'] ?? false;
+        $report[] = "Statut       : " . ($smtpSuccess ? "✅ SUCCÈS" : "❌ ÉCHEC");
+        $report[] = "Message      : " . ($smtpResult['message'] ?? 'Aucun message');
+
+        if (!$smtpSuccess && isset($smtpResult['raw_error'])) {
+            $report[] = "";
+            $report[] = "Erreur brute :";
+            $report[] = "┌─────────────────────────────────────────────────────────────┐";
+            foreach (explode("\n", wordwrap($smtpResult['raw_error'], 60)) as $line) {
+                $report[] = "│ " . str_pad($line, 60) . "│";
+            }
+            $report[] = "└─────────────────────────────────────────────────────────────┘";
+        }
+
+        if (isset($smtpResult['test_id'])) {
+            $report[] = "ID du test   : " . $smtpResult['test_id'];
+        }
+        $report[] = "";
+
+        // Résultat IMAP
+        if (isset($results['imap']) && !($results['imap']['skipped'] ?? false)) {
+            $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            $report[] = "RÉSULTAT TEST IMAP";
+            $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+            $imapResult = $results['imap'];
+            $imapSuccess = $imapResult['success'] ?? false;
+            $report[] = "Statut       : " . ($imapSuccess ? "✅ SUCCÈS" : "❌ ÉCHEC");
+            $report[] = "Message      : " . ($imapResult['message'] ?? 'Aucun message');
+
+            if (isset($imapResult['email_found'])) {
+                $report[] = "Email reçu   : " . ($imapResult['email_found'] ? "Oui" : "Non (délai possible)");
+            }
+            if (isset($imapResult['message_count'])) {
+                $report[] = "Messages     : " . $imapResult['message_count'] . " dans la boîte";
+            }
+
+            if (!$imapSuccess && isset($imapResult['raw_error'])) {
+                $report[] = "";
+                $report[] = "Erreur brute :";
+                $report[] = "┌─────────────────────────────────────────────────────────────┐";
+                foreach (explode("\n", wordwrap($imapResult['raw_error'], 60)) as $line) {
+                    $report[] = "│ " . str_pad($line, 60) . "│";
+                }
+                $report[] = "└─────────────────────────────────────────────────────────────┘";
+            }
+            $report[] = "";
+        }
+
+        // Diagnostic
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $report[] = "DIAGNOSTIC";
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+
+        $diagnostics = $this->generateDiagnostics($smtpConfig, $imapConfig, $results);
+        foreach ($diagnostics as $diag) {
+            $report[] = $diag;
+        }
+
+        $report[] = "";
+        $report[] = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+        $report[] = "Fin du rapport";
+        $report[] = "";
+
+        return implode("\n", $report);
+    }
+
+    /**
+     * Génère des diagnostics basés sur les erreurs.
+     */
+    protected function generateDiagnostics(array $smtpConfig, ?array $imapConfig, array $results): array
+    {
+        $diagnostics = [];
+        $smtpError = $results['smtp']['raw_error'] ?? '';
+        $imapError = $results['imap']['raw_error'] ?? '';
+
+        // Vérifications de base
+        $diagnostics[] = "";
+        $diagnostics[] = "Extension OpenSSL : " . (extension_loaded('openssl') ? "✓ Installée" : "✗ Manquante");
+        $diagnostics[] = "Extension IMAP    : " . (function_exists('imap_open') ? "✓ Installée" : "✗ Manquante");
+        $diagnostics[] = "";
+
+        // Suggestions basées sur les erreurs SMTP
+        if (!($results['smtp']['success'] ?? false)) {
+            $diagnostics[] = "💡 SUGGESTIONS SMTP :";
+
+            if (str_contains($smtpError, 'Authentication') || str_contains($smtpError, '535') || str_contains($smtpError, '534')) {
+                $diagnostics[] = "   • Vérifiez que l'identifiant est l'adresse email COMPLÈTE";
+                $diagnostics[] = "   • Vérifiez le mot de passe (celui de la boîte mail, pas du compte OVH)";
+                $diagnostics[] = "   • Pour Gmail : créez un 'Mot de passe d'application'";
+                $diagnostics[] = "   • Pour OVH : vérifiez que le compte email est actif";
+            }
+
+            if (str_contains($smtpError, 'Connection') || str_contains($smtpError, 'connect')) {
+                $diagnostics[] = "   • Vérifiez l'adresse du serveur SMTP";
+                $diagnostics[] = "   • Le port peut être bloqué par un firewall";
+                $diagnostics[] = "   • Essayez un autre port (465 SSL ou 587 TLS)";
+            }
+
+            if (str_contains($smtpError, 'SSL') || str_contains($smtpError, 'TLS') || str_contains($smtpError, 'certificate')) {
+                $diagnostics[] = "   • Port 465 → utilisez chiffrement SSL";
+                $diagnostics[] = "   • Port 587 → utilisez chiffrement TLS";
+                $diagnostics[] = "   • Le certificat du serveur peut être invalide";
+            }
+
+            // Suggestions spécifiques OVH
+            $host = strtolower($smtpConfig['host'] ?? '');
+            if (str_contains($host, 'ovh')) {
+                $diagnostics[] = "";
+                $diagnostics[] = "📧 CONFIGURATION OVH RECOMMANDÉE :";
+                $diagnostics[] = "   • MX Plan : ssl0.ovh.net, port 465, SSL";
+                $diagnostics[] = "   • Email Pro : pro1.mail.ovh.net, port 587, TLS";
+                $diagnostics[] = "   • Exchange : ex1.mail.ovh.net, port 587, TLS";
+            }
+        }
+
+        // Suggestions IMAP
+        if (isset($results['imap']) && !($results['imap']['success'] ?? true) && !($results['imap']['skipped'] ?? false)) {
+            $diagnostics[] = "";
+            $diagnostics[] = "💡 SUGGESTIONS IMAP :";
+
+            if (str_contains($imapError, 'Authentication') || str_contains($imapError, 'LOGIN')) {
+                $diagnostics[] = "   • Mêmes identifiants que SMTP généralement";
+                $diagnostics[] = "   • Vérifiez que l'accès IMAP est activé sur la boîte mail";
+            }
+
+            $host = strtolower($imapConfig['host'] ?? '');
+            if (str_contains($host, 'ovh')) {
+                $diagnostics[] = "";
+                $diagnostics[] = "📧 CONFIGURATION IMAP OVH :";
+                $diagnostics[] = "   • MX Plan : ssl0.ovh.net (ou imap.mail.ovh.net), port 993, SSL";
+                $diagnostics[] = "   • Email Pro : pro1.mail.ovh.net, port 993, SSL";
+            }
+        }
+
+        return $diagnostics;
+    }
+
+    /**
      * Teste la configuration email complète (SMTP + IMAP).
      *
      * @param array $smtpConfig Configuration SMTP
