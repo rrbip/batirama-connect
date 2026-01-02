@@ -654,7 +654,25 @@ class ViewAiSession extends ViewRecord
             return $a['original_id'] <=> $b['original_id'];
         });
 
-        return $messages;
+        // Dédupliquer les messages clients qui existent dans les deux tables (ai_messages + support_messages)
+        // Quand un utilisateur envoie un message après escalade, il est enregistré dans les deux tables
+        $seen = [];
+        $deduplicated = [];
+        foreach ($messages as $msg) {
+            // Créer une clé unique basée sur le type, contenu et timestamp (arrondi à la seconde)
+            $timestamp = $msg['created_at']?->format('Y-m-d H:i:s') ?? '';
+            $key = $msg['type'] . '|' . md5($msg['content']) . '|' . $timestamp;
+
+            // Si c'est un message client et qu'on l'a déjà vu, ignorer (préférer la version support)
+            if ($msg['type'] === 'client' && isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $deduplicated[] = $msg;
+        }
+
+        return $deduplicated;
     }
 
     public function getSessionStats(): array
