@@ -285,7 +285,15 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
 
             // Contact
             'contacter quelqu\'un',
+            'contacter le support',
+            'contacter un support',
+            'contacter support',
+            'support humain',
+            'support client',
+            'service client',
             'joindre quelqu\'un',
+            'joindre le support',
+            'joindre un conseiller',
             'être rappelé',
             'etre rappelé',
             'etre rappele',
