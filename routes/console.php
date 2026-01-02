@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Jobs\FetchSupportEmailsJob;
 use Illuminate\Support\Facades\Schedule;
 
 /*
@@ -14,9 +15,8 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('queue:work --stop-when-empty')->everyMinute()->withoutOverlapping();
 Schedule::command('logs:purge --days=90')->daily();
 
-// Support email polling (IMAP)
-Schedule::command('support:fetch-emails')
+// Support email polling (IMAP) - Dispatch job to queue for visibility
+Schedule::job(new FetchSupportEmailsJob())
     ->everyMinute()
     ->withoutOverlapping()
-    ->runInBackground()
-    ->appendOutputTo(storage_path('logs/support-emails.log'));
+    ->name('support:fetch-emails');
