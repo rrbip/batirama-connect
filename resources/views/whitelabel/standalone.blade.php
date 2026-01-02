@@ -1027,7 +1027,8 @@
                 uploadedAttachment: null,
                 isHumanSupportActive: false,  // True when escalated/assigned - hide AI typing
                 userEmail: null,  // User email (if provided)
-                asyncMode: false  // True when outside support hours or no agents connected - show email form
+                asyncMode: false,  // True when outside support hours or no agents connected - show email form
+                isSessionClosed: false  // True when session is resolved - block input
             };
 
             // Track session channel subscription status (déclaré ici pour être disponible dans les handlers WebSocket)
@@ -1340,6 +1341,10 @@
                         if (historyResponse.data.support_status === 'escalated' && historyResponse.data.async_mode && !historyResponse.data.user_email) {
                             setTimeout(showEmailForm, 500);
                         }
+                        // Si session résolue, bloquer la saisie
+                        if (historyResponse.data.support_status === 'resolved') {
+                            closeSession(null); // Pas de message, l'historique contient déjà le contexte
+                        }
                     } else {
                         // Whitelabel mode - create session via whitelabel API
                         var sessionResponse = await apiRequest('POST', '/whitelabel/sessions', {
@@ -1357,6 +1362,10 @@
                             state.isHumanSupportActive = true;
                             console.log('🔄 Restored human support mode from session:', sessionResponse.support_status);
                             // Note: Le message système d'escalade est maintenant stocké en BDD
+                        }
+                        // Si session résolue, bloquer la saisie
+                        if (sessionResponse.support_status === 'resolved') {
+                            closeSession(null);
                         }
                     }
 
@@ -1539,6 +1548,11 @@
                             created_at: data.created_at
                         });
                         scrollToBottom();
+                    })
+                    // Listen for session resolution (conversation closed by support)
+                    .listen('.session.resolved', function(data) {
+                        console.log('🔒 Session resolved:', data);
+                        closeSession('Cette conversation a été clôturée. Merci pour votre confiance !');
                     });
 
                 console.log('✅ Session channel subscribed');
@@ -1553,6 +1567,39 @@
                 // Insérer avant le typing indicator pour maintenir l'ordre chronologique
                 container.insertBefore(messageDiv, elements.typingIndicator);
                 scrollToBottom();
+            }
+
+            // Close the session and disable input
+            function closeSession(message) {
+                if (state.isSessionClosed) return; // Déjà fermée
+
+                state.isSessionClosed = true;
+
+                // Ajouter le message de clôture
+                if (message) {
+                    addSystemMessage(message);
+                }
+
+                // Désactiver la saisie
+                elements.inputField.disabled = true;
+                elements.inputField.placeholder = 'Cette conversation est terminée';
+                elements.sendButton.disabled = true;
+                elements.sendButton.style.opacity = '0.5';
+                elements.sendButton.style.cursor = 'not-allowed';
+
+                // Masquer le bouton d'upload si présent
+                var uploadBtn = document.getElementById('uploadButton');
+                if (uploadBtn) {
+                    uploadBtn.style.display = 'none';
+                }
+
+                // Ajouter une classe visuelle au container d'input
+                var inputContainer = document.querySelector('.input-container');
+                if (inputContainer) {
+                    inputContainer.style.opacity = '0.6';
+                }
+
+                console.log('🔒 Session fermée - saisie désactivée');
             }
 
             // Load message by role (used when loading history)
@@ -1581,6 +1628,12 @@
 
             // Send message
             async function sendMessage(content) {
+                // Bloquer l'envoi si la session est fermée
+                if (state.isSessionClosed) {
+                    console.log('🔒 Message bloqué - session fermée');
+                    return;
+                }
+
                 var hasContent = content.trim().length > 0;
                 var hasFile = state.currentFile !== null;
 

@@ -6,6 +6,7 @@ namespace App\Services\Support;
 
 use App\Events\Support\SessionAssigned;
 use App\Events\Support\SessionEscalated;
+use App\Events\Support\SessionResolved;
 use App\Mail\Support\EscalationNotificationMail;
 use App\Models\Agent;
 use App\Models\AiSession;
@@ -399,6 +400,9 @@ class EscalationService
             'resolution_type' => $resolutionType,
             'resolved_by' => auth()->id(),
         ]);
+
+        // Dispatcher l'événement pour notifier le client (standalone)
+        event(new SessionResolved($session));
 
         return $session;
     }
