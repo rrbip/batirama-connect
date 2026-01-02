@@ -1339,7 +1339,7 @@
             function sendPresencePing() {
                 if (!CONFIG.token) return;
 
-                fetch(CONFIG.baseUrl + '/c/' + CONFIG.token + '/ping', {
+                fetch(CONFIG.apiBase + '/c/' + CONFIG.token + '/ping', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1406,7 +1406,7 @@
                             authorize: function(socketId, callback) {
                                 var sessionUuid = state.session?.uuid || state.session?.session_id;
 
-                                fetch(CONFIG.baseUrl + '/broadcasting/auth/guest', {
+                                fetch(CONFIG.apiBase + '/broadcasting/auth/guest', {
                                     method: 'POST',
                                     headers: {
                                         'Content-Type': 'application/json',
