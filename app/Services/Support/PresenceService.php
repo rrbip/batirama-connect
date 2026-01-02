@@ -246,7 +246,7 @@ class PresenceService
 
             $isOnline = count($guests) > 0;
 
-            Log::debug('PresenceService: Session user online check', [
+            Log::info('PresenceService: Session user online check', [
                 'session_uuid' => $sessionUuid,
                 'channel' => $channelName,
                 'total_members' => count($members),

@@ -65,7 +65,7 @@ class SupportService
 
         $shouldSendEmail = $sendEmailIfAvailable && $hasEmail && $channel === 'chat' && !$isUserOnline;
 
-        Log::debug('SupportService: Email notification check', [
+        Log::info('SupportService: Email notification check', [
             'session_id' => $session->id,
             'session_uuid' => $session->uuid,
             'message_id' => $message->id,
@@ -79,7 +79,7 @@ class SupportService
         if ($shouldSendEmail) {
             $this->sendEmailNotificationForMessage($session, $message, $agent);
         } elseif ($hasEmail && $isUserOnline) {
-            Log::debug('SupportService: User online via Soketi, skipping email', [
+            Log::info('SupportService: User online via Soketi, skipping email', [
                 'session_id' => $session->id,
                 'message_id' => $message->id,
             ]);
