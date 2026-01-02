@@ -1217,7 +1217,13 @@
                 var json = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(json.message || json.error || 'Erreur de requête');
+                    var errorMsg = json.message || json.error || 'Erreur de requête';
+                    // Ajouter le debug info si disponible (APP_DEBUG=true)
+                    if (json.debug) {
+                        console.error('API Debug:', json.debug);
+                        errorMsg += ' (' + json.debug + ')';
+                    }
+                    throw new Error(errorMsg);
                 }
 
                 return json;
