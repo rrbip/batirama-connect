@@ -684,6 +684,21 @@ class AgentResource extends Resource
                                             ])
                                             ->columns(3),
 
+                                        Forms\Components\Fieldset::make('Personnalisation des emails')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.email_brand_name')
+                                                    ->label('Nom de marque')
+                                                    ->placeholder('Mon Entreprise')
+                                                    ->helperText('Nom affiché dans le titre et footer des emails (par défaut: nom de l\'agent)'),
+
+                                                Forms\Components\Textarea::make('ai_assistance_config.email_footer_text')
+                                                    ->label('Texte du footer')
+                                                    ->placeholder('© 2024 Mon Entreprise. Tous droits réservés.')
+                                                    ->helperText('Texte personnalisé affiché en bas des emails (optionnel)')
+                                                    ->rows(2),
+                                            ])
+                                            ->columns(1),
+
                                         Forms\Components\Actions::make([
                                             Forms\Components\Actions\Action::make('testEmailConfig')
                                                 ->label('Tester la configuration email')

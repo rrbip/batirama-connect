@@ -33,30 +33,24 @@ class SupportReplyMail extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         $agentName = $this->session->agent?->name ?? 'Support';
-        $token = $this->session->support_access_token;
+        $brandName = $this->getBrandName();
 
-        // Sujet avec token pour le threading
-        $subject = "[Support-{$token}] Réponse de {$agentName}";
+        // Référence courte pour le sujet (6 derniers caractères du token)
+        $shortRef = strtoupper(substr($this->session->support_access_token, -6));
 
-        // Récupérer le dernier message pour In-Reply-To
-        $lastUserMessage = $this->session->supportMessages()
-            ->where('sender_type', 'user')
-            ->where('channel', 'email')
-            ->orderBy('created_at', 'desc')
-            ->first();
-
-        $inReplyTo = $lastUserMessage?->email_metadata['message_id'] ?? null;
+        // Sujet propre avec référence courte pour le threading
+        $subject = "Réponse du support {$brandName} [Réf: {$shortRef}]";
 
         return new Envelope(
             from: new Address(
                 $this->session->agent?->support_email ?? config('mail.from.address'),
-                $agentName
+                $brandName
             ),
             subject: $subject,
             replyTo: [
                 new Address(
                     $this->session->agent?->support_email ?? config('mail.from.address'),
-                    $agentName
+                    $brandName
                 ),
             ],
         );
@@ -69,7 +63,7 @@ class SupportReplyMail extends Mailable implements ShouldQueue
     {
         $token = $this->session->support_access_token;
 
-        // Générer un Message-ID unique avec le token
+        // Générer un Message-ID unique avec le token (permet le threading côté client)
         $messageId = "support-{$token}-" . time() . '@' . parse_url(config('app.url'), PHP_URL_HOST);
 
         $headers = [
@@ -104,10 +98,51 @@ class SupportReplyMail extends Mailable implements ShouldQueue
                 'session' => $this->session,
                 'message' => $this->message,
                 'agent' => $this->agent,
-                'agentName' => $this->session->agent?->name ?? 'Support',
+                'brandName' => $this->getBrandName(),
+                'footerText' => $this->getFooterText(),
+                'chatUrl' => $this->getChatUrl(),
                 'replyInstructions' => $this->getReplyInstructions(),
             ],
         );
+    }
+
+    /**
+     * Nom de la marque (configurable dans l'agent).
+     */
+    protected function getBrandName(): string
+    {
+        $config = $this->session->agent?->ai_assistance_config ?? [];
+
+        // Priorité: email_brand_name > agent name > 'Support Client'
+        return $config['email_brand_name']
+            ?? $this->session->agent?->name
+            ?? 'Support Client';
+    }
+
+    /**
+     * Texte du footer (configurable dans l'agent).
+     */
+    protected function getFooterText(): ?string
+    {
+        $config = $this->session->agent?->ai_assistance_config ?? [];
+
+        return $config['email_footer_text'] ?? null;
+    }
+
+    /**
+     * URL pour retourner au chat.
+     */
+    protected function getChatUrl(): ?string
+    {
+        // Essayer de récupérer le token public de la session
+        $publicToken = $this->session->publicAccessToken?->token;
+
+        if ($publicToken) {
+            return config('app.url') . '/c/' . $publicToken;
+        }
+
+        // Fallback: pas de lien si pas de token public
+        return null;
     }
 
     /**
