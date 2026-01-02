@@ -615,8 +615,22 @@ class ViewAiSession extends ViewRecord
         }
 
         // Messages de support (si escaladé)
+        // - agent et system: toujours inclus
+        // - user: seulement si channel='email' (les channel='chat' sont des doublons de ai_messages)
         if ($this->record->isEscalated()) {
-            foreach ($this->record->supportMessages()->with('agent', 'attachments')->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get() as $supportMsg) {
+            $supportMessagesQuery = $this->record->supportMessages()
+                ->with('agent', 'attachments')
+                ->where(function ($query) {
+                    $query->whereIn('sender_type', ['agent', 'system'])
+                          ->orWhere(function ($q) {
+                              $q->where('sender_type', 'user')
+                                ->where('channel', 'email');
+                          });
+                })
+                ->orderBy('created_at', 'asc')
+                ->orderBy('id', 'asc');
+
+            foreach ($supportMessagesQuery->get() as $supportMsg) {
                 // Déterminer le type
                 $type = match ($supportMsg->sender_type) {
                     'agent' => 'support',
