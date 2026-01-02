@@ -853,7 +853,47 @@
                     encrypted: useTLS,
                     disableStats: true,
                     enabledTransports: ['ws', 'wss'],
-                    cluster: CONFIG.soketi.cluster
+                    cluster: CONFIG.soketi.cluster,
+                    // Custom authorizer pour les canaux de présence (guest auth)
+                    authorizer: function(channel, options) {
+                        return {
+                            authorize: function(socketId, callback) {
+                                // Pour les canaux de présence chat.session.*, utiliser l'auth guest
+                                if (channel.name.startsWith('presence-chat.session.')) {
+                                    console.log('🔐 Guest auth for presence channel:', channel.name);
+                                    fetch(CONFIG.apiBase + '/broadcasting/auth/guest', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                            'Accept': 'application/json'
+                                        },
+                                        body: JSON.stringify({
+                                            socket_id: socketId,
+                                            channel_name: channel.name
+                                        })
+                                    })
+                                    .then(function(response) {
+                                        if (!response.ok) {
+                                            throw new Error('Auth failed: ' + response.status);
+                                        }
+                                        return response.json();
+                                    })
+                                    .then(function(data) {
+                                        console.log('✅ Guest auth success');
+                                        callback(null, data);
+                                    })
+                                    .catch(function(error) {
+                                        console.error('❌ Guest auth failed:', error);
+                                        callback(error, null);
+                                    });
+                                } else {
+                                    // Pour les autres canaux, pas d'auth nécessaire (canaux publics)
+                                    console.log('📡 Public channel, no auth needed:', channel.name);
+                                    callback(null, {});
+                                }
+                            }
+                        };
+                    }
                 };
 
                 console.group('🔧 CONFIGURATION ECHO/PUSHER');
@@ -861,9 +901,6 @@
                 console.groupEnd();
 
                 window.Echo = new Echo(echoConfig);
-
-                // Configurer l'auth guest pour les canaux de présence
-                setupGuestAuth();
 
                 // Log tous les états de connexion
                 window.Echo.connector.pusher.connection.bind('initialized', function() {
@@ -1386,69 +1423,6 @@
                 presenceChannel.bind('pusher:member_removed', function(member) {
                     console.log('👤 Member left:', member);
                 });
-            }
-
-            // Authentification guest pour les canaux de présence
-            function setupGuestAuth() {
-                if (!window.Echo || !window.Echo.connector || !window.Echo.connector.pusher) {
-                    return;
-                }
-
-                var pusher = window.Echo.connector.pusher;
-
-                // Override l'authorizer pour les canaux presence-chat.session.*
-                var originalAuthorize = pusher.config.authorizer;
-
-                pusher.config.authorizer = function(channel, options) {
-                    // Si c'est un canal de présence pour une session de chat, utiliser l'auth guest
-                    if (channel.name.startsWith('presence-chat.session.')) {
-                        return {
-                            authorize: function(socketId, callback) {
-                                var sessionUuid = state.session?.uuid || state.session?.session_id;
-
-                                fetch(CONFIG.apiBase + '/broadcasting/auth/guest', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'Accept': 'application/json'
-                                    },
-                                    body: JSON.stringify({
-                                        socket_id: socketId,
-                                        channel_name: channel.name,
-                                        session_uuid: sessionUuid
-                                    })
-                                })
-                                .then(function(response) {
-                                    if (!response.ok) {
-                                        throw new Error('Auth failed: ' + response.status);
-                                    }
-                                    return response.json();
-                                })
-                                .then(function(data) {
-                                    console.log('✅ Guest auth success for presence channel');
-                                    callback(null, data);
-                                })
-                                .catch(function(error) {
-                                    console.error('❌ Guest auth failed:', error);
-                                    callback(error, null);
-                                });
-                            }
-                        };
-                    }
-
-                    // Pour les autres canaux, utiliser l'authorizer original
-                    if (originalAuthorize) {
-                        return originalAuthorize(channel, options);
-                    }
-
-                    return {
-                        authorize: function(socketId, callback) {
-                            callback(new Error('No authorizer configured'), null);
-                        }
-                    };
-                };
-
-                console.log('✅ Guest auth configured for presence channels');
             }
 
             // Subscribe to session WebSocket channel for support events
