@@ -34,9 +34,18 @@ class NewSupportMessage implements ShouldBroadcastNow
             new Channel("chat.session.{$session->uuid}"),
         ];
 
-        // Si c'est un message utilisateur, notifier l'agent de support
-        if ($this->message->sender_type === 'user' && $session->support_agent_id) {
-            $channels[] = new PrivateChannel("user.{$session->support_agent_id}");
+        // Si c'est un message utilisateur
+        if ($this->message->sender_type === 'user') {
+            // Notifier l'agent de support assigné
+            if ($session->support_agent_id) {
+                $channels[] = new PrivateChannel("user.{$session->support_agent_id}");
+            }
+
+            // Notifier aussi le canal de support de l'agent IA pour que tous les admins
+            // qui monitore cet agent voient le message (même si pas encore assigné)
+            if ($session->agent_id && $session->isEscalated()) {
+                $channels[] = new PrivateChannel("agent.{$session->agent_id}.support");
+            }
         }
 
         // Si c'est un message agent, notifier le canal support de l'agent IA

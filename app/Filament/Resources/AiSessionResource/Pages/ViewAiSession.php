@@ -412,13 +412,12 @@ class ViewAiSession extends ViewRecord
             }
 
             // Envoyer par email si le client a fourni son email (mode async)
+            // Note: On envoie juste l'email, sans créer de SupportMessage car le message IA existe déjà
             if ($this->record->user_email) {
-                // Créer un message support avec le contenu validé
-                app(SupportService::class)->sendAgentMessage(
+                app(SupportService::class)->sendValidatedAiMessageByEmail(
                     $this->record,
-                    auth()->user(),
-                    $message->content,
-                    'chat'
+                    $message,
+                    auth()->user()
                 );
             }
 

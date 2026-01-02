@@ -206,9 +206,27 @@ class EscalationService
 
     /**
      * Envoie des notifications par email aux agents de support.
+     *
+     * Note: On vérifie si une notification par email a déjà été envoyée récemment
+     * pour éviter les doublons (ex: NewMessageNotificationMail + EscalationNotificationMail).
      */
     protected function sendEmailNotifications(AiSession $session, Collection $agents): void
     {
+        // Vérifier si une notification email a été envoyée dans les 60 dernières secondes
+        // pour éviter d'envoyer un email d'escalade juste après un email de nouveau message
+        $lastNotificationAt = $session->support_metadata['email_notification_sent_at'] ?? null;
+        if ($lastNotificationAt) {
+            $lastNotification = \Carbon\Carbon::parse($lastNotificationAt);
+            if ($lastNotification->diffInSeconds(now()) < 60) {
+                Log::info('Skipping escalation email - recent notification already sent', [
+                    'session_id' => $session->id,
+                    'last_notification_at' => $lastNotificationAt,
+                    'seconds_ago' => $lastNotification->diffInSeconds(now()),
+                ]);
+                return;
+            }
+        }
+
         foreach ($agents as $agent) {
             if (!$agent->email) {
                 continue;
@@ -234,6 +252,7 @@ class EscalationService
         $session->update([
             'support_metadata' => array_merge($session->support_metadata ?? [], [
                 'notification_sent_at' => now()->toISOString(),
+                'email_notification_sent_at' => now()->toISOString(),
                 'notified_agents_count' => $agents->count(),
             ]),
         ]);

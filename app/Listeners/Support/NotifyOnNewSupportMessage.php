@@ -148,6 +148,13 @@ class NotifyOnNewSupportMessage implements ShouldQueue
                         'session_id' => $session->id,
                     ]);
                 }
+
+                // Marquer qu'un email a été envoyé pour éviter les doublons avec l'email d'escalade
+                $session->update([
+                    'support_metadata' => array_merge($session->support_metadata ?? [], [
+                        'email_notification_sent_at' => now()->toISOString(),
+                    ]),
+                ]);
             } catch (\Throwable $e) {
                 Log::error('NewSupportMessage: Failed to send email', [
                     'user_id' => $user->id,

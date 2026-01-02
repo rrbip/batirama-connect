@@ -488,6 +488,60 @@ class SupportService
     }
 
     /**
+     * Envoie un message IA validé par email au client.
+     *
+     * Cette méthode est utilisée quand on valide un message IA : on envoie juste l'email
+     * sans créer de SupportMessage car le message IA existe déjà.
+     */
+    public function sendValidatedAiMessageByEmail(
+        AiSession $session,
+        \App\Models\AiMessage $aiMessage,
+        \App\Models\User $validator
+    ): bool {
+        if (!$session->user_email) {
+            Log::warning('Cannot send validated AI message: no user email on session', [
+                'session_id' => $session->id,
+            ]);
+            return false;
+        }
+
+        // Générer un token d'accès si pas encore fait
+        if (!$session->support_access_token) {
+            $session->generateSupportAccessToken();
+            $session->refresh();
+        }
+
+        try {
+            // Utiliser un Mailable spécifique pour les réponses IA validées
+            $mailable = new \App\Mail\Support\ValidatedAiResponseMail($session, $aiMessage);
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($session->user_email, $mailable, $smtpConfig);
+            } else {
+                \Illuminate\Support\Facades\Mail::to($session->user_email)->send($mailable);
+            }
+
+            Log::info('Validated AI message sent by email', [
+                'session_id' => $session->id,
+                'ai_message_id' => $aiMessage->id,
+                'to' => $session->user_email,
+                'custom_smtp' => $smtpConfig !== null,
+            ]);
+
+            return true;
+
+        } catch (\Throwable $e) {
+            Log::error('Failed to send validated AI message by email', [
+                'session_id' => $session->id,
+                'ai_message_id' => $aiMessage->id,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
      * Envoie un email de confirmation au client après qu'il ait fourni son email.
      */
     public function sendEmailConfirmationToUser(AiSession $session): bool
