@@ -75,7 +75,7 @@ class NotifyOnNewSupportMessage implements ShouldQueue
             return;
         }
 
-        // Sinon, notifier tous les agents de support avec notify_on_escalation
+        // Notifier tous les agents de support avec notify_on_escalation
         $supportUsers = $agent->supportUsers()
             ->wherePivot('notify_on_escalation', true)
             ->get();
@@ -84,16 +84,15 @@ class NotifyOnNewSupportMessage implements ShouldQueue
             $supportUsers = $agent->supportUsers;
         }
 
-        // Fallback: si toujours vide, notifier les admins/super-admins
+        // Pas de fallback vers admins - système marque blanche
+        // Les admins doivent être explicitement assignés comme agents de support
         if ($supportUsers->isEmpty()) {
-            $supportUsers = User::whereHas('roles', function ($query) {
-                $query->whereIn('name', ['super-admin', 'admin']);
-            })->get();
-
-            Log::info('NewSupportMessage: Using admin fallback', [
+            Log::warning('NewSupportMessage: No support users configured for agent', [
                 'session_id' => $session->id,
-                'admin_count' => $supportUsers->count(),
+                'agent_id' => $agent->id,
+                'agent_name' => $agent->name,
             ]);
+            return;
         }
 
         Log::info('NewSupportMessage: Sending notifications', [
