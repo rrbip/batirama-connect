@@ -610,4 +610,47 @@ class PublicChatController extends Controller
             ],
         ]);
     }
+
+    /**
+     * POST /c/{token}/ping
+     * Met à jour le timestamp d'activité de l'utilisateur.
+     * À appeler régulièrement (toutes les 30 secondes) pour signaler que l'utilisateur est connecté.
+     */
+    public function ping(string $token): JsonResponse
+    {
+        $accessToken = PublicAccessToken::where('token', $token)->first();
+
+        if (!$accessToken) {
+            return response()->json([
+                'error' => 'token_not_found',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'no_session',
+                'message' => 'Aucune session active',
+            ], 404);
+        }
+
+        // Mettre à jour l'activité
+        $session->touch('last_activity_at');
+        $session->update([
+            'support_metadata' => array_merge($session->support_metadata ?? [], [
+                'last_user_activity' => now()->toISOString(),
+                'user_online' => true,
+            ]),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'session_id' => $session->uuid,
+                'timestamp' => now()->toIso8601String(),
+            ],
+        ]);
+    }
 }

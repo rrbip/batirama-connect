@@ -298,6 +298,31 @@ class AiSession extends Model
     }
 
     /**
+     * Vérifie si l'utilisateur est actuellement connecté au chat.
+     * Basé sur la dernière activité : considéré en ligne si actif dans les 60 dernières secondes.
+     *
+     * @param int $thresholdSeconds Seuil en secondes (défaut: 60)
+     */
+    public function isUserOnline(int $thresholdSeconds = 60): bool
+    {
+        // Vérifier d'abord support_metadata.last_user_activity (plus précis)
+        $lastUserActivity = $this->support_metadata['last_user_activity'] ?? null;
+
+        if ($lastUserActivity) {
+            $lastActivity = \Carbon\Carbon::parse($lastUserActivity);
+            return $lastActivity->diffInSeconds(now()) < $thresholdSeconds;
+        }
+
+        // Fallback sur last_activity_at
+        if ($this->last_activity_at) {
+            return $this->last_activity_at->diffInSeconds(now()) < $thresholdSeconds;
+        }
+
+        // Si aucune activité connue, considérer comme hors ligne
+        return false;
+    }
+
+    /**
      * Escalade la session vers le support humain.
      */
     public function escalate(string $reason, ?float $maxRagScore = null): self

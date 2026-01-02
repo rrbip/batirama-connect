@@ -56,8 +56,10 @@ class SupportService
         // Dispatcher l'événement pour le temps réel
         event(new NewSupportMessage($message));
 
-        // Envoyer aussi par email si l'utilisateur a fourni son email (mode async)
-        $shouldSendEmail = $sendEmailIfAvailable && $session->user_email && $channel === 'chat';
+        // Envoyer par email si l'utilisateur a fourni son email ET n'est pas connecté au chat
+        $hasEmail = !empty($session->user_email);
+        $isUserOnline = $session->isUserOnline();
+        $shouldSendEmail = $sendEmailIfAvailable && $hasEmail && $channel === 'chat' && !$isUserOnline;
 
         Log::debug('SupportService: Email notification check', [
             'session_id' => $session->id,
@@ -65,11 +67,17 @@ class SupportService
             'send_email_if_available' => $sendEmailIfAvailable,
             'user_email' => $session->user_email,
             'channel' => $channel,
+            'is_user_online' => $isUserOnline,
             'should_send_email' => $shouldSendEmail,
         ]);
 
         if ($shouldSendEmail) {
             $this->sendEmailNotificationForMessage($session, $message, $agent);
+        } elseif ($hasEmail && $isUserOnline) {
+            Log::debug('SupportService: User online, skipping email', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+            ]);
         }
 
         return $message;
@@ -515,6 +523,7 @@ class SupportService
      *
      * Cette méthode est utilisée quand on valide un message IA : on envoie juste l'email
      * sans créer de SupportMessage car le message IA existe déjà.
+     * L'email n'est envoyé que si l'utilisateur n'est pas connecté au chat.
      */
     public function sendValidatedAiMessageByEmail(
         AiSession $session,
@@ -526,6 +535,15 @@ class SupportService
                 'session_id' => $session->id,
             ]);
             return false;
+        }
+
+        // Vérifier si l'utilisateur est connecté au chat
+        if ($session->isUserOnline()) {
+            Log::debug('Validated AI message: User online, skipping email', [
+                'session_id' => $session->id,
+                'ai_message_id' => $aiMessage->id,
+            ]);
+            return true; // Considéré comme succès car l'utilisateur verra le message en temps réel
         }
 
         // Générer un token d'accès si pas encore fait
