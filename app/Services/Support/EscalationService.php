@@ -177,9 +177,18 @@ class EscalationService
         // Envoyer des notifications database Filament (cloche)
         $this->sendDatabaseNotifications($session, $agents);
 
+        // Vérifier si des agents sont connectés
+        $hasConnectedAgents = $this->hasConnectedAgents($session);
+        Log::info('EscalationService: Checking connected agents for email notification', [
+            'session_id' => $session->id,
+            'agent_id' => $session->agent_id,
+            'has_connected_agents' => $hasConnectedAgents,
+            'will_send_email' => !$hasConnectedAgents,
+        ]);
+
         // Si aucun agent n'est connecté, envoyer un email
         // Sinon la notification cloche suffit
-        if (!$this->hasConnectedAgents($session)) {
+        if (!$hasConnectedAgents) {
             $this->sendEmailNotifications($session, $agents);
         }
     }
