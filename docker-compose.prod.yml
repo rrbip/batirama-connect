@@ -74,3 +74,9 @@ services:
     command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--max-time=3600"]
     deploy:
       replicas: 3
+
+  queue-emails:
+    restart: always
+    command: ["php", "artisan", "queue:work", "redis", "--queue=emails", "--sleep=10", "--tries=2", "--max-time=3600"]
+    deploy:
+      replicas: 1
