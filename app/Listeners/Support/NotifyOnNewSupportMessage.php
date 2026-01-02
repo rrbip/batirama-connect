@@ -7,12 +7,14 @@ namespace App\Listeners\Support;
 use App\Events\Support\NewSupportMessage;
 use App\Mail\Support\NewMessageNotificationMail;
 use App\Models\User;
-use App\Notifications\Support\NewSupportMessageNotification;
 use App\Services\Support\PresenceService;
+use Filament\Notifications\Actions\Action;
+use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mime\Address;
@@ -41,7 +43,7 @@ class NotifyOnNewSupportMessage implements ShouldQueue
         $message = $event->message;
         $session = $message->session;
 
-        // Ne notifier que pour les messages utilisateurs (pas les messages agents)
+        // Ne notifier que pour les messages utilisateurs (pas les messages agents ou système)
         if ($message->sender_type !== 'user') {
             return;
         }
@@ -115,12 +117,36 @@ class NotifyOnNewSupportMessage implements ShouldQueue
         string $messageContent,
         Collection $connectedUserIds
     ): void {
+        $agentName = $session->agent?->name ?? 'Agent inconnu';
+        $userName = $session->user?->name ?? $session->user_email ?? 'Visiteur';
+        $preview = Str::limit($messageContent, 80);
+
         // Toujours envoyer la notification Filament (visible à la reconnexion)
-        $user->notify(new NewSupportMessageNotification(
-            session: $session,
-            senderType: 'user',
-            messagePreview: $messageContent
-        ));
+        try {
+            Notification::make()
+                ->title("Message de {$userName}")
+                ->icon('heroicon-o-chat-bubble-bottom-center-text')
+                ->iconColor('info')
+                ->body("{$agentName} - {$preview}")
+                ->actions([
+                    Action::make('view')
+                        ->label('Répondre')
+                        ->url("/admin/ai-sessions/{$session->id}")
+                        ->markAsRead(),
+                ])
+                ->sendToDatabase($user);
+
+            Log::debug('NewSupportMessage: Filament notification sent', [
+                'user_id' => $user->id,
+                'session_id' => $session->id,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('NewSupportMessage: Failed to send Filament notification', [
+                'user_id' => $user->id,
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Si l'utilisateur n'est pas connecté, envoyer aussi un email
         $isConnected = $connectedUserIds->contains($user->id);
