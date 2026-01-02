@@ -19,13 +19,17 @@ class SupportService
 
     /**
      * Envoie un message de l'agent de support vers l'utilisateur.
+     *
+     * Si l'utilisateur a fourni un email (mode async), le message est aussi
+     * envoyé par email en plus du temps réel.
      */
     public function sendAgentMessage(
         AiSession $session,
         User $agent,
         string $content,
         string $channel = 'chat',
-        ?string $originalContent = null
+        ?string $originalContent = null,
+        bool $sendEmailIfAvailable = true
     ): SupportMessage {
         $message = SupportMessage::create([
             'session_id' => $session->id,
@@ -50,7 +54,52 @@ class SupportService
         // Dispatcher l'événement pour le temps réel
         event(new NewSupportMessage($message));
 
+        // Envoyer aussi par email si l'utilisateur a fourni son email (mode async)
+        if ($sendEmailIfAvailable && $session->user_email && $channel === 'chat') {
+            $this->sendEmailNotificationForMessage($session, $message, $agent);
+        }
+
         return $message;
+    }
+
+    /**
+     * Envoie une notification email pour un message de support.
+     */
+    protected function sendEmailNotificationForMessage(
+        AiSession $session,
+        SupportMessage $message,
+        User $agent
+    ): void {
+        // Générer un token d'accès si pas encore fait
+        if (!$session->support_access_token) {
+            $session->generateSupportAccessToken();
+            $session->refresh();
+        }
+
+        try {
+            $mailable = new \App\Mail\Support\SupportReplyMail($session, $message, $agent);
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($session->user_email, $mailable, $smtpConfig);
+            } else {
+                \Illuminate\Support\Facades\Mail::to($session->user_email)->queue($mailable);
+            }
+
+            Log::info('Support email notification sent', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+                'to' => $session->user_email,
+                'custom_smtp' => $smtpConfig !== null,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::error('Failed to send support email notification', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
