@@ -268,7 +268,9 @@
         console.log('👥 Joining presence channels for ' + supportAgentIds.length + ' agent(s)');
 
         supportAgentIds.forEach(function(agentId) {
-            var channelName = 'presence-agent.' + agentId + '.support';
+            // Note: Echo.join() adds 'presence-' prefix automatically
+            // So 'agent.2.support' becomes 'presence-agent.2.support'
+            var channelName = 'agent.' + agentId + '.support';
 
             try {
                 var channel = window.Echo.join(channelName)
@@ -298,7 +300,8 @@
     window.addEventListener('beforeunload', function() {
         presenceChannels.forEach(function(pc) {
             try {
-                window.Echo.leave('presence-agent.' + pc.agentId + '.support');
+                // Echo.leave() uses the same channel name as Echo.join() (without prefix)
+                window.Echo.leave('agent.' + pc.agentId + '.support');
             } catch (e) {
                 // Ignore errors during cleanup
             }
