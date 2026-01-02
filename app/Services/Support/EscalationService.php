@@ -15,6 +15,10 @@ use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Mailer\Mailer;
+use Symfony\Component\Mailer\Transport;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 
 class EscalationService
 {
@@ -317,23 +321,44 @@ class EscalationService
      */
     protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
     {
-        $transport = new \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport(
+        $encryption = strtolower($smtpConfig['encryption'] ?? 'tls');
+        $port = (int) $smtpConfig['port'];
+
+        // SSL (port 465): smtps://user:pass@host:465
+        // TLS (port 587): smtp://user:pass@host:587
+        $scheme = ($encryption === 'ssl' || $port === 465) ? 'smtps' : 'smtp';
+
+        $dsn = sprintf(
+            '%s://%s:%s@%s:%d',
+            $scheme,
+            urlencode($smtpConfig['username']),
+            urlencode($smtpConfig['password']),
             $smtpConfig['host'],
-            $smtpConfig['port'],
-            $smtpConfig['encryption'] === 'tls'
-        );
-        $transport->setUsername($smtpConfig['username']);
-        $transport->setPassword($smtpConfig['password']);
-
-        $mailer = new \Symfony\Component\Mailer\Mailer($transport);
-        $symfonyMailer = new \Illuminate\Mail\Mailer(
-            'custom',
-            app('view'),
-            $mailer,
-            app('events')
+            $port
         );
 
-        $symfonyMailer->to($to)->send($mailable);
+        $transport = Transport::fromDsn($dsn);
+        $mailer = new Mailer($transport);
+
+        // Extraire le sujet de l'Envelope
+        $subject = 'Nouvelle demande de support';
+        if (method_exists($mailable, 'envelope')) {
+            $envelope = $mailable->envelope();
+            $subject = $envelope->subject ?? $subject;
+        }
+
+        // Rendre le contenu HTML
+        $mailable->from($smtpConfig['from_address'], $smtpConfig['from_name']);
+        $htmlContent = $mailable->to($to)->render();
+
+        // Créer et envoyer l'email Symfony
+        $email = (new Email())
+            ->from(new Address($smtpConfig['from_address'], $smtpConfig['from_name']))
+            ->to($to)
+            ->subject($subject)
+            ->html($htmlContent);
+
+        $mailer->send($email);
     }
 
     /**
