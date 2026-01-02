@@ -1315,7 +1315,7 @@
                 }
             }
 
-            // Ping de présence pour signaler que l'utilisateur est connecté
+            // Ping de présence pour signaler que l'utilisateur est connecté (fallback HTTP)
             var pingInterval = null;
             function startPresencePing() {
                 if (!CONFIG.tokenMode || !CONFIG.token) {
@@ -1333,6 +1333,21 @@
                     if (pingInterval) {
                         clearInterval(pingInterval);
                     }
+                });
+            }
+
+            function sendPresencePing() {
+                if (!CONFIG.token) return;
+
+                fetch(CONFIG.baseUrl + '/c/' + CONFIG.token + '/ping', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                }).catch(function(error) {
+                    // Ignorer les erreurs de ping silencieusement
+                    console.debug('Ping failed:', error);
                 });
             }
 
