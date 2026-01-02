@@ -48,17 +48,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagickwand-dev \
     # PDF utilities
     poppler-utils \
-    # IMAP pour réception des emails de support
-    libc-client2007e-dev \
-    libkrb5-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ===========================================
 # COUCHE 2: Extensions PHP (change rarement)
 # ===========================================
+# Note: IMAP est géré via webklex/php-imap (librairie PHP pure, pas d'extension native)
+# La librairie c-client requise par l'extension IMAP native n'est plus disponible sur Debian Trixie
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure intl \
-    && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
     && docker-php-ext-install -j$(nproc) \
         pdo \
         pdo_pgsql \
@@ -68,8 +66,7 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
         intl \
         bcmath \
         opcache \
-        pcntl \
-        imap
+        pcntl
 
 # Installation de Redis extension
 RUN pecl install redis \
