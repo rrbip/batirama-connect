@@ -141,11 +141,19 @@ class ImapService
     protected function processEmail(Agent $agent, Message $message): ?array
     {
         try {
-            $subject = $message->getSubject()?->toString() ?? '';
+            // Décoder le sujet MIME (ex: =?iso-8859-1?Q?R=E9f:?= -> Réf:)
+            $rawSubject = $message->getSubject()?->toString() ?? '';
+            $subject = $this->decodeMimeHeader($rawSubject);
             $from = $message->getFrom()[0]?->mail ?? '';
             $messageId = $message->getMessageId()?->toString();
             $inReplyTo = $message->getInReplyTo()?->toString();
             $references = $message->getReferences()?->toString();
+
+            Log::debug('Processing email', [
+                'raw_subject' => $rawSubject,
+                'decoded_subject' => $subject,
+                'from' => $from,
+            ]);
 
             // Récupérer le corps du message (préférer texte brut, sinon HTML)
             $body = $message->getTextBody();
@@ -338,5 +346,50 @@ class ImapService
         }
 
         return 'Erreur de connexion IMAP: ' . $error;
+    }
+
+    /**
+     * Décode un en-tête MIME encodé (ex: =?iso-8859-1?Q?R=E9f:?= -> Réf:)
+     */
+    protected function decodeMimeHeader(string $header): string
+    {
+        // Si le header ne contient pas d'encodage MIME, retourner tel quel
+        if (!str_contains($header, '=?')) {
+            return $header;
+        }
+
+        // Essayer iconv_mime_decode (plus robuste)
+        $decoded = @iconv_mime_decode($header, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+        if ($decoded !== false && !empty($decoded)) {
+            return $decoded;
+        }
+
+        // Fallback: mb_decode_mimeheader
+        $decoded = @mb_decode_mimeheader($header);
+        if (!empty($decoded)) {
+            return $decoded;
+        }
+
+        // Dernier recours: extraction manuelle du pattern
+        // Format: =?charset?encoding?text?=
+        $result = preg_replace_callback(
+            '/=\?([^?]+)\?([BQbq])\?([^?]*)\?=/',
+            function ($matches) {
+                $charset = $matches[1];
+                $encoding = strtoupper($matches[2]);
+                $text = $matches[3];
+
+                if ($encoding === 'B') {
+                    $text = base64_decode($text);
+                } elseif ($encoding === 'Q') {
+                    $text = quoted_printable_decode(str_replace('_', ' ', $text));
+                }
+
+                return @iconv($charset, 'UTF-8//IGNORE', $text) ?: $text;
+            },
+            $header
+        );
+
+        return $result ?: $header;
     }
 }
