@@ -96,6 +96,7 @@ WORKDIR /var/www/html
 COPY composer.json composer.lock ./
 
 # Créer les dossiers Laravel nécessaires AVANT composer install
+# Note: Ces dossiers sont créés pour le build, mais seront écrasés par le bind mount en dev
 RUN mkdir -p bootstrap/cache \
     && mkdir -p storage/framework/sessions \
     && mkdir -p storage/framework/views \
@@ -103,7 +104,9 @@ RUN mkdir -p bootstrap/cache \
     && mkdir -p storage/logs \
     && mkdir -p resources/views \
     && mkdir -p database/factories \
-    && mkdir -p database/seeders
+    && mkdir -p database/seeders \
+    && chown -R www-data:www-data bootstrap storage resources \
+    && chmod -R 775 bootstrap storage
 
 # Installer les dépendances Composer (cette couche est mise en cache
 # tant que composer.json et composer.lock ne changent pas)
