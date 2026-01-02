@@ -610,6 +610,12 @@ class SupportService
             return false;
         }
 
+        // Générer un token d'accès si pas encore fait (pour avoir une référence cohérente)
+        if (!$session->support_access_token) {
+            $session->generateSupportAccessToken();
+            $session->refresh();
+        }
+
         try {
             $mailable = new \App\Mail\Support\UserEmailConfirmationMail($session);
             $smtpConfig = $agent->getSmtpConfig();
