@@ -438,6 +438,11 @@
                                                                 DOCUMENTÉ
                                                             </x-filament::badge>
 
+                                                            {{-- Badge type: Direct QR Match (Qdrant sans LLM) --}}
+                                                            <x-filament::badge color="success" icon="heroicon-s-bolt" x-show="block.type === 'direct_qr_match'">
+                                                                RÉPONSE DIRECTE
+                                                            </x-filament::badge>
+
                                                             {{-- Badge état: Validé --}}
                                                             <x-filament::badge color="success" icon="heroicon-s-check" x-show="block.validated && !block.rejected">
                                                                 VALIDÉ
@@ -474,8 +479,7 @@
                                                                 }"
                                                                 class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
                                                                 rows="1"
-                                                                x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
-                                                                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                x-effect="block.question; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
                                                             ></textarea>
                                                         </div>
 
@@ -492,8 +496,7 @@
                                                                 }"
                                                                 class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
                                                                 rows="1"
-                                                                x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
-                                                                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
                                                             ></textarea>
                                                         </div>
 
