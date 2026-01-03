@@ -489,7 +489,7 @@
                                                                 }"
                                                                 class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
                                                                 rows="1"
-                                                                x-effect="block.question; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
+                                                                x-effect="block.question; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = ($el.scrollHeight + 2) + 'px'; })"
                                                             ></textarea>
                                                         </div>
 
@@ -541,7 +541,7 @@
                                                                 }"
                                                                 class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
                                                                 rows="1"
-                                                                x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
+                                                                x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = ($el.scrollHeight + 2) + 'px'; })"
                                                             ></textarea>
                                                         </div>
 
