@@ -236,6 +236,8 @@
                                 if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
                                     $previousQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
                                 }
+                                // Récupérer le flag requires_handoff si c'est un direct_qr_match
+                                $originalRequiresHandoff = $message['rag_context']['stats']['requires_handoff'] ?? false;
                             @endphp
                             <div class="flex justify-start" x-data="{
                                 showValidation: false,
@@ -243,7 +245,7 @@
                                 validationQuestion: @js($previousQuestion),
                                 correctionQuestion: @js($previousQuestion),
                                 correctedContent: @js($message['content']),
-                                requiresHandoff: false
+                                requiresHandoff: @js($originalRequiresHandoff)
                             }">
                                 <div class="max-w-[75%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">

@@ -252,6 +252,7 @@ class RagService
                 'use_category_filtering' => $agent->use_category_filtering ?? false,
                 'response_type' => 'direct_qr_match',
                 'direct_qr_threshold' => IndexingStrategyService::DIRECT_QR_THRESHOLD,
+                'requires_handoff' => $qr['requires_handoff'] ?? false,
             ],
         ];
 
