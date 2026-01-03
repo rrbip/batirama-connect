@@ -336,6 +336,7 @@ class AgentResource extends Resource
                                     ->schema([
                                         Forms\Components\Toggle::make('strict_mode')
                                             ->label('Mode strict')
+                                            ->live()
                                             ->helperText('Ajoute automatiquement des garde-fous contre les hallucinations. Recommandé pour les agents factuels (support, BTP, médical).')
                                             ->columnSpanFull(),
                                     ]),
