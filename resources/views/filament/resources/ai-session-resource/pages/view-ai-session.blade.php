@@ -330,7 +330,7 @@
                                     }
                                 }
                             }">
-                                <div class="max-w-[80%]">
+                                <div class="max-w-3xl">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -402,143 +402,123 @@
                                         @else
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
-                                                    <div class="border-2 rounded-lg p-4"
-                                                        :style="{
-                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : '#d1d5db'),
-                                                            opacity: block.rejected ? 0.6 : 1
+                                                    <div class="border-2 rounded-lg p-4 transition-colors"
+                                                        :class="{
+                                                            'border-gray-300 dark:border-gray-600': !block.rejected && !block.validated,
+                                                            'border-success-500 bg-success-50 dark:bg-success-950': block.validated && !block.rejected,
+                                                            'border-danger-500 bg-danger-50 dark:bg-danger-950 opacity-70': block.rejected
                                                         }">
-                                                        {{-- Header du bloc --}}
-                                                        <div class="flex items-center justify-between gap-2 mb-3">
+                                                        {{-- Header du bloc - hauteur fixe --}}
+                                                        <div class="flex items-center justify-between gap-3 mb-3 min-h-[40px]">
                                                             <div class="flex items-center gap-2 flex-wrap">
-                                                                {{-- Numéro de question (visible multi-questions) --}}
-                                                                <span class="inline-flex items-center px-2.5 py-1 text-xs font-bold rounded shadow-sm" x-show="blocks.length > 1" style="background-color: #3b82f6; color: white;">
+                                                                {{-- Numéro de question (multi-questions) --}}
+                                                                <x-filament::badge color="primary" x-show="blocks.length > 1">
                                                                     Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
-                                                                </span>
+                                                                </x-filament::badge>
 
-                                                                {{-- Badge type (Suggestion/Documenté) - TRÈS VISIBLE --}}
-                                                                <template x-if="block.is_suggestion || block.type === 'suggestion'">
-                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg shadow-md" style="background-color: #f59e0b; color: white;">
-                                                                        <x-heroicon-s-light-bulb class="w-4 h-4" />
-                                                                        SUGGESTION IA
-                                                                    </span>
-                                                                </template>
-                                                                <template x-if="!block.is_suggestion && block.type === 'documented'">
-                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg shadow-md" style="background-color: #06b6d4; color: white;">
-                                                                        <x-heroicon-s-document-check class="w-4 h-4" />
-                                                                        DOCUMENTÉ
-                                                                    </span>
-                                                                </template>
+                                                                {{-- Badge type: Suggestion --}}
+                                                                <x-filament::badge color="warning" icon="heroicon-s-light-bulb" x-show="block.is_suggestion || block.type === 'suggestion'">
+                                                                    SUGGESTION IA
+                                                                </x-filament::badge>
 
-                                                                {{-- Badge validé --}}
-                                                                <template x-if="block.validated && !block.rejected">
-                                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full" style="background-color: #dcfce7; color: #15803d;">
-                                                                        <x-heroicon-s-check class="w-3.5 h-3.5" />
-                                                                        VALIDÉ
-                                                                    </span>
-                                                                </template>
+                                                                {{-- Badge type: Documenté --}}
+                                                                <x-filament::badge color="info" icon="heroicon-s-document-check" x-show="!block.is_suggestion && block.type === 'documented'">
+                                                                    DOCUMENTÉ
+                                                                </x-filament::badge>
 
-                                                                {{-- Badge rejeté --}}
-                                                                <template x-if="block.rejected">
-                                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full" style="background-color: #fee2e2; color: #b91c1c;">
-                                                                        <x-heroicon-s-x-mark class="w-3.5 h-3.5" />
-                                                                        REJETÉ
-                                                                    </span>
-                                                                </template>
+                                                                {{-- Badge état: Validé --}}
+                                                                <x-filament::badge color="success" icon="heroicon-s-check" x-show="block.validated && !block.rejected">
+                                                                    VALIDÉ
+                                                                </x-filament::badge>
+
+                                                                {{-- Badge état: Rejeté --}}
+                                                                <x-filament::badge color="danger" icon="heroicon-s-x-mark" x-show="block.rejected">
+                                                                    REJETÉ
+                                                                </x-filament::badge>
                                                             </div>
 
-                                                            {{-- Boutons - TOUT LOCAL jusqu'à Envoyer --}}
-                                                            <div class="flex items-center gap-2" x-show="!sent">
-                                                                {{-- État: En attente → Valider + Rejeter --}}
-                                                                <template x-if="!block.validated && !block.rejected">
-                                                                    <div class="flex gap-2">
-                                                                        <button type="button"
-                                                                            @click="block.validated = true"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg shadow-md transition-all hover:opacity-90"
-                                                                            style="background-color: #16a34a; color: white;">
-                                                                            <x-heroicon-s-check class="w-4 h-4" />
-                                                                            Valider
-                                                                        </button>
-                                                                        <button type="button"
-                                                                            @click="block.rejected = true"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg shadow-md transition-all hover:opacity-90"
-                                                                            style="background-color: #dc2626; color: white;">
-                                                                            <x-heroicon-s-x-mark class="w-4 h-4" />
-                                                                            Rejeter
-                                                                        </button>
-                                                                    </div>
-                                                                </template>
+                                                            {{-- Boutons - Largeur fixe pour éviter les sauts --}}
+                                                            <div class="flex items-center gap-2 min-w-[200px] justify-end" x-show="!sent">
+                                                                {{-- Valider + Rejeter (état initial) --}}
+                                                                <button type="button"
+                                                                    @click="block.validated = true"
+                                                                    x-show="!block.validated && !block.rejected"
+                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-success-600 text-white hover:bg-success-700 shadow-sm transition-all">
+                                                                    <x-heroicon-s-check class="w-4 h-4" />
+                                                                    Valider
+                                                                </button>
+                                                                <button type="button"
+                                                                    @click="block.rejected = true"
+                                                                    x-show="!block.validated && !block.rejected"
+                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-danger-600 text-white hover:bg-danger-700 shadow-sm transition-all">
+                                                                    <x-heroicon-s-x-mark class="w-4 h-4" />
+                                                                    Rejeter
+                                                                </button>
 
-                                                                {{-- État: Verrouillé (validé OU rejeté) → Annuler --}}
-                                                                <template x-if="block.validated || block.rejected">
-                                                                    <button type="button"
-                                                                        @click="block.validated = false; block.rejected = false"
-                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border-2 transition-all hover:opacity-80"
-                                                                        style="background-color: #f3f4f6; color: #374151; border-color: #9ca3af;">
-                                                                        <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
-                                                                        Annuler
-                                                                    </button>
-                                                                </template>
+                                                                {{-- Annuler (état verrouillé) --}}
+                                                                <button type="button"
+                                                                    @click="block.validated = false; block.rejected = false"
+                                                                    x-show="block.validated || block.rejected"
+                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border border-gray-400 dark:border-gray-500 transition-all">
+                                                                    <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
+                                                                    Annuler
+                                                                </button>
                                                             </div>
                                                         </div>
 
-                                                        {{-- Bannière avertissement si suggestion --}}
-                                                        <template x-if="(block.is_suggestion || block.type === 'suggestion') && !block.validated && !block.rejected">
-                                                            <div class="mb-3 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded">
-                                                                <div class="flex items-center gap-2 text-xs text-warning-700 dark:text-warning-300">
-                                                                    <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
-                                                                    <span><strong>Suggestion IA</strong> - Aucune documentation trouvée. Vérifiez avant de valider.</span>
+                                                        {{-- Avertissement suggestion (hauteur fixe réservée) --}}
+                                                        <div class="mb-3" x-show="(block.is_suggestion || block.type === 'suggestion') && !block.validated && !block.rejected">
+                                                            <div class="p-2 bg-warning-50 dark:bg-warning-950 border border-warning-300 dark:border-warning-700 rounded-lg">
+                                                                <div class="flex items-center gap-2 text-sm text-warning-700 dark:text-warning-300 font-medium">
+                                                                    <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
+                                                                    <span>Suggestion IA - Aucune documentation. Vérifiez avant validation.</span>
                                                                 </div>
                                                             </div>
-                                                        </template>
-
-                                                        {{-- Question --}}
-                                                        <div class="mb-4">
-                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Question :</label>
-                                                            {{-- Éditable si pas verrouillé --}}
-                                                            <template x-if="!block.validated && !block.rejected && !sent">
-                                                                <textarea
-                                                                    x-model="block.question"
-                                                                    rows="2"
-                                                                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
-                                                                    placeholder="Question du client..."
-                                                                ></textarea>
-                                                            </template>
-                                                            {{-- Lecture seule si verrouillé --}}
-                                                            <template x-if="block.validated || block.rejected || sent">
-                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300" :class="{'line-through opacity-50': block.rejected}" x-text="block.question"></div>
-                                                            </template>
                                                         </div>
 
-                                                        {{-- Réponse --}}
-                                                        <div class="mb-4">
-                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Réponse :</label>
-                                                            {{-- Éditable si pas verrouillé --}}
-                                                            <template x-if="!block.validated && !block.rejected && !sent">
-                                                                <textarea
-                                                                    x-model="block.answer"
-                                                                    rows="6"
-                                                                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
-                                                                    placeholder="Réponse de l'IA..."
-                                                                ></textarea>
-                                                            </template>
-                                                            {{-- Lecture seule si verrouillé --}}
-                                                            <template x-if="block.validated || block.rejected || sent">
-                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none" :class="{'line-through opacity-50': block.rejected}" x-html="block.answer"></div>
-                                                            </template>
+                                                        {{-- Question - Toujours visible, édition conditionnelle --}}
+                                                        <div class="mb-3">
+                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Question :</label>
+                                                            <div class="p-3 rounded-lg text-sm min-h-[2.5rem]"
+                                                                :class="{
+                                                                    'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400': block.validated || block.rejected || sent,
+                                                                    'line-through opacity-50': block.rejected
+                                                                }"
+                                                                :contenteditable="!block.validated && !block.rejected && !sent"
+                                                                @input="block.question = $event.target.innerText"
+                                                                x-text="block.question">
+                                                            </div>
                                                         </div>
 
-                                                        {{-- Checkbox handoff - visible seulement si éditable --}}
-                                                        <div class="flex items-center gap-3 p-2 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800" x-show="!block.validated && !block.rejected && !sent">
-                                                            <input
-                                                                type="checkbox"
-                                                                x-model="block.requiresHandoff"
-                                                                :id="'handoff-' + block.id + '-{{ $message['original_id'] }}'"
-                                                                class="w-5 h-5 rounded border-orange-400 dark:border-orange-600 text-orange-600 focus:ring-orange-500"
-                                                            />
-                                                            <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-sm font-semibold text-orange-700 dark:text-orange-300 cursor-pointer flex items-center gap-2">
-                                                                <x-heroicon-s-user-group class="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                                                                Nécessite toujours un suivi humain
-                                                            </label>
+                                                        {{-- Réponse - Toujours visible, édition conditionnelle --}}
+                                                        <div class="mb-3">
+                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Réponse :</label>
+                                                            <div class="p-3 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none min-h-[4rem]"
+                                                                :class="{
+                                                                    'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-100 dark:bg-gray-800': block.validated || block.rejected || sent,
+                                                                    'line-through opacity-50': block.rejected
+                                                                }"
+                                                                x-html="block.answer">
+                                                            </div>
+                                                        </div>
+
+                                                        {{-- Checkbox handoff - hauteur réservée --}}
+                                                        <div class="min-h-[44px]" x-show="!sent">
+                                                            <div class="flex items-center gap-3 p-2 rounded-lg bg-warning-50 dark:bg-warning-900 border border-warning-300 dark:border-warning-700"
+                                                                x-show="!block.validated && !block.rejected">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    x-model="block.requiresHandoff"
+                                                                    :id="'handoff-' + block.id + '-{{ $message['original_id'] }}'"
+                                                                    class="w-5 h-5 rounded border-warning-400 text-warning-600 focus:ring-warning-500"
+                                                                />
+                                                                <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-sm font-semibold text-warning-700 dark:text-warning-300 cursor-pointer flex items-center gap-2">
+                                                                    <x-heroicon-s-user-group class="w-5 h-5" />
+                                                                    Nécessite toujours un suivi humain
+                                                                </label>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </template>
@@ -547,31 +527,29 @@
                                             {{-- ═══════════════════════════════════════════════════════════════ --}}
                                             {{-- FOOTER GLOBAL - COLORÉ --}}
                                             {{-- ═══════════════════════════════════════════════════════════════ --}}
-                                            <div class="mt-5 pt-4 border-t-2 border-gray-300 dark:border-gray-600" x-show="!sent">
+                                            <div class="mt-5 pt-4 border-t-2 border-gray-200 dark:border-gray-700" x-show="!sent">
                                                 <div class="flex items-center justify-between gap-4 flex-wrap">
                                                     <div class="flex items-center gap-4">
-                                                        {{-- Bouton Envoyer - PROMINENT --}}
+                                                        {{-- Bouton Envoyer --}}
                                                         <button type="button"
                                                             @click="sendAll()"
-                                                            class="inline-flex items-center gap-2 px-6 py-3 text-base font-bold rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all hover:opacity-90"
-                                                            style="background-color: #2563eb; color: white;"
+                                                            class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-lg bg-primary-600 text-white hover:bg-primary-700 shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                                             :disabled="getValidatedBlocks().length === 0">
                                                             <x-heroicon-s-paper-airplane class="w-5 h-5" />
                                                             Envoyer
                                                         </button>
 
                                                         {{-- Compteur blocs validés --}}
-                                                        <span class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200" x-show="blocks.length > 1">
+                                                        <x-filament::badge color="gray" x-show="blocks.length > 1">
                                                             <span x-text="getValidatedBlocks().length"></span>/<span x-text="blocks.length"></span> validés
-                                                        </span>
+                                                        </x-filament::badge>
                                                     </div>
 
                                                     {{-- Bouton Valider tout --}}
                                                     <button type="button"
                                                         @click="validateAllPending()"
                                                         x-show="getPendingBlocks().length > 0"
-                                                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg border-2 transition-all hover:opacity-90"
-                                                        style="background-color: #dcfce7; color: #15803d; border-color: #22c55e;">
+                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-success-100 text-success-700 hover:bg-success-200 dark:bg-success-900 dark:text-success-300 dark:hover:bg-success-800 border border-success-300 dark:border-success-700 transition-all">
                                                         <x-heroicon-s-check-circle class="w-4 h-4" />
                                                         Tout valider
                                                     </button>
