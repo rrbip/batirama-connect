@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\AiSessionResource\Pages;
 
+use App\Events\Chat\AiMessageValidated;
 use App\Filament\Resources\AiSessionResource;
 use App\Models\AiMessage;
 use App\Models\SupportMessage;
@@ -22,6 +23,24 @@ class ViewAiSession extends ViewRecord
     protected static string $resource = AiSessionResource::class;
 
     protected static string $view = 'filament.resources.ai-session-resource.pages.view-ai-session';
+
+    // ─────────────────────────────────────────────────────────────────
+    // WEBSOCKET LISTENERS
+    // ─────────────────────────────────────────────────────────────────
+
+    #[On('refreshMessages')]
+    public function refreshMessages(): void
+    {
+        // Force refresh of the record and its messages
+        $this->record->refresh();
+        $this->record->load('messages', 'supportMessages');
+    }
+
+    #[On('refreshSession')]
+    public function refreshSession(): void
+    {
+        $this->record->refresh();
+    }
 
     // ─────────────────────────────────────────────────────────────────
     // PROPRIÉTÉS SUPPORT HUMAIN
@@ -385,9 +404,28 @@ class ViewAiSession extends ViewRecord
         try {
             app(LearningService::class)->validate($message, auth()->id());
 
+            // Broadcast au standalone si support humain actif
+            // pour que l'utilisateur voie maintenant la réponse validée
+            $message->refresh();
+            if ($this->record->isEscalated()) {
+                broadcast(new AiMessageValidated($message));
+            }
+
+            // Envoyer par email si le client a fourni son email (mode async)
+            // Note: On envoie juste l'email, sans créer de SupportMessage car le message IA existe déjà
+            if ($this->record->user_email) {
+                app(SupportService::class)->sendValidatedAiMessageByEmail(
+                    $this->record,
+                    $message,
+                    auth()->user()
+                );
+            }
+
             Notification::make()
                 ->title('Réponse validée')
-                ->body('La réponse a été marquée comme correcte.')
+                ->body($this->record->user_email
+                    ? 'La réponse a été validée et envoyée par email au client.'
+                    : 'La réponse a été marquée comme correcte.')
                 ->success()
                 ->send();
 
@@ -426,7 +464,7 @@ class ViewAiSession extends ViewRecord
         }
     }
 
-    public function learnFromMessage(int $messageId, string $correctedContent): void
+    public function learnFromMessage(int $messageId, string $correctedContent, bool $requiresHandoff = false): void
     {
         $message = AiMessage::findOrFail($messageId);
 
@@ -447,13 +485,33 @@ class ViewAiSession extends ViewRecord
             $result = app(LearningService::class)->learn(
                 $message,
                 $correctedContent,
-                auth()->id()
+                auth()->id(),
+                $requiresHandoff
             );
 
             if ($result) {
+                // Broadcast au standalone si support humain actif
+                // pour que l'utilisateur voie la réponse corrigée
+                $message->refresh();
+                if ($this->record->isEscalated()) {
+                    broadcast(new AiMessageValidated($message));
+                }
+
+                // Envoyer par email si le client a fourni son email (mode async)
+                // Le mail utilisera corrected_content automatiquement
+                if ($this->record->user_email) {
+                    app(SupportService::class)->sendValidatedAiMessageByEmail(
+                        $this->record,
+                        $message,
+                        auth()->user()
+                    );
+                }
+
                 Notification::make()
                     ->title('Correction enregistrée')
-                    ->body('La réponse corrigée a été indexée pour l\'apprentissage.')
+                    ->body($this->record->user_email
+                        ? 'La réponse corrigée a été indexée et envoyée par email au client.'
+                        : 'La réponse corrigée a été indexée pour l\'apprentissage.')
                     ->success()
                     ->send();
             } else {
@@ -473,9 +531,294 @@ class ViewAiSession extends ViewRecord
         }
     }
 
-    public function getMessages(): \Illuminate\Database\Eloquent\Collection
+    /**
+     * Valide un message avec possibilité de modifier la question pour l'apprentissage.
+     */
+    public function validateMessageWithQuestion(int $messageId, string $question, bool $requiresHandoff = false): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty(trim($question))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question ne peut pas être vide.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            app(LearningService::class)->validate($message, auth()->id(), trim($question), $requiresHandoff);
+
+            // Broadcast au standalone si support humain actif
+            $message->refresh();
+            if ($this->record->isEscalated()) {
+                broadcast(new AiMessageValidated($message));
+            }
+
+            // Envoyer par email si le client a fourni son email (mode async)
+            if ($this->record->user_email) {
+                app(SupportService::class)->sendValidatedAiMessageByEmail(
+                    $this->record,
+                    $message,
+                    auth()->user()
+                );
+            }
+
+            Notification::make()
+                ->title('Réponse validée')
+                ->body($this->record->user_email
+                    ? 'La réponse a été validée avec la question modifiée et envoyée par email.'
+                    : 'La réponse a été validée avec la question modifiée.')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Apprend d'un message avec question et réponse modifiées.
+     */
+    public function learnFromMessageWithQuestion(int $messageId, string $question, string $answer, bool $requiresHandoff = false): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty(trim($question)) || empty(trim($answer))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question et la réponse ne peuvent pas être vides.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $result = app(LearningService::class)->learnWithQuestion(
+                $message,
+                trim($question),
+                trim($answer),
+                auth()->id(),
+                $requiresHandoff
+            );
+
+            if ($result) {
+                // Broadcast au standalone si support humain actif
+                $message->refresh();
+                if ($this->record->isEscalated()) {
+                    broadcast(new AiMessageValidated($message));
+                }
+
+                // Envoyer par email si le client a fourni son email (mode async)
+                if ($this->record->user_email) {
+                    app(SupportService::class)->sendValidatedAiMessageByEmail(
+                        $this->record,
+                        $message,
+                        auth()->user()
+                    );
+                }
+
+                Notification::make()
+                    ->title('Correction enregistrée')
+                    ->body($this->record->user_email
+                        ? 'La question et réponse corrigées ont été indexées et envoyées par email.'
+                        : 'La question et réponse corrigées ont été indexées pour l\'apprentissage.')
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Impossible d\'indexer la correction.')
+                    ->danger()
+                    ->send();
+            }
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Apprend à l'IA avec question et réponse éditées par l'admin.
+     */
+    public function learnFromSupportMessageWithEdit(int $supportMessageId, string $question, string $answer): void
+    {
+        if (empty(trim($question)) || empty(trim($answer))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question et la réponse sont obligatoires.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $learningService = app(\App\Services\AI\LearningService::class);
+
+            $result = $learningService->indexLearnedResponse(
+                question: trim($question),
+                answer: trim($answer),
+                agentId: $this->record->agent_id,
+                agentSlug: $this->record->agent->slug,
+                messageId: $supportMessageId,
+                validatorId: auth()->id()
+            );
+
+            if ($result) {
+                // Marquer le message support comme appris
+                SupportMessage::where('id', $supportMessageId)->update([
+                    'learned_at' => now(),
+                    'learned_by' => auth()->id(),
+                ]);
+
+                Notification::make()
+                    ->title('Réponse apprise')
+                    ->body("Q: " . \Illuminate\Support\Str::limit($question, 50) . "\nR: " . \Illuminate\Support\Str::limit($answer, 50))
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Impossible d\'indexer la réponse.')
+                    ->danger()
+                    ->send();
+            }
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    public function getChatMessages(): \Illuminate\Database\Eloquent\Collection
     {
         return $this->record->messages()->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get();
+    }
+
+    /**
+     * Récupère tous les messages fusionnés (IA + Support) dans une timeline unifiée.
+     *
+     * @return array Messages triés par date avec type normalisé
+     */
+    public function getUnifiedMessages(): array
+    {
+        $messages = [];
+
+        // Messages IA (user + assistant)
+        foreach ($this->record->messages()->orderBy('created_at', 'asc')->orderBy('id', 'asc')->get() as $msg) {
+            $messages[] = [
+                'id' => 'ai_' . $msg->id,
+                'original_id' => $msg->id,
+                'source' => 'ai',
+                'type' => $msg->role === 'user' ? 'client' : 'ai',
+                'content' => $msg->content,
+                'created_at' => $msg->created_at,
+                'sender_name' => $msg->role === 'user' ? 'Client' : ($this->record->agent?->name ?? 'Assistant IA'),
+                'validation_status' => $msg->validation_status,
+                'model_used' => $msg->model_used,
+                'tokens' => ($msg->tokens_prompt ?? 0) + ($msg->tokens_completion ?? 0),
+                'generation_time_ms' => $msg->generation_time_ms,
+                'rag_context' => $msg->rag_context,
+                'corrected_content' => $msg->corrected_content,
+                'original' => $msg,
+                'is_pending_validation' => $msg->role === 'assistant' && $msg->validation_status === 'pending',
+                'is_direct_match' => $msg->model_used === 'direct_qr_match',
+            ];
+        }
+
+        // Messages de support (si escaladé)
+        // - agent et system: toujours inclus
+        // - user: seulement si channel='email' (les channel='chat' sont des doublons de ai_messages)
+        if ($this->record->isEscalated()) {
+            $supportMessagesQuery = $this->record->supportMessages()
+                ->with('agent', 'attachments')
+                ->where(function ($query) {
+                    $query->whereIn('sender_type', ['agent', 'system'])
+                          ->orWhere(function ($q) {
+                              $q->where('sender_type', 'user')
+                                ->where('channel', 'email');
+                          });
+                })
+                ->orderBy('created_at', 'asc')
+                ->orderBy('id', 'asc');
+
+            foreach ($supportMessagesQuery->get() as $supportMsg) {
+                // Déterminer le type
+                $type = match ($supportMsg->sender_type) {
+                    'agent' => 'support',
+                    'system' => 'system',
+                    'user' => 'client',
+                    default => 'support',
+                };
+
+                $messages[] = [
+                    'id' => 'support_' . $supportMsg->id,
+                    'original_id' => $supportMsg->id,
+                    'source' => 'support',
+                    'type' => $type,
+                    'content' => $supportMsg->content,
+                    'created_at' => $supportMsg->created_at,
+                    'sender_name' => $type === 'support'
+                        ? ($supportMsg->agent?->name ?? 'Agent Support')
+                        : ($type === 'system' ? 'Système' : 'Client'),
+                    'channel' => $supportMsg->channel ?? 'chat',
+                    'was_ai_improved' => $supportMsg->was_ai_improved ?? false,
+                    'attachments' => $supportMsg->attachments ?? collect(),
+                    'original' => $supportMsg,
+                    'is_pending_validation' => false,
+                    'learned_at' => $supportMsg->learned_at,
+                ];
+            }
+        }
+
+        // Trier par date puis par ID pour les messages simultanés
+        usort($messages, function ($a, $b) {
+            $dateCompare = $a['created_at'] <=> $b['created_at'];
+            if ($dateCompare !== 0) {
+                return $dateCompare;
+            }
+            // Si même date, trier par ID
+            return $a['original_id'] <=> $b['original_id'];
+        });
+
+        // Dédupliquer les messages clients qui existent dans les deux tables (ai_messages + support_messages)
+        // Quand un utilisateur envoie un message après escalade, il est enregistré dans les deux tables
+        $seen = [];
+        $deduplicated = [];
+        foreach ($messages as $msg) {
+            // Créer une clé unique basée sur le type, contenu et timestamp (arrondi à la seconde)
+            $timestamp = $msg['created_at']?->format('Y-m-d H:i:s') ?? '';
+            $key = $msg['type'] . '|' . md5($msg['content']) . '|' . $timestamp;
+
+            // Si c'est un message client et qu'on l'a déjà vu, ignorer (préférer la version support)
+            if ($msg['type'] === 'client' && isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $deduplicated[] = $msg;
+        }
+
+        return $deduplicated;
     }
 
     public function getSessionStats(): array

@@ -9,11 +9,11 @@ use App\Models\User;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class SessionAssigned implements ShouldBroadcast
+class SessionAssigned implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;
@@ -32,8 +32,8 @@ class SessionAssigned implements ShouldBroadcast
         return [
             // Canal pour l'agent de support assigné
             new PrivateChannel("user.{$this->supportAgent->id}"),
-            // Canal pour la session (côté utilisateur)
-            new PrivateChannel("session.{$this->session->uuid}"),
+            // Canal public pour la session (standalone)
+            new Channel("chat.session.{$this->session->uuid}"),
             // Canal général de l'agent IA (pour mettre à jour la liste)
             new PrivateChannel("agent.{$this->session->agent_id}.support"),
         ];

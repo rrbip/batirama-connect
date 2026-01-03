@@ -6,6 +6,7 @@ namespace App\Services\AI;
 
 use App\DTOs\AI\LLMResponse;
 use App\DTOs\AI\RagResult;
+use App\Events\Chat\UserMessageReceived;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
@@ -73,7 +74,7 @@ class RagService
         );
 
         // 7. Construire le prompt avec TOUT le contexte et générer la réponse
-        $ollama = OllamaService::forAgent($agent);
+        $llmService = LLMServiceFactory::forAgent($agent);
 
         $messages = $this->promptBuilder->buildChatMessages(
             agent: $agent,
@@ -83,7 +84,7 @@ class RagService
             learnedResponses: $learnedResponses
         );
 
-        $response = $ollama->chat($messages, [
+        $response = $llmService->chat($messages, [
             'temperature' => $agent->temperature,
             'max_tokens' => $agent->max_tokens,
             'fallback_model' => $agent->fallback_model,
@@ -251,6 +252,7 @@ class RagService
                 'use_category_filtering' => $agent->use_category_filtering ?? false,
                 'response_type' => 'direct_qr_match',
                 'direct_qr_threshold' => IndexingStrategyService::DIRECT_QR_THRESHOLD,
+                'requires_handoff' => $qr['requires_handoff'] ?? false,
             ],
         ];
 
@@ -267,6 +269,7 @@ class RagService
                 'source' => $qr['source'],
                 'category' => $qr['category'],
                 'is_faq' => $qr['is_faq'],
+                'requires_handoff' => $qr['requires_handoff'] ?? false,
                 'context' => $fullContext,
             ]
         );
@@ -541,6 +544,17 @@ class RagService
 
         // Mettre à jour le compteur de messages
         $session->increment('message_count');
+
+        // Broadcast l'événement si c'est un message utilisateur
+        // Permet à l'admin de voir le message immédiatement
+        if ($role === 'user') {
+            Log::info('Broadcasting UserMessageReceived', [
+                'message_id' => $message->uuid,
+                'session_id' => $session->uuid,
+                'channel' => 'chat.session.' . $session->uuid,
+            ]);
+            broadcast(new UserMessageReceived($message));
+        }
 
         return $message;
     }

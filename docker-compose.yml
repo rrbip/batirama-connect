@@ -16,6 +16,8 @@ services:
     volumes:
       - .:/var/www/html
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      # Volume nommé pour éviter les problèmes de permissions sur les fichiers compilés
+      - laravel_storage_framework:/var/www/html/storage/framework
     environment:
       - APP_ENV=${APP_ENV:-local}
       - APP_KEY=${APP_KEY:-}
@@ -223,6 +225,7 @@ services:
     volumes:
       - .:/var/www/html
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - laravel_storage_framework:/var/www/html/storage/framework
     depends_on:
       - app
       - db
@@ -230,7 +233,7 @@ services:
       - ai_network
 
   # ===========================================
-  # QUEUE WORKER
+  # QUEUE WORKER (AI Messages)
   # ===========================================
   queue:
     build:
@@ -239,10 +242,32 @@ services:
     container_name: aim_queue
     restart: unless-stopped
     working_dir: /var/www/html
-    command: ["php", "artisan", "queue:work", "--queue=ai-messages,default,pipeline,llm-chunking", "--sleep=3", "--tries=3", "--max-time=3600"]
+    command: ["php", "artisan", "queue:work", "--queue=ai-messages,mail,default,pipeline,llm-chunking", "--sleep=3", "--tries=3", "--max-time=3600"]
     volumes:
       - .:/var/www/html
       - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - laravel_storage_framework:/var/www/html/storage/framework
+    depends_on:
+      - app
+      - db
+    networks:
+      - ai_network
+
+  # ===========================================
+  # QUEUE WORKER (Emails) - Worker dédié pour ne pas bloquer
+  # ===========================================
+  queue-emails:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    container_name: aim_queue_emails
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: ["php", "artisan", "queue:work", "--queue=emails", "--sleep=10", "--tries=2", "--max-time=3600"]
+    volumes:
+      - .:/var/www/html
+      - ./docker/app/php.ini:/usr/local/etc/php/conf.d/custom.ini:ro
+      - laravel_storage_framework:/var/www/html/storage/framework
     depends_on:
       - app
       - db
@@ -295,6 +320,10 @@ volumes:
   caddy_data:
     driver: local
   caddy_config:
+    driver: local
+  # Volume pour les fichiers compilés Laravel (views, cache, sessions)
+  # Évite les problèmes de permissions avec les bind mounts
+  laravel_storage_framework:
     driver: local
 
 # ===========================================

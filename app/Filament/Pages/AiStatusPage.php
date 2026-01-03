@@ -6,8 +6,10 @@ namespace App\Filament\Pages;
 
 use App\Jobs\ProcessAiMessageJob;
 use App\Jobs\ProcessDocumentJob;
+use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\Document;
+use App\Services\Support\ImapService;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\OllamaService;
 use App\Services\AI\QdrantService;
@@ -60,6 +62,9 @@ class AiStatusPage extends Page
     public ?string $customModelName = null;
     public bool $isInstallingModel = false;
 
+    // Support Email (IMAP)
+    public array $emailSupportStatus = [];
+
     public function mount(): void
     {
         $this->refreshStatus();
@@ -83,6 +88,9 @@ class AiStatusPage extends Page
         $this->loadOllamaModels();
         $this->availableModels = $this->getAvailableModels();
         $this->lastSyncInfo = $this->getLastSyncInfo();
+
+        // Support Email
+        $this->emailSupportStatus = $this->getEmailSupportStatus();
     }
 
     /**
@@ -324,6 +332,100 @@ class AiStatusPage extends Page
             'last_sync' => Cache::get('ollama_models_last_sync'),
             'source' => Cache::get('ollama_models_sync_source', 'config'),
         ];
+    }
+
+    /**
+     * Récupère le statut du support email (IMAP)
+     */
+    protected function getEmailSupportStatus(): array
+    {
+        try {
+            // Agents avec support email configuré
+            $agents = Agent::where('human_support_enabled', true)
+                ->whereNotNull('support_email')
+                ->get();
+
+            if ($agents->isEmpty()) {
+                return [
+                    'configured' => false,
+                    'message' => 'Aucun agent avec support email configuré',
+                    'agents' => [],
+                ];
+            }
+
+            // Lire les dernières lignes du log
+            $logFile = storage_path('logs/support-emails.log');
+            $lastLog = null;
+            $lastRun = null;
+
+            if (file_exists($logFile)) {
+                $lines = file($logFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                $lastLines = array_slice($lines, -10);
+                $lastLog = implode("\n", $lastLines);
+
+                // Extraire la date de la dernière exécution
+                foreach (array_reverse($lastLines) as $line) {
+                    if (preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $line, $matches)) {
+                        $lastRun = $matches[1];
+                        break;
+                    }
+                }
+            }
+
+            // Vérifier le cache du scheduler
+            $schedulerLastRun = Cache::get('support:fetch-emails:last_run');
+
+            $agentsList = $agents->map(fn ($agent) => [
+                'id' => $agent->id,
+                'name' => $agent->name,
+                'email' => $agent->support_email,
+                'has_imap' => !empty($agent->getImapConfig()),
+            ])->toArray();
+
+            return [
+                'configured' => true,
+                'agents_count' => $agents->count(),
+                'agents' => $agentsList,
+                'last_run' => $schedulerLastRun ?? $lastRun,
+                'last_log' => $lastLog,
+                'log_file' => $logFile,
+            ];
+        } catch (\Exception $e) {
+            return [
+                'configured' => false,
+                'error' => $e->getMessage(),
+                'agents' => [],
+            ];
+        }
+    }
+
+    /**
+     * Force la récupération des emails IMAP
+     */
+    public function fetchSupportEmails(): void
+    {
+        try {
+            // Exécuter le job de manière synchrone pour un retour immédiat
+            $job = new \App\Jobs\FetchSupportEmailsJob();
+            dispatch_sync($job);
+
+            // Sauvegarder la date de dernière exécution
+            Cache::put('support:fetch-emails:last_run', now()->format('Y-m-d H:i:s'), now()->addHours(24));
+
+            $this->refreshStatus();
+
+            Notification::make()
+                ->title('Emails récupérés')
+                ->body('Synchronisation IMAP terminée')
+                ->success()
+                ->send();
+        } catch (\Exception $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
     }
 
     protected function checkServices(): array

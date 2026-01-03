@@ -14,6 +14,13 @@ interface LLMServiceInterface
     public function generate(string $prompt, array $options = []): LLMResponse;
 
     /**
+     * Chat avec historique de messages
+     *
+     * @param array $messages Format: [["role" => "user|assistant|system", "content" => "..."], ...]
+     */
+    public function chat(array $messages, array $options = []): LLMResponse;
+
+    /**
      * Génère une réponse en streaming
      */
     public function generateStream(string $prompt, array $options = []): \Generator;

@@ -65,6 +65,86 @@
             </div>
         </x-filament::section>
 
+        {{-- Support Email (IMAP) Status --}}
+        <x-filament::section collapsible>
+            <x-slot name="heading">
+                <div class="flex items-center gap-2">
+                    <x-heroicon-o-envelope class="w-5 h-5" />
+                    Support Email (IMAP)
+                </div>
+            </x-slot>
+
+            @if($emailSupportStatus['configured'] ?? false)
+                <div class="space-y-4">
+                    {{-- Statut général --}}
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center px-2.5 py-1 text-xs font-medium rounded-full bg-success-100 text-success-700 dark:bg-success-800 dark:text-success-300">
+                                <x-heroicon-s-check-circle class="w-3 h-3 mr-1" />
+                                {{ $emailSupportStatus['agents_count'] ?? 0 }} agent(s) configuré(s)
+                            </span>
+                            @if($emailSupportStatus['last_run'] ?? null)
+                                <span class="text-sm text-gray-500 dark:text-gray-400">
+                                    Dernière exécution: {{ $emailSupportStatus['last_run'] }}
+                                </span>
+                            @else
+                                <span class="text-sm text-warning-500">
+                                    Aucune exécution récente détectée
+                                </span>
+                            @endif
+                        </div>
+                        <button
+                            wire:click="fetchSupportEmails"
+                            wire:loading.attr="disabled"
+                            wire:target="fetchSupportEmails"
+                            class="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 transition"
+                        >
+                            <x-heroicon-o-arrow-path class="w-4 h-4" wire:loading.class="animate-spin" wire:target="fetchSupportEmails" />
+                            <span wire:loading.remove wire:target="fetchSupportEmails">Récupérer maintenant</span>
+                            <span wire:loading wire:target="fetchSupportEmails">Récupération...</span>
+                        </button>
+                    </div>
+
+                    {{-- Liste des agents --}}
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        @foreach($emailSupportStatus['agents'] ?? [] as $agent)
+                            <div class="p-3 rounded-lg border {{ $agent['has_imap'] ? 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700' : 'bg-warning-50 dark:bg-warning-900/20 border-warning-200 dark:border-warning-700' }}">
+                                <div class="font-medium text-sm text-gray-900 dark:text-gray-100">
+                                    {{ $agent['name'] }}
+                                </div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                    {{ $agent['email'] }}
+                                </div>
+                                @if(!$agent['has_imap'])
+                                    <div class="mt-1 text-xs text-warning-600 dark:text-warning-400">
+                                        ⚠️ Config IMAP manquante
+                                    </div>
+                                @endif
+                            </div>
+                        @endforeach
+                    </div>
+
+                    {{-- Log récent --}}
+                    @if($emailSupportStatus['last_log'] ?? null)
+                        <details class="mt-4">
+                            <summary class="cursor-pointer text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
+                                Voir les derniers logs
+                            </summary>
+                            <pre class="mt-2 p-3 bg-gray-800 text-gray-100 rounded-lg text-xs overflow-x-auto max-h-48 overflow-y-auto">{{ $emailSupportStatus['last_log'] }}</pre>
+                        </details>
+                    @endif
+                </div>
+            @else
+                <div class="text-center py-6 text-gray-500 dark:text-gray-400">
+                    <x-heroicon-o-envelope class="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p>{{ $emailSupportStatus['message'] ?? 'Aucun agent avec support email configuré' }}</p>
+                    @if($emailSupportStatus['error'] ?? null)
+                        <p class="mt-2 text-danger-500 text-sm">{{ $emailSupportStatus['error'] }}</p>
+                    @endif
+                </div>
+            @endif
+        </x-filament::section>
+
         {{-- Queue & Documents Stats --}}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <x-filament::section>

@@ -51,6 +51,7 @@ class IndexingStrategyService
             'category' => $payload['category'] ?? '',
             'score' => $result['score'] ?? 0,
             'is_faq' => $payload['is_faq'] ?? false,
+            'requires_handoff' => $payload['requires_handoff'] ?? false,
         ];
     }
 

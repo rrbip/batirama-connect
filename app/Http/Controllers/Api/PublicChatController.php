@@ -60,7 +60,7 @@ class PublicChatController extends Controller
         }
 
         $session = $accessToken->session;
-        $usesCount = $accessToken->uses_count ?? $accessToken->use_count ?? 0;
+        $usesCount = $accessToken->use_count ?? 0;
         $maxUses = $accessToken->max_uses ?? 1;
 
         return response()->json([
@@ -127,6 +127,12 @@ class PublicChatController extends Controller
             // Lier la session au token
             $accessToken->update(['session_id' => $session->id]);
             $accessToken->refresh();
+
+            // Si un email client est pré-configuré, l'ajouter à la session
+            $clientEmail = $accessToken->client_info['email'] ?? null;
+            if ($clientEmail) {
+                $session->update(['user_email' => $clientEmail]);
+            }
         }
 
         // Incrémenter le compteur
@@ -338,11 +344,18 @@ class PublicChatController extends Controller
 
         $history = $this->dispatcherService->getSessionHistory($session);
 
+        $agent = $session->agent;
+
         return response()->json([
             'success' => true,
             'data' => [
                 'session_id' => $session->uuid,
                 'messages' => $history,
+                'support_status' => $session->support_status,
+                'user_email' => $session->user_email,
+                // Mode asynchrone (email) si hors horaires ou aucun agent connecté
+                'async_mode' => $agent?->shouldUseAsyncSupport() ?? true,
+                'within_support_hours' => $agent?->isWithinSupportHours() ?? false,
             ],
         ]);
     }
@@ -481,6 +494,66 @@ class PublicChatController extends Controller
     }
 
     /**
+     * POST /c/{token}/email
+     * Enregistre l'email de l'utilisateur pour la session et envoie un email de confirmation.
+     */
+    public function saveEmail(Request $request, string $token): JsonResponse
+    {
+        $accessToken = PublicAccessToken::where('token', $token)->first();
+
+        if (!$accessToken) {
+            return response()->json([
+                'error' => 'token_not_found',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'no_session',
+                'message' => 'Aucune session active',
+            ], 404);
+        }
+
+        $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+        ]);
+
+        $email = $request->input('email');
+
+        // Sauvegarder l'email dans la session
+        $session->update(['user_email' => $email]);
+
+        Log::info('User email saved for session', [
+            'session_id' => $session->uuid,
+            'email' => $email,
+        ]);
+
+        // Envoyer un email de confirmation au client (si l'agent a une config SMTP)
+        $emailSent = false;
+        try {
+            $supportService = app(\App\Services\Support\SupportService::class);
+            $emailSent = $supportService->sendEmailConfirmationToUser($session);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send confirmation email', [
+                'session_id' => $session->uuid,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'email' => $email,
+                'session_id' => $session->uuid,
+                'confirmation_email_sent' => $emailSent,
+            ],
+        ]);
+    }
+
+    /**
      * POST /messages/{uuid}/retry
      * Relance un message en échec
      */
@@ -534,6 +607,49 @@ class PublicChatController extends Controller
                 'status' => $message->processing_status,
                 'retry_count' => $message->retry_count,
                 'poll_url' => url("/api/messages/{$message->uuid}/status"),
+            ],
+        ]);
+    }
+
+    /**
+     * POST /c/{token}/ping
+     * Met à jour le timestamp d'activité de l'utilisateur.
+     * À appeler régulièrement (toutes les 30 secondes) pour signaler que l'utilisateur est connecté.
+     */
+    public function ping(string $token): JsonResponse
+    {
+        $accessToken = PublicAccessToken::where('token', $token)->first();
+
+        if (!$accessToken) {
+            return response()->json([
+                'error' => 'token_not_found',
+                'message' => 'Token invalide',
+            ], 404);
+        }
+
+        $session = $accessToken->session;
+
+        if (!$session) {
+            return response()->json([
+                'error' => 'no_session',
+                'message' => 'Aucune session active',
+            ], 404);
+        }
+
+        // Mettre à jour l'activité
+        $session->touch('last_activity_at');
+        $session->update([
+            'support_metadata' => array_merge($session->support_metadata ?? [], [
+                'last_user_activity' => now()->toISOString(),
+                'user_online' => true,
+            ]),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'session_id' => $session->uuid,
+                'timestamp' => now()->toIso8601String(),
             ],
         ]);
     }

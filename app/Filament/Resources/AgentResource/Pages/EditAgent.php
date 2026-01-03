@@ -97,15 +97,22 @@ class EditAgent extends EditRecord
         $data = $this->form->getState();
         $warnings = [];
 
+        // Skip Ollama validation if not using Ollama as LLM provider
+        $llmProvider = $data['llm_provider'] ?? 'ollama';
+        if ($llmProvider !== 'ollama') {
+            return;
+        }
+
         // Check Chat Ollama
         $chatHost = $data['ollama_host'] ?? config('ai.ollama.host', 'ollama');
         $chatPort = $data['ollama_port'] ?? config('ai.ollama.port', 11434);
-        $chatResult = $this->testOllamaEndpoint($chatHost, $chatPort, $data['model'] ?? null);
+        $model = $data['model'] ?? null;
+        $chatResult = $this->testOllamaEndpoint($chatHost, $chatPort, $model);
 
         if (!$chatResult['connected']) {
             $warnings[] = "Chat Ollama ({$chatResult['url']}) inaccessible";
-        } elseif ($data['model'] && !$chatResult['model_installed']) {
-            $warnings[] = "Modèle Chat '{$data['model']}' non installé";
+        } elseif ($model && !$chatResult['model_installed']) {
+            $warnings[] = "Modèle Chat '{$model}' non installé";
         }
 
         // Check Vision Ollama (if configured)

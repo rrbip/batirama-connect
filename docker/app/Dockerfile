@@ -1,9 +1,15 @@
 # ===========================================
 # AI-Manager CMS - PHP Application
 # ===========================================
+# Dockerfile optimisé avec cache de couches (Debian)
+# - Base Debian pour meilleure compatibilité
+# - Les dépendances système/PHP sont en haut (changent rarement)
+# - Composer est installé séparément (cache si composer.lock ne change pas)
+# - Le code applicatif est copié en dernier (change souvent)
+# ===========================================
 ARG PHP_VERSION=8.4
 
-FROM php:${PHP_VERSION}-fpm-alpine
+FROM php:${PHP_VERSION}-fpm
 
 # Arguments de build
 ARG APP_ENV=production
@@ -17,32 +23,38 @@ LABEL description="AI-Manager CMS Application"
 ENV APP_ENV=${APP_ENV}
 ENV COMPOSER_ALLOW_SUPERUSER=1
 ENV COMPOSER_HOME=/composer
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Installation des dépendances système
-RUN apk add --no-cache \
+# ===========================================
+# COUCHE 1: Dépendances système (change rarement)
+# ===========================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
     libzip-dev \
     zip \
     unzip \
-    icu-dev \
-    postgresql-dev \
-    linux-headers \
-    bash \
-    poppler-utils \
+    libicu-dev \
+    libpq-dev \
     # OCR Tesseract pour extraction texte d'images
     tesseract-ocr \
-    tesseract-ocr-data-fra \
-    tesseract-ocr-data-eng \
+    tesseract-ocr-fra \
+    tesseract-ocr-eng \
     # ImageMagick pour manipulation d'images (Vision extraction)
     imagemagick \
-    imagemagick-libs \
-    $PHPIZE_DEPS
+    libmagickwand-dev \
+    # PDF utilities
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
-# Configuration et installation des extensions PHP
+# ===========================================
+# COUCHE 2: Extensions PHP (change rarement)
+# ===========================================
+# Note: IMAP est géré via webklex/php-imap (librairie PHP pure, pas d'extension native)
+# La librairie c-client requise par l'extension IMAP native n'est plus disponible sur Debian Trixie
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-configure intl \
     && docker-php-ext-install -j$(nproc) \
@@ -66,50 +78,57 @@ RUN if [ "$INSTALL_XDEBUG" = "true" ]; then \
         && docker-php-ext-enable xdebug; \
     fi
 
-# Installation de Composer
+# ===========================================
+# COUCHE 3: Composer (change rarement)
+# ===========================================
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# Configuration PHP personnalisée (remplace la config par défaut)
+# Configuration PHP personnalisée
 COPY docker/app/php.ini $PHP_INI_DIR/php.ini
 
 # Création du répertoire de travail
 WORKDIR /var/www/html
 
-# Copie des fichiers de l'application
+# ===========================================
+# COUCHE 4: Dépendances Composer (cache si composer.lock ne change pas)
+# ===========================================
+# Copier UNIQUEMENT les fichiers de dépendances en premier
+COPY composer.json composer.lock ./
+
+# Créer les dossiers nécessaires pour composer install (PAS storage - créé au runtime)
+# Note: storage/ est exclu via .dockerignore et créé par l'entrypoint avec les bonnes permissions
+RUN mkdir -p bootstrap/cache \
+    && mkdir -p resources/views \
+    && mkdir -p database/factories \
+    && mkdir -p database/seeders \
+    && chown -R www-data:www-data bootstrap resources \
+    && chmod -R 775 bootstrap
+
+# Installer les dépendances Composer (cette couche est mise en cache
+# tant que composer.json et composer.lock ne changent pas)
+RUN if [ "$APP_ENV" = "production" ]; then \
+        composer install --no-dev --optimize-autoloader --no-interaction --no-scripts; \
+    else \
+        composer install --optimize-autoloader --no-interaction --no-scripts; \
+    fi
+
+# ===========================================
+# COUCHE 5: Code applicatif (change souvent)
+# ===========================================
+# Copier le reste du code source (storage/ exclu via .dockerignore)
 COPY --chown=www-data:www-data . .
 
-# Création des dossiers Laravel nécessaires AVANT composer install
-# Ces dossiers sont requis par Laravel pour le cache et les sessions.
-# Ils doivent exister avant l'exécution de composer install car
-# certains scripts post-install de Composer peuvent en avoir besoin.
-# Le dossier resources/views est également créé car il est requis
-# pour les commandes artisan view:cache en production.
-RUN mkdir -p bootstrap/cache \
-    && mkdir -p storage/framework/sessions \
-    && mkdir -p storage/framework/views \
-    && mkdir -p storage/framework/cache \
-    && mkdir -p storage/logs \
-    && mkdir -p resources/views \
-    && chown -R www-data:www-data bootstrap storage resources \
-    && chmod -R 775 bootstrap storage
+# NOTE: storage/ n'est PAS créé ici - il est créé par l'entrypoint au runtime
+# avec les bonnes permissions. Cela évite tout problème d'UID entre images.
+# composer dump-autoload est aussi exécuté dans l'entrypoint après création de storage.
 
 # Copie du script d'entrypoint
 COPY docker/app/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Installation des dépendances Composer (production)
-RUN if [ "$APP_ENV" = "production" ]; then \
-        composer install --no-dev --optimize-autoloader --no-interaction; \
-    else \
-        composer install --optimize-autoloader --no-interaction; \
-    fi
-
-# Note: Les optimisations Laravel (config:cache, route:cache, view:cache)
-# sont exécutées par l'entrypoint au démarrage du conteneur
-
-# Permissions
-RUN chown -R www-data:www-data storage bootstrap/cache \
-    && chmod -R 775 storage bootstrap/cache
+# Permissions finales (pas storage - créé au runtime)
+RUN chown -R www-data:www-data bootstrap/cache resources \
+    && chmod -R 775 bootstrap/cache
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

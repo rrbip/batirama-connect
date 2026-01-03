@@ -24,6 +24,14 @@ Broadcast::channel('user.{id}', function (User $user, int $id) {
 });
 
 /**
+ * Canal privé pour les notifications Laravel/Livewire.
+ * Format standard utilisé par Laravel Echo et Filament.
+ */
+Broadcast::channel('App.Models.User.{id}', function (User $user, int $id) {
+    return $user->id === $id;
+});
+
+/**
  * Canal privé pour le support d'un agent IA spécifique.
  * Seuls les agents de support assignés peuvent écouter.
  */
@@ -40,6 +48,92 @@ Broadcast::channel('agent.{agentId}.support', function (User $user, int $agentId
     }
 
     return $agent->userCanHandleSupport($user);
+});
+
+/**
+ * Canal de PRÉSENCE pour les agents de support d'un agent IA.
+ * Utilisé pour tracker en temps réel quels admins sont connectés.
+ *
+ * Retourne les infos utilisateur pour le suivi de présence.
+ */
+Broadcast::channel('presence-agent.{agentId}.support', function (User $user, int $agentId) {
+    // Super-admin et admin peuvent rejoindre
+    if ($user->hasRole('super-admin') || $user->hasRole('admin')) {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->roles->first()?->name ?? 'user',
+        ];
+    }
+
+    // Vérifie si l'utilisateur est assigné comme agent de support
+    $agent = \App\Models\Agent::find($agentId);
+    if (!$agent) {
+        return false;
+    }
+
+    if ($agent->userCanHandleSupport($user)) {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => 'support-agent',
+        ];
+    }
+
+    return false;
+});
+
+/**
+ * Canal de PRÉSENCE pour les utilisateurs du chat standalone.
+ * Permet de détecter si l'utilisateur est connecté au chat.
+ *
+ * Accessible par les utilisateurs authentifiés ET les guests (via auth/guest).
+ */
+Broadcast::channel('presence-chat.session.{uuid}', function ($user, string $uuid) {
+    $session = AiSession::where('uuid', $uuid)->first();
+
+    if (!$session) {
+        return false;
+    }
+
+    // Si c'est un utilisateur authentifié
+    if ($user instanceof User) {
+        // L'utilisateur de la session peut rejoindre
+        if ($session->user_id === $user->id) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name ?? 'Utilisateur',
+                'type' => 'authenticated',
+            ];
+        }
+
+        // L'agent de support peut aussi rejoindre (pour voir la présence)
+        if ($session->support_agent_id === $user->id ||
+            $user->hasRole('super-admin') ||
+            $user->hasRole('admin') ||
+            ($session->agent && $session->agent->userCanHandleSupport($user))) {
+            return [
+                'id' => $user->id,
+                'name' => $user->name,
+                'type' => 'support',
+            ];
+        }
+    }
+
+    // Pour les guests (utilisateurs anonymes du chat standalone)
+    // L'auth est gérée par le endpoint /broadcasting/auth/guest
+    // qui passe le socket_id et channel_name avec un user_id généré
+    if (is_array($user) && isset($user['id'])) {
+        return [
+            'id' => $user['id'],
+            'name' => $user['name'] ?? 'Visiteur',
+            'type' => 'guest',
+        ];
+    }
+
+    return false;
 });
 
 /**

@@ -8,11 +8,11 @@ use App\Models\SupportMessage;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class NewSupportMessage implements ShouldBroadcast
+class NewSupportMessage implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;
@@ -30,13 +30,22 @@ class NewSupportMessage implements ShouldBroadcast
         $session = $this->message->session;
 
         $channels = [
-            // Canal de la session (les deux parties)
-            new PrivateChannel("session.{$session->uuid}"),
+            // Canal public de la session (pour standalone)
+            new Channel("chat.session.{$session->uuid}"),
         ];
 
-        // Si c'est un message utilisateur, notifier l'agent de support
-        if ($this->message->sender_type === 'user' && $session->support_agent_id) {
-            $channels[] = new PrivateChannel("user.{$session->support_agent_id}");
+        // Si c'est un message utilisateur
+        if ($this->message->sender_type === 'user') {
+            // Notifier l'agent de support assigné
+            if ($session->support_agent_id) {
+                $channels[] = new PrivateChannel("user.{$session->support_agent_id}");
+            }
+
+            // Notifier aussi le canal de support de l'agent IA pour que tous les admins
+            // qui monitore cet agent voient le message (même si pas encore assigné)
+            if ($session->agent_id && $session->isEscalated()) {
+                $channels[] = new PrivateChannel("agent.{$session->agent_id}.support");
+            }
         }
 
         // Si c'est un message agent, notifier le canal support de l'agent IA

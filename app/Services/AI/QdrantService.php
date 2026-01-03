@@ -184,6 +184,18 @@ class QdrantService implements VectorStoreInterface
     }
 
     /**
+     * Supprime des points par filtre (ex: message_id)
+     */
+    public function deleteByFilter(string $collection, array $filter): bool
+    {
+        $response = $this->request()->post("/collections/{$collection}/points/delete", [
+            'filter' => $filter,
+        ]);
+
+        return $response->successful();
+    }
+
+    /**
      * Récupère un point par son ID
      */
     public function getPoint(string $collection, string|int $id): ?array

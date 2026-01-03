@@ -1,0 +1,53 @@
+# ===========================================
+# Docker Ignore - Accélère le build
+# ===========================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Dependencies (installées dans le conteneur)
+/vendor
+/node_modules
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# ===========================================
+# IMPORTANT: Exclure TOUT le dossier storage
+# Les dossiers sont créés par l'entrypoint au runtime
+# avec les bonnes permissions (www-data UID 33)
+# ===========================================
+/storage
+
+# Bootstrap cache (recréé au runtime)
+/bootstrap/cache
+
+# Tests et développement
+/tests
+phpunit.xml
+.phpunit.result.cache
+.phpunit.cache
+
+# Documentation
+*.md
+!README.md
+/docs
+
+# Docker (évite boucle récursive)
+docker-compose*.yml
+Dockerfile*
+
+# Autres
+.DS_Store
+Thumbs.db
+*.log

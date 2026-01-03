@@ -25,7 +25,9 @@ class LearningService
     public function validateAndLearn(
         AiMessage $message,
         User $validator,
-        ?string $correctedContent = null
+        ?string $correctedContent = null,
+        ?string $customQuestion = null,
+        bool $requiresHandoff = false
     ): bool {
         // Le message doit être une réponse assistant
         if ($message->role !== 'assistant') {
@@ -43,9 +45,9 @@ class LearningService
             throw new \RuntimeException("Aucune question utilisateur trouvée avant ce message assistant (ID: {$message->id})");
         }
 
-        // Contenu à apprendre
+        // Contenu à apprendre (question personnalisée ou originale)
         $answerContent = $correctedContent ?? $message->content;
-        $question = $questionMessage->content;
+        $question = $customQuestion ?? $questionMessage->content;
 
         // Mettre à jour le statut du message
         $message->update([
@@ -62,7 +64,8 @@ class LearningService
             agentId: $message->session->agent_id,
             agentSlug: $message->session->agent->slug,
             messageId: $message->id,
-            validatorId: $validator->id
+            validatorId: $validator->id,
+            requiresHandoff: $requiresHandoff
         );
     }
 
@@ -75,13 +78,20 @@ class LearningService
         int $agentId,
         string $agentSlug,
         int $messageId,
-        int $validatorId
+        int $validatorId,
+        bool $requiresHandoff = false
     ): bool {
         // S'assurer que la collection existe
         $this->ensureCollectionExists();
 
+        // Supprimer les anciens points pour ce message_id (évite les doublons lors des corrections)
+        $this->deleteExistingPointsForMessage($messageId, $agentId);
+
         // Générer l'embedding de la question
         $vector = $this->embeddingService->embed($question);
+
+        // Supprimer les questions similaires existantes (évite les doublons sémantiques)
+        $this->deleteSimilarQuestions($vector, $agentId, $agentSlug);
 
         $pointId = Str::uuid()->toString();
 
@@ -98,6 +108,7 @@ class LearningService
                     'answer' => $answer,
                     'validated_by' => $validatorId,
                     'validated_at' => now()->toIso8601String(),
+                    'requires_handoff' => $requiresHandoff,
                 ],
             ]
         ]);
@@ -111,7 +122,7 @@ class LearningService
             // 2. Double indexation : indexer aussi dans la collection de l'agent
             $agent = Agent::find($agentId);
             if ($agent) {
-                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId);
+                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId, $requiresHandoff);
             }
         } else {
             Log::error('Failed to upsert learned response to Qdrant', [
@@ -131,7 +142,8 @@ class LearningService
         Agent $agent,
         string $question,
         string $answer,
-        ?int $messageId = null
+        ?int $messageId = null,
+        bool $requiresHandoff = false
     ): ?string {
         if (empty($agent->qdrant_collection)) {
             Log::warning('LearningService: Agent has no Qdrant collection', [
@@ -159,6 +171,7 @@ class LearningService
                 'is_faq' => true,
                 'message_id' => $messageId,
                 'indexed_at' => now()->toIso8601String(),
+                'requires_handoff' => $requiresHandoff,
             ],
         ]]);
 
@@ -185,7 +198,8 @@ class LearningService
         Agent $agent,
         string $question,
         string $answer,
-        int $userId
+        int $userId,
+        bool $requiresHandoff = false
     ): bool {
         // S'assurer que la collection learned_responses existe
         $this->ensureCollectionExists();
@@ -208,6 +222,7 @@ class LearningService
                     'validated_by' => $userId,
                     'validated_at' => now()->toIso8601String(),
                     'source' => 'manual',
+                    'requires_handoff' => $requiresHandoff,
                 ],
             ]
         ]);
@@ -218,7 +233,7 @@ class LearningService
             ]);
 
             // 2. Double indexation : indexer aussi dans la collection de l'agent
-            $this->indexFaqInAgentCollection($agent, $question, $answer, null);
+            $this->indexFaqInAgentCollection($agent, $question, $answer, null, $requiresHandoff);
         }
 
         return $result;
@@ -268,8 +283,20 @@ class LearningService
      * Valide un message ET l'ajoute à la base d'apprentissage
      * (la réponse originale est considérée comme correcte)
      */
-    public function validate(AiMessage $message, int $validatorId): bool
+    public function validate(AiMessage $message, int $validatorId, ?string $customQuestion = null, bool $requiresHandoff = false): bool
     {
+        // Si c'est un direct_qr_match avec une question modifiée ou un flag handoff, on ré-indexe
+        if ($message->model_used === 'direct_qr_match' && empty($customQuestion) && !$requiresHandoff) {
+            Log::info('Skip learning for direct_qr_match - already in learned_responses', [
+                'message_id' => $message->id,
+            ]);
+            return $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
+            ]);
+        }
+
         $validator = User::find($validatorId);
         if (!$validator) {
             return $message->update([
@@ -279,8 +306,8 @@ class LearningService
             ]);
         }
 
-        // Valider ET apprendre (sans correction = réponse originale)
-        return $this->validateAndLearn($message, $validator, null);
+        // Valider ET apprendre (sans correction = réponse originale, avec question optionnelle)
+        return $this->validateAndLearn($message, $validator, null, $customQuestion, $requiresHandoff);
     }
 
     /**
@@ -298,14 +325,32 @@ class LearningService
     /**
      * Apprend d'un message corrigé
      */
-    public function learn(AiMessage $message, string $correctedContent, int $validatorId): bool
+    public function learn(AiMessage $message, string $correctedContent, int $validatorId, bool $requiresHandoff = false): bool
     {
         $validator = User::find($validatorId);
         if (!$validator) {
             return false;
         }
 
-        return $this->validateAndLearn($message, $validator, $correctedContent);
+        return $this->validateAndLearn($message, $validator, $correctedContent, null, $requiresHandoff);
+    }
+
+    /**
+     * Apprend d'un message avec question et réponse personnalisées
+     */
+    public function learnWithQuestion(
+        AiMessage $message,
+        string $customQuestion,
+        string $correctedContent,
+        int $validatorId,
+        bool $requiresHandoff = false
+    ): bool {
+        $validator = User::find($validatorId);
+        if (!$validator) {
+            return false;
+        }
+
+        return $this->validateAndLearn($message, $validator, $correctedContent, $customQuestion, $requiresHandoff);
     }
 
     /**
@@ -330,6 +375,110 @@ class LearningService
             'total_learned' => $total,
             'collection' => $collection,
         ];
+    }
+
+    /**
+     * Supprime les points existants pour un message_id donné (évite les doublons lors des corrections)
+     * Supprime à la fois dans learned_responses et dans la collection de l'agent
+     */
+    private function deleteExistingPointsForMessage(int $messageId, int $agentId): void
+    {
+        // Supprimer dans learned_responses
+        $filter = [
+            'must' => [
+                ['key' => 'message_id', 'match' => ['value' => $messageId]]
+            ]
+        ];
+
+        $deleted = $this->qdrantService->deleteByFilter(self::LEARNED_RESPONSES_COLLECTION, $filter);
+        if ($deleted) {
+            Log::info('Deleted existing learned_response point for message', ['message_id' => $messageId]);
+        }
+
+        // Supprimer dans la collection de l'agent (si elle existe)
+        $agent = Agent::find($agentId);
+        if ($agent && !empty($agent->qdrant_collection)) {
+            $deleted = $this->qdrantService->deleteByFilter($agent->qdrant_collection, $filter);
+            if ($deleted) {
+                Log::info('Deleted existing FAQ point in agent collection', [
+                    'message_id' => $messageId,
+                    'collection' => $agent->qdrant_collection,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Supprime les doublons basés sur la similarité de la question (même question = même réponse attendue)
+     * Utilise la recherche vectorielle pour trouver les questions très similaires (score > 0.98)
+     */
+    private function deleteSimilarQuestions(array $vector, int $agentId, string $agentSlug): void
+    {
+        // Chercher les questions très similaires dans learned_responses
+        try {
+            $similarResults = $this->qdrantService->search(
+                vector: $vector,
+                collection: self::LEARNED_RESPONSES_COLLECTION,
+                limit: 5,
+                filter: [
+                    'must' => [
+                        ['key' => 'agent_slug', 'match' => ['value' => $agentSlug]]
+                    ]
+                ],
+                scoreThreshold: 0.98 // Très similaire = même question
+            );
+
+            if (!empty($similarResults)) {
+                $pointIds = array_column($similarResults, 'id');
+
+                if (!empty($pointIds)) {
+                    $this->qdrantService->delete(self::LEARNED_RESPONSES_COLLECTION, $pointIds);
+                    Log::info('Deleted similar questions from learned_responses', [
+                        'agent' => $agentSlug,
+                        'deleted_count' => count($pointIds),
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to delete similar questions from learned_responses', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Faire de même dans la collection de l'agent
+        $agent = Agent::find($agentId);
+        if ($agent && !empty($agent->qdrant_collection)) {
+            try {
+                $similarResults = $this->qdrantService->search(
+                    vector: $vector,
+                    collection: $agent->qdrant_collection,
+                    limit: 5,
+                    filter: [
+                        'must' => [
+                            ['key' => 'type', 'match' => ['value' => 'qa_pair']]
+                        ]
+                    ],
+                    scoreThreshold: 0.98
+                );
+
+                if (!empty($similarResults)) {
+                    $pointIds = array_column($similarResults, 'id');
+
+                    if (!empty($pointIds)) {
+                        $this->qdrantService->delete($agent->qdrant_collection, $pointIds);
+                        Log::info('Deleted similar questions from agent collection', [
+                            'agent' => $agentSlug,
+                            'collection' => $agent->qdrant_collection,
+                            'deleted_count' => count($pointIds),
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('Failed to delete similar questions from agent collection', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     /**

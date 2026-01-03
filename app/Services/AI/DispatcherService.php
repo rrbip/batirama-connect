@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Services\AI;
 
 use App\DTOs\AI\LLMResponse;
+use App\Events\Support\NewSupportMessage;
 use App\Jobs\ProcessAiMessageJob;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\AiSession;
+use App\Models\SupportMessage;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -77,6 +79,23 @@ class DispatcherService
 
         // Sauvegarder le message utilisateur
         $this->ragService->saveMessage($session, 'user', $userMessage);
+
+        // Rafraîchir la session pour avoir le statut actuel (peut avoir été escaladée entre-temps)
+        $session->refresh();
+
+        // Vérifier si la session est en mode support (escalated ou assigned)
+        $isInSupportMode = in_array($session->support_status, ['escalated', 'assigned']);
+
+        Log::debug('DispatcherService: Checking support mode', [
+            'session_id' => $session->id,
+            'support_status' => $session->support_status,
+            'is_in_support_mode' => $isInSupportMode,
+        ]);
+
+        // Si la session est en mode support, créer aussi un message support pour notifier les agents
+        if ($isInSupportMode) {
+            $this->createSupportMessageForEscalatedSession($session, $userMessage);
+        }
 
         // Créer le message assistant en attente (contenu vide pour l'instant)
         $assistantMessage = AiMessage::create([
@@ -199,17 +218,69 @@ class DispatcherService
 
     /**
      * Récupère l'historique d'une session
+     * Inclut les messages IA et les messages de support (système, agent)
      */
     public function getSessionHistory(AiSession $session, int $limit = 50): array
     {
-        return $session->messages()
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+
+        // Messages IA (filtrer les non-validés si support humain actif)
+        $aiMessagesQuery = $session->messages();
+
+        if ($isHumanSupportActive) {
+            $aiMessagesQuery->where(function ($query) {
+                $query->where('role', 'user')
+                      ->orWhere(function ($q) {
+                          $q->where('role', 'assistant')
+                            ->whereIn('validation_status', ['validated', 'learned']);
+                      });
+            });
+        }
+
+        $aiMessages = $aiMessagesQuery
             ->orderBy('created_at', 'asc')
+            ->orderBy('id', 'asc')
             ->take($limit)
             ->get()
             ->map(fn($msg) => [
                 'role' => $msg->role,
+                'content' => $msg->corrected_content ?? $msg->content,
+                'created_at' => $msg->created_at,
+            ]);
+
+        // Messages de support:
+        // - agent et system: toujours inclus
+        // - user: seulement si channel='email' (les channel='chat' sont des doublons de aiMessages)
+        $supportMessages = $session->supportMessages()
+            ->where(function ($query) {
+                $query->whereIn('sender_type', ['agent', 'system'])
+                      ->orWhere(function ($q) {
+                          $q->where('sender_type', 'user')
+                            ->where('channel', 'email');
+                      });
+            })
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(fn($msg) => [
+                'role' => match($msg->sender_type) {
+                    'agent' => 'support',
+                    'user' => 'user',
+                    default => 'system',
+                },
                 'content' => $msg->content,
-                'created_at' => $msg->created_at->toIso8601String(),
+                'sender_name' => $msg->agent?->name ?? null,
+                'created_at' => $msg->created_at,
+            ]);
+
+        // Fusionner et trier par date
+        return $aiMessages->concat($supportMessages)
+            ->sortBy('created_at')
+            ->values()
+            ->map(fn($msg) => [
+                'role' => $msg['role'],
+                'content' => $msg['content'],
+                'sender_name' => $msg['sender_name'] ?? null,
+                'created_at' => $msg['created_at']->toIso8601String(),
             ])
             ->toArray();
     }
@@ -223,5 +294,39 @@ class DispatcherService
             'ended_at' => now(),
             'status' => 'completed',
         ]);
+    }
+
+    /**
+     * Crée un message support pour une session escaladée.
+     * Ceci permet de notifier les agents support quand l'utilisateur envoie un message
+     * via le chat standalone après escalade.
+     */
+    protected function createSupportMessageForEscalatedSession(AiSession $session, string $content): void
+    {
+        try {
+            $message = SupportMessage::create([
+                'session_id' => $session->id,
+                'sender_type' => 'user',
+                'channel' => 'chat',
+                'content' => $content,
+                'is_read' => false,
+            ]);
+
+            // Mettre à jour l'activité de la session
+            $session->touch('last_activity_at');
+
+            // Dispatcher l'événement pour notifier les agents support
+            event(new NewSupportMessage($message));
+
+            Log::info('DispatcherService: Support message created for escalated session', [
+                'session_id' => $session->id,
+                'message_id' => $message->id,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('DispatcherService: Failed to create support message', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

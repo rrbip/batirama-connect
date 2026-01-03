@@ -4,15 +4,22 @@ declare(strict_types=1);
 
 namespace App\Services\Support;
 
+use App\Events\Support\SessionAssigned;
+use App\Events\Support\SessionEscalated;
+use App\Events\Support\SessionResolved;
+use App\Mail\Support\EscalationNotificationMail;
 use App\Models\Agent;
 use App\Models\AiSession;
 use App\Models\User;
-use App\Events\Support\SessionEscalated;
-use App\Events\Support\SessionAssigned;
-use App\Mail\Support\EscalationNotificationMail;
+use Filament\Notifications\Actions\Action;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Symfony\Component\Mailer\Mailer;
+use Symfony\Component\Mailer\Transport;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 
 class EscalationService
 {
@@ -62,6 +69,9 @@ class EscalationService
             'max_rag_score' => $maxRagScore,
         ]);
 
+        // Créer le message système d'escalade pour l'historique
+        $this->createEscalationSystemMessage($session);
+
         // Dispatcher l'événement (pour WebSocket)
         event(new SessionEscalated($session));
 
@@ -69,6 +79,28 @@ class EscalationService
         $this->notifyAvailableAgents($session);
 
         return $session;
+    }
+
+    /**
+     * Crée un message système d'escalade dans l'historique.
+     */
+    protected function createEscalationSystemMessage(AiSession $session): void
+    {
+        $agent = $session->agent;
+        $asyncMode = $agent?->shouldUseAsyncSupport() ?? true;
+
+        $content = $asyncMode
+            ? 'Votre demande a été transmise à notre équipe. Un conseiller vous répondra dès que possible.'
+            : 'Votre demande a été transmise à notre équipe. Un conseiller va vous répondre.';
+
+        $message = $session->supportMessages()->create([
+            'sender_type' => 'system',
+            'channel' => 'chat',
+            'content' => $content,
+        ]);
+
+        // Broadcast le message pour les clients connectés
+        event(new \App\Events\Support\NewSupportMessage($message));
     }
 
     /**
@@ -96,6 +128,7 @@ class EscalationService
 
     /**
      * Trouve les agents de support disponibles pour une session.
+     * Pas de fallback vers admins - système marque blanche.
      */
     public function findAvailableAgents(AiSession $session): Collection
     {
@@ -105,7 +138,7 @@ class EscalationService
             return collect();
         }
 
-        // 1. Agents assignés spécifiquement à cet agent IA
+        // Agents assignés spécifiquement à cet agent IA avec notify_on_escalation
         $assignedAgents = $agent->supportUsers()
             ->wherePivot('notify_on_escalation', true)
             ->get();
@@ -114,26 +147,42 @@ class EscalationService
             return $assignedAgents;
         }
 
-        // 2. Fallback : Admins et super-admins
-        return User::whereHas('roles', function ($query) {
-            $query->whereIn('name', ['super-admin', 'admin']);
-        })->get();
+        // Sinon tous les agents de support assignés
+        return $agent->supportUsers;
     }
 
     /**
-     * Vérifie si des agents de support sont connectés.
-     * Note: Sera amélioré avec Soketi pour vérifier la présence en temps réel.
+     * Récupère les IDs des utilisateurs connectés au canal de présence.
      */
-    public function hasConnectedAgents(AiSession $session): bool
+    protected function getConnectedUserIds(AiSession $session): Collection
     {
-        // Pour l'instant, on retourne toujours false car on n'a pas encore
-        // implémenté la détection de présence avec Soketi.
-        // Cela sera fait dans la Phase 4.
-        return false;
+        if (!$session->agent_id) {
+            return collect();
+        }
+
+        try {
+            $presenceService = app(PresenceService::class);
+            $connectedUsers = $presenceService->getConnectedAgents($session->agent_id);
+
+            Log::debug('EscalationService: Raw connected users from Soketi', [
+                'agent_id' => $session->agent_id,
+                'raw_data' => $connectedUsers,
+            ]);
+
+            return collect($connectedUsers)->pluck('id')->filter();
+        } catch (\Throwable $e) {
+            Log::warning('EscalationService: Failed to get connected users', [
+                'session_id' => $session->id,
+                'error' => $e->getMessage(),
+            ]);
+            // En cas d'erreur, considérer personne comme connecté (envoyer les emails)
+            return collect();
+        }
     }
 
     /**
      * Notifie les agents de support disponibles.
+     * Pour chaque agent : notification cloche + email si non connecté.
      */
     public function notifyAvailableAgents(AiSession $session): void
     {
@@ -142,49 +191,175 @@ class EscalationService
         if ($agents->isEmpty()) {
             Log::warning('No support agents available for escalated session', [
                 'session_id' => $session->id,
+                'agent_id' => $session->agent_id,
             ]);
             return;
         }
 
-        // Si aucun agent n'est connecté, envoyer un email
-        if (!$this->hasConnectedAgents($session)) {
-            $this->sendEmailNotifications($session, $agents);
+        // Récupérer les IDs des utilisateurs connectés
+        $connectedUserIds = $this->getConnectedUserIds($session);
+
+        Log::info('EscalationService: Notifying agents', [
+            'session_id' => $session->id,
+            'agents_count' => $agents->count(),
+            'agents_ids' => $agents->pluck('id')->toArray(),
+            'connected_user_ids' => $connectedUserIds->toArray(),
+        ]);
+
+        $emailsSent = 0;
+
+        foreach ($agents as $agent) {
+            // Toujours envoyer la notification Filament (cloche)
+            $this->sendDatabaseNotificationToUser($session, $agent);
+
+            // Si l'agent n'est pas connecté, envoyer aussi un email
+            $isConnected = $connectedUserIds->contains($agent->id);
+
+            Log::debug('EscalationService: Agent notification check', [
+                'agent_id' => $agent->id,
+                'agent_email' => $agent->email,
+                'is_connected' => $isConnected,
+                'will_send_email' => !$isConnected && $agent->email,
+            ]);
+
+            if (!$isConnected && $agent->email) {
+                $this->sendEmailNotificationToUser($session, $agent);
+                $emailsSent++;
+            }
+        }
+
+        // Mettre à jour les métadonnées si des emails ont été envoyés
+        if ($emailsSent > 0) {
+            $session->update([
+                'support_metadata' => array_merge($session->support_metadata ?? [], [
+                    'email_notification_sent_at' => now()->toISOString(),
+                    'notified_agents_count' => $agents->count(),
+                    'emails_sent_count' => $emailsSent,
+                ]),
+            ]);
         }
     }
 
     /**
-     * Envoie des notifications par email aux agents de support.
+     * Envoie une notification Filament (cloche) à un utilisateur.
      */
-    protected function sendEmailNotifications(AiSession $session, Collection $agents): void
+    protected function sendDatabaseNotificationToUser(AiSession $session, User $user): void
     {
-        foreach ($agents as $agent) {
-            if (!$agent->email) {
-                continue;
+        $reasonLabels = [
+            'ai_handoff_request' => "L'IA a demandé un transfert",
+            'user_explicit_request' => "L'utilisateur demande un humain",
+            'low_confidence' => 'Score de confiance trop bas',
+            'low_rag_score' => 'Score de confiance trop bas',
+            'manual_request' => 'Demande de support humain',
+        ];
+
+        $reasonLabel = $reasonLabels[$session->escalation_reason] ?? $session->escalation_reason;
+        $agentName = $session->agent?->name ?? 'Agent IA';
+        $userName = $session->user_email ?? $session->user?->name ?? 'Visiteur';
+
+        try {
+            Notification::make()
+                ->title('Nouvelle escalade support')
+                ->icon('heroicon-o-exclamation-triangle')
+                ->iconColor('danger')
+                ->body("{$reasonLabel}\n**{$agentName}** - De : {$userName}")
+                ->actions([
+                    Action::make('view')
+                        ->label('Voir la session')
+                        ->url("/admin/ai-sessions/{$session->id}")
+                        ->markAsRead(),
+                ])
+                ->sendToDatabase($user);
+
+            Log::debug('Database notification sent to support agent', [
+                'session_id' => $session->id,
+                'user_id' => $user->id,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send database notification', [
+                'session_id' => $session->id,
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Envoie un email de notification d'escalade à un utilisateur.
+     */
+    protected function sendEmailNotificationToUser(AiSession $session, User $user): void
+    {
+        try {
+            $mailable = new EscalationNotificationMail($session, $user);
+
+            // Utiliser le SMTP personnalisé de l'agent IA si disponible
+            $smtpConfig = $session->agent?->getSmtpConfig();
+
+            if ($smtpConfig) {
+                $this->sendWithCustomSmtp($user->email, $mailable, $smtpConfig);
+            } else {
+                Mail::to($user->email)->send($mailable);
             }
 
-            try {
-                Mail::to($agent->email)->queue(new EscalationNotificationMail($session, $agent));
+            Log::info('Escalation email sent to support agent', [
+                'session_id' => $session->id,
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'custom_smtp' => (bool) $smtpConfig,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Failed to send escalation email', [
+                'session_id' => $session->id,
+                'user_id' => $user->id,
+                'user_email' => $user->email,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
 
-                Log::info('Escalation email sent to support agent', [
-                    'session_id' => $session->id,
-                    'agent_email' => $agent->email,
-                ]);
-            } catch (\Throwable $e) {
-                Log::error('Failed to send escalation email', [
-                    'session_id' => $session->id,
-                    'agent_email' => $agent->email,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+    /**
+     * Envoie un email via un SMTP personnalisé.
+     */
+    protected function sendWithCustomSmtp(string $to, $mailable, array $smtpConfig): void
+    {
+        $encryption = strtolower($smtpConfig['encryption'] ?? 'tls');
+        $port = (int) $smtpConfig['port'];
+
+        // SSL (port 465): smtps://user:pass@host:465
+        // TLS (port 587): smtp://user:pass@host:587
+        $scheme = ($encryption === 'ssl' || $port === 465) ? 'smtps' : 'smtp';
+
+        $dsn = sprintf(
+            '%s://%s:%s@%s:%d',
+            $scheme,
+            urlencode($smtpConfig['username']),
+            urlencode($smtpConfig['password']),
+            $smtpConfig['host'],
+            $port
+        );
+
+        $transport = Transport::fromDsn($dsn);
+        $mailer = new Mailer($transport);
+
+        // Extraire le sujet de l'Envelope
+        $subject = 'Nouvelle demande de support';
+        if (method_exists($mailable, 'envelope')) {
+            $envelope = $mailable->envelope();
+            $subject = $envelope->subject ?? $subject;
         }
 
-        // Mettre à jour les métadonnées
-        $session->update([
-            'support_metadata' => array_merge($session->support_metadata ?? [], [
-                'notification_sent_at' => now()->toISOString(),
-                'notified_agents_count' => $agents->count(),
-            ]),
-        ]);
+        // Rendre le contenu HTML
+        $mailable->from($smtpConfig['from_address'], $smtpConfig['from_name']);
+        $htmlContent = $mailable->to($to)->render();
+
+        // Créer et envoyer l'email Symfony
+        $email = (new Email())
+            ->from(new Address($smtpConfig['from_address'], $smtpConfig['from_name']))
+            ->to($to)
+            ->subject($subject)
+            ->html($htmlContent);
+
+        $mailer->send($email);
     }
 
     /**
@@ -225,6 +400,9 @@ class EscalationService
             'resolution_type' => $resolutionType,
             'resolved_by' => auth()->id(),
         ]);
+
+        // Dispatcher l'événement pour notifier le client (standalone)
+        event(new SessionResolved($session));
 
         return $session;
     }

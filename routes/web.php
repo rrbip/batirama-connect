@@ -27,6 +27,10 @@ Route::get('/s/{token}', [StandaloneChatController::class, 'show'])
 Route::get('/c/{token}', [StandaloneChatController::class, 'show'])
     ->name('public.chat');
 
+// Widget embed route (deployment key based)
+Route::get('/widget', [StandaloneChatController::class, 'widget'])
+    ->name('whitelabel.widget');
+
 // Test documents for pipeline testing (public access)
 Route::get('/test-docs/{filename}', function (string $filename) {
     $path = storage_path("app/test-documents/{$filename}");

@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Enums\IndexingMethod;
+use App\Enums\LLMProvider;
 use App\Filament\Resources\AgentResource\Pages;
+use Filament\Forms\Get;
+use App\Filament\Resources\AgentResource\RelationManagers;
 use App\Models\Agent;
 use App\Services\AgentResetService;
 use Filament\Forms;
@@ -104,28 +107,77 @@ class AgentResource extends Resource
                         Forms\Components\Tabs\Tab::make('Configuration IA')
                             ->icon('heroicon-o-cog-6-tooth')
                             ->schema([
-                                Forms\Components\Section::make('Ollama - Chat')
-                                    ->description('Serveur Ollama pour les conversations (vide = config globale)')
+                                Forms\Components\Section::make('Provider LLM')
+                                    ->description('Sélectionnez le provider pour les conversations (Ollama local ou API cloud)')
                                     ->schema([
+                                        Forms\Components\Select::make('llm_provider')
+                                            ->label('Provider')
+                                            ->options(LLMProvider::class)
+                                            ->default('ollama')
+                                            ->live()
+                                            ->required()
+                                            ->helperText(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => 'Free: 250 req/jour. Vision native incluse.',
+                                                'openai' => 'Payant. GPT-4o supporte la vision.',
+                                                default => 'Self-hosted. Gratuit avec GPU/CPU dédié.',
+                                            }),
+
+                                        // Champs API (Gemini/OpenAI)
+                                        Forms\Components\TextInput::make('llm_api_key')
+                                            ->label('Clé API')
+                                            ->password()
+                                            ->revealable()
+                                            ->visible(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->required(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->helperText('La clé sera chiffrée en base de données'),
+
+                                        Forms\Components\Select::make('llm_api_model')
+                                            ->label('Modèle API')
+                                            ->options(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => [
+                                                    'gemini-2.5-flash' => 'Gemini 2.5 Flash (Recommandé)',
+                                                    'gemini-2.5-flash-lite' => 'Gemini 2.5 Flash Lite (Plus rapide)',
+                                                    'gemini-2.5-pro' => 'Gemini 2.5 Pro (Plus puissant)',
+                                                    'gemini-2.0-flash' => 'Gemini 2.0 Flash',
+                                                ],
+                                                'openai' => [
+                                                    'gpt-4o-mini' => 'GPT-4o Mini (Économique)',
+                                                    'gpt-4o' => 'GPT-4o (Performant)',
+                                                    'gpt-4-turbo' => 'GPT-4 Turbo',
+                                                ],
+                                                default => [],
+                                            })
+                                            ->visible(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
+                                            ->default(fn (Get $get) => match ($get('llm_provider')) {
+                                                'gemini' => 'gemini-2.5-flash',
+                                                'openai' => 'gpt-4o-mini',
+                                                default => null,
+                                            }),
+
+                                        // Champs Ollama
                                         Forms\Components\TextInput::make('model')
-                                            ->label('Modèle')
-                                            ->placeholder('llama3.2')
-                                            ->helperText('Modèle Ollama à utiliser'),
+                                            ->label('Modèle Ollama')
+                                            ->placeholder('mistral:7b')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null)
+                                            ->helperText('Modèle Ollama pour le chat'),
 
                                         Forms\Components\TextInput::make('fallback_model')
                                             ->label('Modèle de secours')
-                                            ->placeholder('mistral'),
+                                            ->placeholder('llama3.2:3b')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
 
                                         Forms\Components\TextInput::make('ollama_host')
-                                            ->label('Host')
-                                            ->placeholder('ollama'),
+                                            ->label('Host Ollama')
+                                            ->placeholder('ollama')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
 
                                         Forms\Components\TextInput::make('ollama_port')
                                             ->label('Port')
                                             ->numeric()
-                                            ->placeholder('11434'),
+                                            ->placeholder('11434')
+                                            ->visible(fn (Get $get) => $get('llm_provider') === 'ollama' || $get('llm_provider') === null),
                                     ])
-                                    ->columns(4)
+                                    ->columns(2)
                                     ->collapsible(),
 
                                 Forms\Components\Section::make('Ollama - Vision (extraction PDF)')
@@ -632,6 +684,111 @@ class AgentResource extends Resource
                                             ])
                                             ->columns(3),
 
+                                        Forms\Components\Fieldset::make('Personnalisation des emails')
+                                            ->schema([
+                                                Forms\Components\TextInput::make('ai_assistance_config.email_brand_name')
+                                                    ->label('Nom de marque')
+                                                    ->placeholder('Mon Entreprise')
+                                                    ->helperText('Nom affiché dans le titre et footer des emails (par défaut: nom de l\'agent)'),
+
+                                                Forms\Components\Textarea::make('ai_assistance_config.email_footer_text')
+                                                    ->label('Texte du footer')
+                                                    ->placeholder('© 2024 Mon Entreprise. Tous droits réservés.')
+                                                    ->helperText('Texte personnalisé affiché en bas des emails (optionnel)')
+                                                    ->rows(2),
+                                            ])
+                                            ->columns(1),
+
+                                        Forms\Components\Actions::make([
+                                            Forms\Components\Actions\Action::make('testEmailConfig')
+                                                ->label('Tester la configuration email')
+                                                ->icon('heroicon-o-paper-airplane')
+                                                ->color('info')
+                                                ->requiresConfirmation()
+                                                ->modalHeading('Tester la configuration email')
+                                                ->modalDescription('Ce test va envoyer un email via SMTP puis vérifier sa réception via IMAP. Assurez-vous d\'avoir enregistré les modifications avant de tester.')
+                                                ->modalSubmitActionLabel('Lancer le test')
+                                                ->action(function ($record, $livewire, \Filament\Forms\Components\Actions\Action $action) {
+                                                    if (!$record) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Erreur')
+                                                            ->body('Veuillez d\'abord enregistrer l\'agent avant de tester.')
+                                                            ->danger()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    $testService = app(\App\Services\Support\EmailConfigTestService::class);
+
+                                                    $smtpConfig = $record->getSmtpConfig();
+                                                    $imapConfig = $record->getImapConfig();
+                                                    $testEmail = $record->support_email;
+
+                                                    if (!$smtpConfig) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Configuration SMTP incomplète')
+                                                            ->body('Veuillez renseigner tous les champs SMTP (serveur, port, identifiant, mot de passe).')
+                                                            ->warning()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    if (!$testEmail) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Email de support manquant')
+                                                            ->body('Veuillez renseigner l\'email de support pour effectuer le test.')
+                                                            ->warning()
+                                                            ->send();
+                                                        return;
+                                                    }
+
+                                                    // Exécuter les tests
+                                                    if (!$imapConfig) {
+                                                        $smtpResult = $testService->testSmtp($smtpConfig, $testEmail);
+                                                        $results = [
+                                                            'smtp' => $smtpResult,
+                                                            'imap' => ['skipped' => true, 'message' => 'IMAP non configuré'],
+                                                        ];
+                                                    } else {
+                                                        $results = $testService->testFullConfiguration($smtpConfig, $imapConfig, $testEmail);
+                                                    }
+
+                                                    // Générer le rapport
+                                                    $report = $testService->generateReport($smtpConfig, $imapConfig, $testEmail, $results);
+
+                                                    // Stocker le rapport dans la session pour l'afficher
+                                                    session(['email_test_report' => $report, 'email_test_results' => $results]);
+
+                                                    // Notification de résultat
+                                                    $smtpSuccess = $results['smtp']['success'] ?? false;
+                                                    $imapSuccess = $results['imap']['success'] ?? true;
+                                                    $imapSkipped = $results['imap']['skipped'] ?? false;
+
+                                                    if ($smtpSuccess && ($imapSuccess || $imapSkipped)) {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Test terminé')
+                                                            ->body('Consultez le rapport détaillé ci-dessous.')
+                                                            ->success()
+                                                            ->send();
+                                                    } else {
+                                                        \Filament\Notifications\Notification::make()
+                                                            ->title('Test terminé avec erreurs')
+                                                            ->body('Consultez le rapport détaillé ci-dessous pour diagnostiquer le problème.')
+                                                            ->danger()
+                                                            ->send();
+                                                    }
+
+                                                    // Forcer le rafraîchissement pour afficher le rapport
+                                                    $livewire->dispatch('email-test-completed', report: $report);
+                                                })
+                                                ->visible(fn ($record) => $record !== null),
+                                        ])
+                                            ->columnSpanFull(),
+
+                                        // Zone d'affichage du rapport de test
+                                        Forms\Components\View::make('filament.forms.components.email-test-report')
+                                            ->columnSpanFull(),
+
                                         Forms\Components\Placeholder::make('email_help')
                                             ->label('')
                                             ->content('💡 Les emails entrants sont récupérés automatiquement. Pour Gmail, créez un mot de passe d\'application dans les paramètres de sécurité Google.')
@@ -669,6 +826,24 @@ class AgentResource extends Resource
                                     ->collapsible()
                                     ->collapsed(),
                             ]),
+
+                        Forms\Components\Tabs\Tab::make('Liens Publics')
+                            ->icon('heroicon-o-link')
+                            ->schema([
+                                Forms\Components\Placeholder::make('public_links_info')
+                                    ->label('')
+                                    ->content('Générez des liens publics pour partager l\'accès à cet agent sans authentification.')
+                                    ->visible(fn ($record) => $record === null),
+
+                                Forms\Components\Livewire::make(\App\Livewire\Agent\PublicLinksManager::class, fn ($record) => ['agent' => $record])
+                                    ->visible(fn ($record) => $record !== null),
+
+                                Forms\Components\Placeholder::make('save_first')
+                                    ->label('')
+                                    ->content('Sauvegardez d\'abord l\'agent pour pouvoir gérer les liens publics.')
+                                    ->visible(fn ($record) => $record === null),
+                            ])
+                            ->visible(fn (callable $get) => $get('allow_public_access')),
                     ])
                     ->columnSpanFull(),
             ]);
@@ -831,9 +1006,7 @@ class AgentResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array

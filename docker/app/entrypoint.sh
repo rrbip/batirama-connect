@@ -73,10 +73,55 @@ else
     echo "✅ Dépendances à jour"
 fi
 
-# Créer les dossiers Laravel et fixer les permissions
+# ===========================================
+# PERMISSIONS (critique pour les volumes montés)
+# ===========================================
+echo "🔒 Configuration des permissions..."
 mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache storage/logs bootstrap/cache
-chown -R www-data:www-data storage bootstrap/cache 2>/dev/null || true
-chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
+# IMPORTANT: chown AVANT chmod pour les volumes nommés
+# Le volume storage/framework peut avoir des UIDs incorrects (ex: 82 d'Alpine)
+echo "   Correction des propriétaires..."
+chown -R www-data:www-data storage/framework 2>/dev/null || true
+chown -R www-data:www-data storage/logs 2>/dev/null || true
+chown -R www-data:www-data bootstrap/cache 2>/dev/null || true
+
+# Appliquer les permissions
+chmod -R 775 storage bootstrap/cache 2>/dev/null || {
+    echo "   ⚠️  chmod storage échoué, essai fichier par fichier..."
+    find storage -type d -exec chmod 775 {} \; 2>/dev/null || true
+    find storage -type f -exec chmod 664 {} \; 2>/dev/null || true
+    find bootstrap/cache -type d -exec chmod 775 {} \; 2>/dev/null || true
+    find bootstrap/cache -type f -exec chmod 664 {} \; 2>/dev/null || true
+}
+
+# Test d'écriture EN TANT QUE www-data (pas root!)
+if su -s /bin/sh www-data -c "touch storage/framework/views/.perm_test" 2>/dev/null; then
+    rm -f storage/framework/views/.perm_test
+    echo "   ✅ Permissions configurées et validées (www-data peut écrire)"
+else
+    echo "   ❌ ATTENTION: www-data ne peut pas écrire dans storage/framework/views"
+    echo "   ℹ️  Tentative de correction forcée..."
+    chown -R 33:33 storage/framework storage/logs bootstrap/cache 2>/dev/null || true
+    chmod -R 777 storage/framework storage/logs bootstrap/cache 2>/dev/null || true
+    # Re-test
+    if su -s /bin/sh www-data -c "touch storage/framework/views/.perm_test" 2>/dev/null; then
+        rm -f storage/framework/views/.perm_test
+        echo "   ✅ Permissions corrigées après intervention forcée"
+    else
+        echo "   ❌ ÉCHEC: Vérifiez manuellement les permissions"
+        ls -la storage/framework/
+        id www-data
+    fi
+fi
+
+# ===========================================
+# COMPOSER AUTOLOAD (après création de storage)
+# ===========================================
+# Exécuter dump-autoload pour générer l'autoloader et découvrir les packages
+# Ceci doit être fait APRÈS la création de storage car les scripts Laravel en ont besoin
+echo "🔄 Génération de l'autoloader Composer..."
+composer dump-autoload --optimize --quiet 2>/dev/null || composer dump-autoload --optimize
 
 # Modèles IA à télécharger automatiquement
 OLLAMA_MODELS="${OLLAMA_MODELS:-nomic-embed-text,mistral:7b}"
@@ -248,6 +293,7 @@ else
     php artisan cache:clear 2>/dev/null || true
     php artisan view:clear 2>/dev/null || true
     php artisan route:clear 2>/dev/null || true
+    php artisan livewire:discover 2>/dev/null || true
 
     # Régénérer l'autoloader si le code a changé
     if vendor_needs_update; then

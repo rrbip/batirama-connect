@@ -1,5 +1,5 @@
 <x-mail::message>
-# Réponse de {{ $agentName }}
+# Réponse de {{ $brandName }}
 
 Bonjour,
 
@@ -7,9 +7,23 @@ Bonjour,
 
 ---
 
+@if($chatUrl)
+<x-mail::button :url="$chatUrl" color="primary">
+Accéder au chat en direct
+</x-mail::button>
+
+Vous pouvez également suivre votre conversation en temps réel sur notre chat.
+
+@endif
 {{ $replyInstructions }}
 
 Cordialement,<br>
 {{ $agent->name }}<br>
-{{ $agentName }}
+{{ $brandName }}
+
+@if($footerText)
+<x-mail::subcopy>
+{{ $footerText }}
+</x-mail::subcopy>
+@endif
 </x-mail::message>

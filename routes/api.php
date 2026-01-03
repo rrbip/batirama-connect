@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\GuestBroadcastAuthController;
 use App\Http\Controllers\Api\PartnerApiController;
 use App\Http\Controllers\Api\PublicChatController;
 use App\Http\Controllers\Api\Whitelabel\EditorController;
@@ -21,6 +22,9 @@ Route::get('/health', fn () => response()->json([
     'status' => 'ok',
     'timestamp' => now()->toIso8601String(),
 ]));
+
+// Guest broadcast auth (for anonymous chat users)
+Route::post('/broadcasting/auth/guest', [GuestBroadcastAuthController::class, 'authenticate']);
 
 // API v1
 Route::prefix('v1')->group(function () {
@@ -115,6 +119,8 @@ Route::prefix('c')->group(function () {
     Route::post('/{token}/end', [PublicChatController::class, 'end']);
     Route::get('/{token}/history', [PublicChatController::class, 'history']);
     Route::post('/{token}/upload', [PublicChatController::class, 'upload']);
+    Route::post('/{token}/email', [PublicChatController::class, 'saveEmail']);
+    Route::post('/{token}/ping', [PublicChatController::class, 'ping']);
 });
 
 // Message status endpoints (polling for async messages)

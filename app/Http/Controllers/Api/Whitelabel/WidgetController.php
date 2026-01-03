@@ -12,6 +12,7 @@ use App\Models\AiMessage;
 use App\Models\AiSession;
 use App\Models\User;
 use App\Models\UserEditorLink;
+use App\Jobs\ProcessAiMessageJob;
 use App\Services\Upload\FileUploadService;
 use App\Services\Whitelabel\BrandingResolver;
 use Illuminate\Http\JsonResponse;
@@ -142,6 +143,7 @@ class WidgetController extends Controller
 
     /**
      * Envoie un message et reçoit la réponse de l'IA.
+     * Supporte le mode async pour le handoff humain.
      */
     public function sendMessage(Request $request, string $sessionId): JsonResponse
     {
@@ -150,6 +152,7 @@ class WidgetController extends Controller
             'attachments' => 'nullable|array',
             'attachments.*.type' => 'required_with:attachments|string',
             'attachments.*.url' => 'required_with:attachments|url',
+            'async' => 'nullable|boolean',
         ]);
 
         /** @var AgentDeployment $deployment */
@@ -183,8 +186,34 @@ class WidgetController extends Controller
         $deployment->incrementMessageCount();
         $session->increment('message_count');
 
-        // Dispatcher le job de génération de réponse IA
-        // Pour l'instant, on utilise le service existant de chat
+        // Mode async: dispatcher un job et retourner immédiatement
+        // Utilisé quand le support humain est actif pour ne pas bloquer l'utilisateur
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+        $useAsync = $request->boolean('async', false) || $isHumanSupportActive;
+
+        if ($useAsync) {
+            // Créer le message assistant en attente
+            $assistantMessage = $session->messages()->create([
+                'uuid' => (string) Str::uuid(),
+                'role' => 'assistant',
+                'content' => '',
+                'processing_status' => AiMessage::STATUS_PENDING,
+            ]);
+
+            // Dispatcher le job
+            ProcessAiMessageJob::dispatch($assistantMessage, $validated['message']);
+            $assistantMessage->markAsQueued();
+
+            return response()->json([
+                'message_id' => $userMessage->uuid,
+                'async' => true,
+                'ai_message_id' => $assistantMessage->uuid,
+                'support_status' => $session->support_status,
+                'poll_url' => url("/api/messages/{$assistantMessage->uuid}/status"),
+            ]);
+        }
+
+        // Mode sync: générer la réponse immédiatement
         try {
             $response = $this->generateAiResponse($session, $userMessage);
 
@@ -213,6 +242,7 @@ class WidgetController extends Controller
 
     /**
      * Récupère l'historique des messages d'une session.
+     * Inclut les messages IA et les messages de support (système, agent).
      */
     public function getMessages(Request $request, string $sessionId): JsonResponse
     {
@@ -230,20 +260,61 @@ class WidgetController extends Controller
             ], 404);
         }
 
-        $messages = $session->messages()
-            ->orderBy('created_at', 'asc')
+        $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
+
+        // Messages IA (filtrer les non-validés si support humain actif)
+        $aiMessages = $session->messages()
+            ->when($isHumanSupportActive, function ($query) {
+                // Si support actif, n'afficher que:
+                // - Messages user
+                // - Messages assistant validés ou appris
+                $query->where(function ($q) {
+                    $q->where('role', 'user')
+                      ->orWhere(function ($q2) {
+                          $q2->where('role', 'assistant')
+                             ->whereIn('validation_status', ['validated', 'learned']);
+                      });
+                });
+            })
             ->get()
             ->map(fn ($msg) => [
                 'message_id' => $msg->uuid,
                 'role' => $msg->role,
-                'content' => $msg->content,
+                'content' => $msg->corrected_content ?? $msg->content,
                 'sources' => $msg->metadata['sources'] ?? [],
-                'created_at' => $msg->created_at->toIso8601String(),
+                'created_at' => $msg->created_at,
+                'type' => 'ai',
+            ]);
+
+        // Messages de support (agent, system)
+        $supportMessages = $session->supportMessages()
+            ->get()
+            ->map(fn ($msg) => [
+                'message_id' => $msg->uuid,
+                'role' => $msg->sender_type === 'agent' ? 'support' : 'system',
+                'content' => $msg->content,
+                'sender_name' => $msg->sender?->name ?? null,
+                'created_at' => $msg->created_at,
+                'type' => 'support',
+            ]);
+
+        // Fusionner et trier par date
+        $allMessages = $aiMessages->concat($supportMessages)
+            ->sortBy('created_at')
+            ->values()
+            ->map(fn ($msg) => [
+                'message_id' => $msg['message_id'],
+                'role' => $msg['role'],
+                'content' => $msg['content'],
+                'sender_name' => $msg['sender_name'] ?? null,
+                'sources' => $msg['sources'] ?? [],
+                'created_at' => $msg['created_at']->toIso8601String(),
             ]);
 
         return response()->json([
             'session_id' => $session->uuid,
-            'messages' => $messages,
+            'messages' => $allMessages,
+            'support_status' => $session->support_status,
         ]);
     }
 
@@ -272,6 +343,7 @@ class WidgetController extends Controller
         return response()->json([
             'session_id' => $session->uuid,
             'status' => $session->status,
+            'support_status' => $session->support_status,
             'message_count' => $session->message_count,
             'branding' => $branding,
             'created_at' => $session->created_at->toIso8601String(),

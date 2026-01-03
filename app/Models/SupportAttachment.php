@@ -147,7 +147,7 @@ class SupportAttachment extends Model
     /**
      * Vérifie si le fichier a été scanné et est propre.
      */
-    public function isClean(): bool
+    public function isScanClean(): bool
     {
         return $this->scan_status === 'clean';
     }

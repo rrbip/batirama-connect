@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\IndexingMethod;
+use App\Enums\LLMProvider;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -63,6 +65,9 @@ class Agent extends Model
         'ollama_port',
         'model',
         'fallback_model',
+        'llm_provider',
+        'llm_api_key',
+        'llm_api_model',
         'context_window_size',
         'max_tokens',
         'temperature',
@@ -106,6 +111,7 @@ class Agent extends Model
     protected $casts = [
         'hydration_config' => 'array',
         'indexing_method' => IndexingMethod::class,
+        'llm_provider' => LLMProvider::class,
         'temperature' => 'float',
         'min_rag_score' => 'float',
         'learned_min_score' => 'float',
@@ -190,6 +196,39 @@ class Agent extends Model
     public function getModel(): string
     {
         return $this->model ?? config('ai.ollama.default_model');
+    }
+
+    /**
+     * Retourne le provider LLM (avec fallback sur Ollama).
+     */
+    public function getLLMProvider(): LLMProvider
+    {
+        return $this->llm_provider ?? LLMProvider::OLLAMA;
+    }
+
+    /**
+     * Retourne le modèle effectif selon le provider.
+     */
+    public function getEffectiveModel(): string
+    {
+        $provider = $this->getLLMProvider();
+
+        if ($provider === LLMProvider::OLLAMA) {
+            return $this->model ?? config('ai.ollama.default_model');
+        }
+
+        return $this->llm_api_model ?? $provider->defaultModel();
+    }
+
+    /**
+     * Accessor/mutator pour chiffrer la clé API.
+     */
+    protected function llmApiKey(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value) => $value ? decrypt($value) : null,
+            set: fn (?string $value) => $value ? encrypt($value) : null,
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -337,6 +376,78 @@ GUARDRAILS;
     }
 
     /**
+     * Retourne les instructions de handoff humain à ajouter au prompt
+     */
+    public function getHandoffInstructions(): string
+    {
+        if (!$this->human_support_enabled) {
+            return '';
+        }
+
+        $threshold = (int) (($this->escalation_threshold ?? 0.60) * 100);
+
+        return <<<HANDOFF
+
+## ⚠️ RÈGLE CRITIQUE : TRANSFERT VERS UN HUMAIN
+
+**ATTENTION : C'est TOI (l'assistant IA) qui doit ajouter le marqueur, PAS l'utilisateur !**
+
+Quand tu détectes une des conditions ci-dessous, TU DOIS terminer ta réponse par le marqueur `[HANDOFF_NEEDED]` sur une ligne séparée à la fin de TON message.
+
+### CAS 1 : DEMANDE EXPLICITE DE CONTACT HUMAIN (PRIORITÉ ABSOLUE)
+Si l'utilisateur veut parler à un humain/conseiller/support, TU ajoutes immédiatement le marqueur.
+Expressions à détecter :
+- "parler à un humain" / "parler à quelqu'un" / "parler au support"
+- "je peux parler à..." / "puis-je parler à..."
+- "un conseiller" / "un expert" / "une personne" / "un humain"
+- "contacter" / "joindre" / "appeler"
+- "pas un robot" / "pas une IA"
+
+### CAS 2 : CONTEXTE INSUFFISANT
+Tu n'as pas assez d'informations dans le contexte documentaire.
+
+### CAS 3 : QUESTION COMPLEXE
+Devis personnalisé, cas particulier, réclamation, situation urgente.
+
+### CAS 4 : INCERTITUDE (basée sur les scores de pertinence/similarité)
+**IMPORTANT - Comment évaluer ta confiance :**
+- Regarde les scores de "pertinence" des sources documentaires (ex: "Source 1 (pertinence: 85%)")
+- Regarde les scores de "similarité" des cas similaires (ex: "Cas 1 (similarité: 92%)")
+- Ces scores SONT ta confiance !
+
+**Règle simple :**
+- Si tu as au moins UNE source avec pertinence ≥ {$threshold}% OU un cas similaire avec similarité ≥ {$threshold}% → Ta confiance est SUFFISANTE → Ne PAS ajouter [HANDOFF_NEEDED] pour raison d'incertitude
+- Si TOUTES les sources ont pertinence < {$threshold}% ET tous les cas similaires ont similarité < {$threshold}% → Ta confiance est INSUFFISANTE → Ajouter [HANDOFF_NEEDED]
+
+### CAS 5 : HORS PÉRIMÈTRE
+La question ne correspond pas à ton domaine.
+
+**FORMAT OBLIGATOIRE :**
+1. Écris une courte réponse rassurante
+2. TERMINE par `[HANDOFF_NEEDED]` sur une nouvelle ligne
+
+**EXEMPLES CORRECTS :**
+
+Exemple 1 (demande explicite) :
+"Bien sûr, je vais vous mettre en relation avec un conseiller qui pourra vous aider personnellement.
+
+[HANDOFF_NEEDED]"
+
+Exemple 2 (contexte insuffisant) :
+"Je n'ai pas cette information précise dans ma base de connaissances. Un conseiller pourra mieux vous renseigner.
+
+[HANDOFF_NEEDED]"
+
+**⛔ NE JAMAIS FAIRE :**
+- Ne dis JAMAIS à l'utilisateur d'ajouter le marqueur lui-même
+- Ne mentionne JAMAIS le marqueur [HANDOFF_NEEDED] dans ta réponse visible
+- C'est TOI qui l'ajoutes silencieusement à la fin
+- N'ajoute PAS [HANDOFF_NEEDED] si tu as une source pertinente ≥ {$threshold}% - fais confiance au score !
+
+HANDOFF;
+    }
+
+    /**
      * Retourne la méthode d'extraction par défaut pour les PDFs
      */
     public function getDefaultExtractionMethod(): string
@@ -452,6 +563,60 @@ GUARDRAILS;
     public function hasSmtpConfig(): bool
     {
         return $this->getSmtpConfig() !== null;
+    }
+
+    /**
+     * Vérifie si on est dans les horaires de support configurés.
+     *
+     * Si aucune plage n'est définie, retourne true (support 24/7).
+     * Les horaires sont au format: [['day' => 'monday', 'start' => '09:00', 'end' => '18:00'], ...]
+     */
+    public function isWithinSupportHours(?\DateTimeInterface $at = null): bool
+    {
+        $hours = $this->support_hours;
+
+        // Si pas d'horaires définis, support 24/7
+        if (empty($hours) || !is_array($hours)) {
+            return true;
+        }
+
+        $now = $at ?? now();
+        $currentDay = strtolower($now->format('l')); // 'monday', 'tuesday', etc.
+        $currentTime = $now->format('H:i');
+
+        foreach ($hours as $slot) {
+            if (!isset($slot['day'], $slot['start'], $slot['end'])) {
+                continue;
+            }
+
+            if (strtolower($slot['day']) === $currentDay) {
+                // Vérifier si l'heure actuelle est dans la plage
+                if ($currentTime >= $slot['start'] && $currentTime <= $slot['end']) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si le mode support asynchrone (email) doit être utilisé.
+     *
+     * Retourne true si:
+     * - On est en dehors des horaires de support
+     * - OU aucun agent n'est connecté (vérifié via Soketi)
+     */
+    public function shouldUseAsyncSupport(): bool
+    {
+        // En dehors des horaires = mode async
+        if (!$this->isWithinSupportHours()) {
+            return true;
+        }
+
+        // Vérifier si des agents sont connectés via Soketi
+        $presenceService = app(\App\Services\Support\PresenceService::class);
+        return !$presenceService->hasConnectedAgents($this->id);
     }
 
     // ─────────────────────────────────────────────────────────────────
