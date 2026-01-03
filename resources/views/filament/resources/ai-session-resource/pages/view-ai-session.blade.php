@@ -448,8 +448,9 @@
                                                                 </template>
                                                             </div>
 
-                                                            {{-- Boutons Valider/Rejeter/Modifier - COLORÉS --}}
+                                                            {{-- Boutons Valider/Rejeter/Annuler/Restaurer - TOUT LOCAL jusqu'à Envoyer --}}
                                                             <div class="flex items-center gap-2" x-show="!sent">
+                                                                {{-- État: Non validé, Non rejeté → Afficher Valider + Rejeter --}}
                                                                 <template x-if="!block.validated && !block.rejected">
                                                                     <div class="flex gap-2">
                                                                         <button type="button"
@@ -458,29 +459,42 @@
                                                                             <x-heroicon-s-check class="w-4 h-4" />
                                                                             Valider
                                                                         </button>
-                                                                        @if($this->isAcceleratedLearningMode())
-                                                                        <button type="button"
-                                                                            @click="block.rejected = true; $wire.rejectBlock({{ $message['original_id'] }}, block.id, blocks.length)"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg transition-all">
-                                                                            <x-heroicon-s-x-mark class="w-4 h-4" />
-                                                                            Refuser
-                                                                        </button>
-                                                                        @else
                                                                         <button type="button"
                                                                             @click="block.rejected = true"
                                                                             class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg transition-all">
                                                                             <x-heroicon-s-x-mark class="w-4 h-4" />
                                                                             Rejeter
                                                                         </button>
-                                                                        @endif
                                                                     </div>
                                                                 </template>
-                                                                <template x-if="block.validated && !block.rejected && !block.editing">
+
+                                                                {{-- État: Validé → Afficher Modifier + Annuler --}}
+                                                                <template x-if="block.validated && !block.rejected">
+                                                                    <div class="flex gap-2">
+                                                                        <template x-if="!block.editing">
+                                                                            <button type="button"
+                                                                                @click="block.editing = true"
+                                                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800 border border-blue-300 dark:border-blue-700">
+                                                                                <x-heroicon-o-pencil class="w-4 h-4" />
+                                                                                Modifier
+                                                                            </button>
+                                                                        </template>
+                                                                        <button type="button"
+                                                                            @click="block.validated = false; block.editing = false"
+                                                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+                                                                            <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
+                                                                            Annuler
+                                                                        </button>
+                                                                    </div>
+                                                                </template>
+
+                                                                {{-- État: Rejeté → Afficher Restaurer --}}
+                                                                <template x-if="block.rejected">
                                                                     <button type="button"
-                                                                        @click="block.editing = true"
-                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800 border border-blue-300 dark:border-blue-700">
-                                                                        <x-heroicon-o-pencil class="w-4 h-4" />
-                                                                        Modifier
+                                                                        @click="block.rejected = false"
+                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-200 dark:hover:bg-amber-800 border border-amber-300 dark:border-amber-700">
+                                                                        <x-heroicon-o-arrow-path class="w-4 h-4" />
+                                                                        Restaurer
                                                                     </button>
                                                                 </template>
                                                             </div>
