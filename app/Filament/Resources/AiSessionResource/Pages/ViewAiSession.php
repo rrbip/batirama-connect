@@ -1214,4 +1214,193 @@ class ViewAiSession extends ViewRecord
         $config = $this->record->agent?->getAcceleratedLearningConfig() ?? [];
         return $config['require_skip_reason'] ?? false;
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // NOUVELLE UX : ENVOI UNIFIÉ DES BLOCS VALIDÉS
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Envoie tous les blocs validés (mono ou multi-questions).
+     *
+     * Cette méthode unifie le comportement pour mono et multi-questions :
+     * - Indexe chaque bloc Q/R dans Qdrant
+     * - Met à jour le message avec corrected_content
+     * - Broadcast au client si escaladé
+     * - Envoie email si user_email présent
+     *
+     * @param int $messageId ID du message IA
+     * @param array $blocks Liste des blocs à valider [['id' => 1, 'question' => '...', 'answer' => '...', 'requiresHandoff' => false], ...]
+     */
+    public function sendValidatedBlocks(int $messageId, array $blocks): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty($blocks)) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Aucun bloc à valider.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            $indexedCount = 0;
+            $allAnswers = [];
+
+            foreach ($blocks as $block) {
+                $question = trim($block['question'] ?? '');
+                $answer = trim($block['answer'] ?? '');
+                $requiresHandoff = $block['requiresHandoff'] ?? false;
+                $blockId = $block['id'] ?? 1;
+
+                if (empty($question) || empty($answer)) {
+                    continue;
+                }
+
+                // Indexer la paire Q/R dans Qdrant
+                $result = app(LearningService::class)->indexLearnedResponse(
+                    question: $question,
+                    answer: $answer,
+                    agentId: $this->record->agent_id,
+                    agentSlug: $this->record->agent->slug,
+                    messageId: $messageId,
+                    validatorId: auth()->id(),
+                    requiresHandoff: $requiresHandoff
+                );
+
+                if ($result) {
+                    $indexedCount++;
+                    $allAnswers[] = $answer;
+
+                    // Mettre à jour le statut du bloc dans rag_context (si multi-questions)
+                    if (count($blocks) > 1) {
+                        $this->updateBlockLearnedStatus($message, $blockId);
+                        $message->refresh();
+                    }
+                }
+            }
+
+            if ($indexedCount === 0) {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Aucun bloc n\'a pu être indexé.')
+                    ->danger()
+                    ->send();
+                return;
+            }
+
+            // Construire le corrected_content (toutes les réponses concaténées pour multi, ou la réponse unique pour mono)
+            $correctedContent = count($allAnswers) > 1
+                ? implode("\n\n---\n\n", $allAnswers)
+                : ($allAnswers[0] ?? $message->content);
+
+            // Mettre à jour le message
+            $message->update([
+                'validation_status' => 'learned',
+                'validated_by' => auth()->id(),
+                'validated_at' => now(),
+                'corrected_content' => $correctedContent,
+            ]);
+
+            // Broadcast au client si escaladé
+            if ($this->record->isEscalated()) {
+                broadcast(new AiMessageValidated($message));
+            }
+
+            // Envoyer email si user_email présent
+            if ($this->record->user_email) {
+                app(SupportService::class)->sendValidatedAiMessageByEmail(
+                    $this->record,
+                    $message,
+                    auth()->user()
+                );
+            }
+
+            $blockLabel = $indexedCount > 1 ? "{$indexedCount} blocs" : "1 bloc";
+            Notification::make()
+                ->title('Réponse envoyée')
+                ->body($this->record->user_email
+                    ? "{$blockLabel} indexé(s) et envoyé(s) par email au client."
+                    : "{$blockLabel} indexé(s) et envoyé(s) au client.")
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Log::error('sendValidatedBlocks error', [
+                'message_id' => $messageId,
+                'error' => $e->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Rejette un bloc spécifique (utilisé dans la nouvelle UX).
+     * En mono-question, cela équivaut à rejeter tout le message.
+     * En multi-questions, seul le bloc concerné est marqué comme rejeté.
+     *
+     * @param int $messageId ID du message IA
+     * @param int $blockId ID du bloc à rejeter (1 pour mono-question)
+     * @param int $totalBlocks Nombre total de blocs
+     */
+    public function rejectBlock(int $messageId, int $blockId, int $totalBlocks = 1): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        try {
+            // Si mono-question ou dernier bloc, rejeter tout le message
+            if ($totalBlocks <= 1) {
+                app(LearningService::class)->reject($message, auth()->id(), 'Bloc rejeté par agent');
+
+                Notification::make()
+                    ->title('Réponse rejetée')
+                    ->body('La suggestion IA a été rejetée.')
+                    ->info()
+                    ->send();
+            } else {
+                // Multi-questions : marquer le bloc comme rejeté dans rag_context
+                $ragContext = $message->rag_context ?? [];
+
+                if (isset($ragContext['multi_question']['blocks'])) {
+                    foreach ($ragContext['multi_question']['blocks'] as &$block) {
+                        if (($block['id'] ?? 0) === $blockId) {
+                            $block['rejected'] = true;
+                            $block['rejected_at'] = now()->toIso8601String();
+                            $block['rejected_by'] = auth()->id();
+                            break;
+                        }
+                    }
+
+                    $message->update(['rag_context' => $ragContext]);
+                }
+
+                Notification::make()
+                    ->title('Bloc rejeté')
+                    ->body("Question {$blockId} retirée de la réponse finale.")
+                    ->info()
+                    ->send();
+            }
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
 }

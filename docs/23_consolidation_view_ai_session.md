@@ -1,7 +1,7 @@
 # Cahier des Charges : Refonte UX Bloc Suggestion IA
 
 ## Date : 2026-01-03
-## Statut : EN COURS DE VALIDATION
+## Statut : ✅ IMPLÉMENTÉ
 
 ---
 
@@ -10,197 +10,248 @@
 Refondre l'affichage des messages IA dans ViewAiSession pour :
 - Éliminer la duplication de données (contenu complet + blocs séparés)
 - Avoir un template unique réutilisable (DRY)
-- Simplifier l'UX tout en conservant les fonctionnalités
+- Simplifier l'UX tout en conservant toutes les fonctionnalités
 
 ---
 
-## 2. Solution Retenue
+## 2. Architecture DRY
 
-### Principe DRY
+### Principe
 - **UN SEUL template** de bloc Q/R
 - **Mono-question** : 1 bloc
 - **Multi-questions** : `@foreach` sur le même template
 
-### Structure
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Message IA                                                  │
-├─────────────────────────────────────────────────────────────┤
-│ [Header: icône + nom agent]                                 │
-│                                                             │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ [Question 1/N si multi] [Badge: Suggestion/Documenté]   │ │
-│ │ [Bannière avertissement si suggestion]                  │ │
-│ │ Q: _________________________________ [Éditer]           │ │
-│ │ R: _________________________________ [Éditer]           │ │
-│ │    (markdown rendu)                                     │ │
-│ │ [ ] Nécessite suivi humain                              │ │
-│ │ [Valider] [Rejeter]                                     │ │
-│ └─────────────────────────────────────────────────────────┘ │
-│                                                             │
-│ (répété N fois si multi-questions)                          │
-│                                                             │
-│ ──────────────────────────────────────────────────────────  │
-│ [Envoyer]                                  [Voir contexte]  │
-│ ──────────────────────────────────────────────────────────  │
-│ 12:34 • gemini-2.0-flash • 1234 tokens                      │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Spécifications Fonctionnelles
-
-### 3.1 Préparation des Données
+### Préparation des Données
 
 ```php
 @php
     $isMultiQuestion = $message['rag_context']['multi_question']['is_multi'] ?? false;
 
     if ($isMultiQuestion) {
-        // Multi-questions : utiliser les blocs parsés
         $qrBlocks = $message['rag_context']['multi_question']['blocks'] ?? [];
     } else {
-        // Mono-question : créer un bloc unique
-        $previousQuestion = ''; // récupérer du message client précédent
+        $previousQuestion = '';
+        if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
+            $previousQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
+        }
         $qrBlocks = [[
             'id' => 1,
             'question' => $previousQuestion,
             'answer' => $message['content'],
             'type' => $message['rag_context']['response_type'] ?? 'unknown',
             'is_suggestion' => $message['rag_context']['is_suggestion'] ?? false,
-            'learned' => $message['validation_status'] === 'learned',
+            'learned' => in_array($message['validation_status'], ['learned', 'validated']),
         ]];
     }
+    $blockCount = count($qrBlocks);
 @endphp
 ```
 
-### 3.2 Template de Bloc Q/R
-
-| Élément | Description |
-|---------|-------------|
-| **Header** | "Question X/N" (si multi) + Badge type |
-| **Badge type** | `Suggestion` (warning) ou `Documenté` (info) |
-| **Bannière** | Avertissement si suggestion (vérifier avant validation) |
-| **Question** | Affichage + bouton Éditer → textarea |
-| **Réponse** | Affichage markdown + bouton Éditer → textarea |
-| **Checkbox** | "Nécessite toujours un suivi humain" |
-| **Boutons** | Valider + Rejeter (ou "Refuser et Rédiger" si mode accéléré) |
-
-### 3.3 Footer Global (Mono ET Multi)
-
-| Élément | Description |
-|---------|-------------|
-| **Envoyer** | TODO: Préciser le comportement exact |
-| **Voir contexte** | Ouvre le modal RAG existant |
-
-### 3.4 Métadonnées
-
-- Heure (HH:mm)
-- Modèle utilisé
-- Nombre de tokens
-
 ---
 
-## 4. Notion de "Correction" - Clarification
+## 3. Structure UI Finale
 
-### Ancien Comportement
-
-| Action | Comportement |
-|--------|--------------|
-| **Valider** | Indexe Q + R originale, `validation_status = validated` |
-| **Corriger** | Ouvre formulaire, indexe Q + R modifiée, `validation_status = learned`, stocke `corrected_content` |
-
-### Nouveau Comportement
-
-| Action | Comportement |
-|--------|--------------|
-| **Éditer inline** | Modifie Q et/ou R dans les textareas |
-| **Valider** | Indexe Q + R (éditées ou non) |
-
-**Logique backend à adapter :**
-```php
-// Si la réponse a été modifiée par rapport à l'originale
-if ($editedAnswer !== $originalAnswer) {
-    $message->update(['corrected_content' => $editedAnswer]);
-    $message->update(['validation_status' => 'learned']);
-} else {
-    $message->update(['validation_status' => 'validated']);
-}
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message IA                                                  │
+├─────────────────────────────────────────────────────────────┤
+│ [Header: icône CPU + nom agent + badges]                    │
+│                                                             │
+│ ┌─ Bloc 1 ─────────────────────────────────────────────────┐│
+│ │ [Question 1/N si multi] [Badge: Suggestion/Documenté]    ││
+│ │ [Bannière avertissement si suggestion]                   ││
+│ │                                                          ││
+│ │ Question:                                                ││
+│ │ ┌──────────────────────────────────┐ [Modifier]          ││
+│ │ │ Texte de la question...          │                     ││
+│ │ └──────────────────────────────────┘                     ││
+│ │                                                          ││
+│ │ Réponse:                                                 ││
+│ │ ┌──────────────────────────────────┐ [Modifier]          ││
+│ │ │ Texte de la réponse (markdown)   │                     ││
+│ │ └──────────────────────────────────┘                     ││
+│ │                                                          ││
+│ │ [ ] Nécessite toujours un suivi humain                   ││
+│ │                                                          ││
+│ │ [Valider] [Rejeter]                                      ││
+│ └──────────────────────────────────────────────────────────┘│
+│                                                             │
+│ (répété N fois si multi-questions)                          │
+│                                                             │
+│ ════════════════════════════════════════════════════════════│
+│ [Envoyer]                                   [Voir contexte] │
+│ ════════════════════════════════════════════════════════════│
+│ 12:34 • gemini-2.0-flash • 1234 tokens                      │
+└─────────────────────────────────────────────────────────────┘
 ```
 
+---
+
+## 4. Comportement des Boutons
+
+### 4.1 Bouton "Valider" (par bloc)
+
+**Action :**
+- Marque le bloc comme "prêt à envoyer"
+- Passe le bloc en **lecture seule**
+- Affiche un bouton "Modifier" pour réactiver l'édition
+- **N'envoie rien** encore (pas de broadcast, pas d'indexation)
+
+**État visuel :**
+- Badge "Validé" (success) affiché
+- Champs Q/R en lecture seule
+- Bouton "Modifier" visible tant que "Envoyer" pas cliqué
+
+### 4.2 Bouton "Rejeter" (par bloc)
+
+**Action :**
+- Supprime le bloc de la réponse finale
+- Le bloc disparaît visuellement (ou grisé/barré)
+
+**Comportement selon contexte :**
+- **Mono-question** : La suggestion IA disparaît complètement
+- **Multi-questions** : Seul ce bloc disparaît, les autres restent
+- **Tous blocs rejetés** : Équivalent à "Passer" (aucune réponse IA envoyée)
+
+**Mode accéléré :**
+- Bouton = "Refuser et Rédiger" (`rejectAndUnlock()`)
+
+### 4.3 Bouton "Envoyer" (footer global)
+
+**Action complète :**
+1. Prend tous les blocs **validés** (non rejetés)
+2. Pour chaque bloc :
+   - Indexe Q/R dans Qdrant (`learned_responses` + collection agent)
+   - Dédoublonne par message_id et par similarité (score > 0.98)
+3. Met à jour le message : `validation_status = 'learned'`, `corrected_content`
+4. Broadcast `AiMessageValidated` au client (WebSocket)
+5. Envoie email si `user_email` présent
+6. Affiche notification de succès
+
+**Équivalent ancien :** Bouton "Corriger" → "Enregistrer"
+
+### 4.4 Bouton "Modifier" (après validation)
+
+**Action :**
+- Réactive l'édition du bloc
+- Visible uniquement si bloc validé ET "Envoyer" pas encore cliqué
+
+---
+
+## 5. Gestion de `corrected_content`
+
+### Règle : Toujours Stocker
+
+Pour la **rétro-compatibilité**, on stocke TOUJOURS dans `corrected_content` :
+- Même si l'utilisateur n'a rien modifié
+- `corrected_content` = "réponse validée par humain"
+
 **Impact :**
-- `corrected_content` est toujours stocké si modification
-- `RebuildAgentIndexJob` continue de fonctionner (`corrected_content ?? content`)
-- `DispatcherService` continue de fonctionner (historique)
+- `RebuildAgentIndexJob` : `corrected_content ?? content` → fonctionne
+- `DispatcherService` : historique utilise `corrected_content ?? content` → fonctionne
 
 ---
 
-## 5. Questions Ouvertes
+## 6. Éléments UI à Préserver
 
-### 5.1 Bouton "Envoyer" - Comportement ?
+### Header Message IA
+- [x] Icône CPU (`heroicon-o-cpu-chip`)
+- [x] Nom agent (`$message['sender_name']`)
+- [x] Badge statut : En attente / Validée / Apprise / Rejetée
+- [x] Badge type : Suggestion IA / Documenté
+- [x] Badge multi : "X questions"
 
-Que doit faire le bouton "Envoyer" dans le footer ?
+### Bannières
+- [x] Avertissement suggestion (si `is_suggestion && pending`)
+- [x] Indicateur "Contenu corrigé" (si `learned && corrected_content`)
+- [x] Spinner "Génération en cours" (si content vide)
 
-- [ ] **Option A** : Valider TOUS les blocs non validés d'un coup et broadcaster au client
-- [ ] **Option B** : Simplement broadcaster au client (sans indexer)
-- [ ] **Option C** : Envoyer email si `user_email` présent
-- [ ] **Option D** : Autre (préciser)
+### Contenu Bloc Q/R
+- [x] Question éditable inline
+- [x] Réponse éditable inline (rendu markdown en lecture)
+- [x] Badge type par bloc (Suggestion/Documenté)
+- [x] Badge "Validé" par bloc
+- [x] Checkbox "Nécessite suivi humain"
+- [x] Bannière avertissement par bloc (si suggestion)
 
-### 5.2 Bouton "Rejeter" - Comportement multi-questions ?
+### Footer
+- [x] Bouton "Envoyer"
+- [x] Bouton "Voir le contexte (X sources)"
+- [x] Compteur "X/Y validés" (multi-questions)
 
-En multi-questions, "Rejeter" rejette :
-- [ ] **Option A** : Uniquement le bloc concerné
-- [ ] **Option B** : Tout le message (tous les blocs)
+### Métadonnées
+- [x] Heure (H:i)
+- [x] Modèle utilisé
+- [x] Tokens
+- [x] Bouton "Utiliser" (copie vers zone support, si escaladé)
 
-### 5.3 Affichage si Déjà Validé ?
-
-Quand un bloc est déjà validé (`learned` ou `validated`) :
-- [ ] **Option A** : Afficher en lecture seule (pas d'édition possible)
-- [ ] **Option B** : Masquer le bloc (collapsed)
-- [ ] **Option C** : Afficher normalement mais boutons grisés
+### Modal Contexte RAG
+- [x] Stats de génération
+- [x] Détection catégorie
+- [x] System prompt
+- [x] Historique conversation
+- [x] Sources apprises
+- [x] Documents RAG
+- [x] Évaluation Handoff
+- [x] Rapport copiable
 
 ---
 
-## 6. Fichiers Impactés
+## 7. Indexation Qdrant
+
+### Double Indexation (confirmé)
+1. **`learned_responses`** : Collection globale d'apprentissage
+2. **`{agent_collection}`** : Collection spécifique agent (type=`qa_pair`)
+
+### Dédoublonnage (confirmé)
+1. **Par `message_id`** : `deleteExistingPointsForMessage()` supprime les anciens points
+2. **Par similarité** : `deleteSimilarQuestions()` supprime si score > 0.98
+
+---
+
+## 8. Fichiers à Modifier
 
 | Fichier | Modifications |
 |---------|---------------|
-| `view-ai-session.blade.php` | Refonte section message IA (lignes ~232-631) |
-| `ViewAiSession.php` | Adapter les méthodes de validation pour détecter les modifications |
+| `ViewAiSession.php` | Nouvelle méthode `sendValidatedBlocks()` |
+| `view-ai-session.blade.php` | Refonte complète section message IA (lignes ~232-700) |
 
 ---
 
-## 7. Plan d'Implémentation (après validation cahier des charges)
+## 9. Plan d'Implémentation
 
-1. **Backend** : Adapter les méthodes de validation
-2. **Frontend** : Supprimer ancien code, implémenter nouveau template
-3. **Tests** : Mono, multi, édition, modes
+### Phase 1 : Backend ✅
+- [x] Créer `sendValidatedBlocks(int $messageId, array $blocks)` dans ViewAiSession.php
+- [x] Créer `rejectBlock(int $messageId, int $blockId, int $totalBlocks)` dans ViewAiSession.php
+- [x] Adapter pour gérer mono ET multi uniformément
+
+### Phase 2 : Frontend ✅
+- [x] Supprimer l'ancien affichage (contenu complet + blocs séparés)
+- [x] Implémenter template unique de bloc Q/R avec Alpine.js `x-for`
+- [x] Ajouter foreach pour multi-questions
+- [x] Implémenter états : édition / validé / rejeté
+- [x] Ajouter footer global avec "Envoyer" et "Tout valider"
+
+### Phase 3 : Tests
+- [ ] Mono-question simple
+- [ ] Mono-question suggestion
+- [ ] Multi-questions (2-5 blocs)
+- [ ] Rejeter un bloc en multi
+- [ ] Rejeter tous les blocs
+- [ ] Mode Apprentissage Accéléré
 
 ---
 
-## 8. Validation
-
-| Point | Validé ? |
-|-------|----------|
-| Template unique + foreach | ⏳ |
-| Footer global (mono ET multi) | ⏳ |
-| Bouton "Envoyer" - comportement | ❓ À préciser |
-| Gestion "correction" simplifiée | ⏳ |
-| Bouton "Rejeter" en multi | ❓ À préciser |
-| Affichage blocs validés | ❓ À préciser |
-
----
-
-## 9. Suivi
+## 10. Suivi
 
 | Date | Action | Statut |
 |------|--------|--------|
 | 2026-01-03 | Création document | ✅ |
-| 2026-01-03 | Correction analyse | ✅ |
+| 2026-01-03 | Analyse du problème | ✅ |
 | 2026-01-03 | Approche DRY validée | ✅ |
-| 2026-01-03 | Cahier des charges v1 | ✅ |
-| - | Réponses questions ouvertes | En attente |
-| - | Validation finale | En attente |
-| - | Implémentation | En attente |
+| 2026-01-03 | Vérification LearningService | ✅ |
+| 2026-01-03 | Inventaire fonctionnalités | ✅ |
+| 2026-01-03 | Cahier des charges validé | ✅ |
+| 2026-01-03 | Backend (sendValidatedBlocks, rejectBlock) | ✅ |
+| 2026-01-03 | Frontend (template Q/R unifié) | ✅ |
+| 2026-01-03 | Implémentation complète | ✅ |

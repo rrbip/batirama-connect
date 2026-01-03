@@ -228,24 +228,109 @@
                                 </div>
                             </div>
 
-                        {{-- Message IA (gauche, gris) --}}
+                        {{-- Message IA (gauche, gris) - NOUVELLE UX UNIFIÉE --}}
                         @elseif($isAi)
                             @php
-                                // Trouver la question utilisateur (message précédent)
+                                // ═══════════════════════════════════════════════════════════════
+                                // PRÉPARATION DES DONNÉES - TEMPLATE UNIQUE MONO/MULTI
+                                // ═══════════════════════════════════════════════════════════════
+
+                                // Récupérer la question utilisateur précédente
                                 $previousQuestion = '';
                                 if (isset($unifiedMessages[$index - 1]) && $unifiedMessages[$index - 1]['type'] === 'client') {
                                     $previousQuestion = $unifiedMessages[$index - 1]['content'] ?? '';
                                 }
-                                // Récupérer le flag requires_handoff si c'est un direct_qr_match
+
+                                // Détecter si multi-questions
+                                $isMultiQuestion = $message['rag_context']['multi_question']['is_multi'] ?? false;
+
+                                // Construire les blocs Q/R de manière uniforme
+                                if ($isMultiQuestion && !empty($message['rag_context']['multi_question']['blocks'])) {
+                                    // Multi-questions : utiliser les blocs parsés
+                                    $qrBlocks = $message['rag_context']['multi_question']['blocks'];
+                                } else {
+                                    // Mono-question : créer un bloc unique
+                                    $qrBlocks = [[
+                                        'id' => 1,
+                                        'question' => $previousQuestion,
+                                        'answer' => $message['content'] ?? '',
+                                        'type' => $message['rag_context']['response_type'] ?? 'unknown',
+                                        'is_suggestion' => $message['rag_context']['is_suggestion'] ?? false,
+                                        'learned' => in_array($message['validation_status'], ['learned', 'validated']),
+                                        'rejected' => $message['validation_status'] === 'rejected',
+                                    ]];
+                                }
+
+                                $blockCount = count($qrBlocks);
                                 $originalRequiresHandoff = $message['rag_context']['stats']['requires_handoff'] ?? false;
+                                $isPending = $message['validation_status'] === 'pending';
+                                $isSuggestionGlobal = $message['rag_context']['is_suggestion'] ?? false;
                             @endphp
                             <div class="flex justify-start" x-data="{
-                                showValidation: false,
-                                showCorrection: false,
-                                validationQuestion: @js($previousQuestion),
-                                correctionQuestion: @js($previousQuestion),
-                                correctedContent: @js($message['content']),
-                                requiresHandoff: @js($originalRequiresHandoff)
+                                blocks: @js(collect($qrBlocks)->map(fn($b, $i) => [
+                                    'id' => $b['id'] ?? $i + 1,
+                                    'question' => $b['question'] ?? '',
+                                    'answer' => $b['answer'] ?? '',
+                                    'requiresHandoff' => $originalRequiresHandoff,
+                                    'validated' => $b['learned'] ?? false,
+                                    'rejected' => $b['rejected'] ?? false,
+                                    'editing' => false,
+                                    'is_suggestion' => $b['is_suggestion'] ?? false,
+                                    'type' => $b['type'] ?? 'unknown',
+                                ])->values()->toArray()),
+                                sent: @js($message['validation_status'] === 'learned' || $message['validation_status'] === 'validated'),
+                                openContext: false,
+                                copied: false,
+
+                                // Récupérer les blocs validés (non rejetés)
+                                getValidatedBlocks() {
+                                    return this.blocks.filter(b => b.validated && !b.rejected);
+                                },
+
+                                // Récupérer les blocs en attente
+                                getPendingBlocks() {
+                                    return this.blocks.filter(b => !b.validated && !b.rejected);
+                                },
+
+                                // Valider tous les blocs en attente
+                                validateAllPending() {
+                                    this.blocks.forEach(b => {
+                                        if (!b.rejected) {
+                                            b.validated = true;
+                                            b.editing = false;
+                                        }
+                                    });
+                                },
+
+                                // Envoyer tous les blocs validés
+                                sendAll() {
+                                    const validBlocks = this.blocks
+                                        .filter(b => b.validated && !b.rejected)
+                                        .map(b => ({
+                                            id: b.id,
+                                            question: b.question,
+                                            answer: b.answer,
+                                            requiresHandoff: b.requiresHandoff
+                                        }));
+
+                                    if (validBlocks.length === 0) {
+                                        alert('Veuillez valider au moins un bloc avant d\'envoyer.');
+                                        return;
+                                    }
+
+                                    $wire.sendValidatedBlocks({{ $message['original_id'] }}, validBlocks);
+                                    this.sent = true;
+                                },
+
+                                // Copier le rapport
+                                copyReport() {
+                                    const report = document.getElementById('report-{{ $message['original_id'] }}');
+                                    if (report) {
+                                        navigator.clipboard.writeText(report.innerText);
+                                        this.copied = true;
+                                        setTimeout(() => this.copied = false, 2000);
+                                    }
+                                }
                             }">
                                 <div class="max-w-[75%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
@@ -303,29 +388,215 @@
                                             </div>
                                         @endif
 
-                                        {{-- Contenu --}}
-                                        <div class="prose prose-sm dark:prose-invert max-w-none">
-                                            @if($message['validation_status'] === 'learned' && $message['corrected_content'])
-                                                <div class="mb-2 p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs">
-                                                    <strong>Contenu corrigé</strong>
+                                        {{-- ═══════════════════════════════════════════════════════════════ --}}
+                                        {{-- BLOCS Q/R - TEMPLATE UNIQUE (MONO/MULTI) --}}
+                                        {{-- ═══════════════════════════════════════════════════════════════ --}}
+
+                                        {{-- Message en cours de génération --}}
+                                        @if(empty(trim($message['content'] ?? '')))
+                                            <div class="flex items-center gap-2 text-gray-400 italic mb-4">
+                                                <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                <span>Génération en cours...</span>
+                                            </div>
+                                        @else
+                                            <div class="space-y-4">
+                                                <template x-for="(block, blockIndex) in blocks" :key="block.id">
+                                                    <div class="border rounded-lg p-3" :class="{
+                                                        'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700': !block.rejected && !block.validated,
+                                                        'bg-success-50 dark:bg-success-950 border-success-200 dark:border-success-800': block.validated && !block.rejected,
+                                                        'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 opacity-50 line-through': block.rejected
+                                                    }">
+                                                        {{-- Header du bloc --}}
+                                                        <div class="flex items-center justify-between gap-2 mb-3">
+                                                            <div class="flex items-center gap-2 flex-wrap">
+                                                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300" x-show="blocks.length > 1">
+                                                                    Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
+                                                                </span>
+
+                                                                {{-- Badge type (Suggestion/Documenté) --}}
+                                                                <template x-if="block.is_suggestion || block.type === 'suggestion'">
+                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300">
+                                                                        <x-heroicon-o-light-bulb class="w-3 h-3" />
+                                                                        Suggestion
+                                                                    </span>
+                                                                </template>
+                                                                <template x-if="!block.is_suggestion && block.type === 'documented'">
+                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-info-100 text-info-700 dark:bg-info-900 dark:text-info-300">
+                                                                        <x-heroicon-o-document-check class="w-3 h-3" />
+                                                                        Documenté
+                                                                    </span>
+                                                                </template>
+
+                                                                {{-- Badge validé --}}
+                                                                <template x-if="block.validated && !block.rejected">
+                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-success-100 text-success-700 dark:bg-success-900 dark:text-success-300">
+                                                                        <x-heroicon-o-check class="w-3 h-3" />
+                                                                        Validé
+                                                                    </span>
+                                                                </template>
+
+                                                                {{-- Badge rejeté --}}
+                                                                <template x-if="block.rejected">
+                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-danger-100 text-danger-700 dark:bg-danger-900 dark:text-danger-300">
+                                                                        <x-heroicon-o-x-mark class="w-3 h-3" />
+                                                                        Rejeté
+                                                                    </span>
+                                                                </template>
+                                                            </div>
+
+                                                            {{-- Boutons Valider/Rejeter/Modifier --}}
+                                                            <div class="flex items-center gap-2" x-show="!sent">
+                                                                <template x-if="!block.validated && !block.rejected">
+                                                                    <div class="flex gap-1">
+                                                                        <button type="button"
+                                                                            @click="block.validated = true; block.editing = false"
+                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-success-500 text-white hover:bg-success-600">
+                                                                            <x-heroicon-o-check class="w-3 h-3" />
+                                                                            Valider
+                                                                        </button>
+                                                                        @if($this->isAcceleratedLearningMode())
+                                                                        <button type="button"
+                                                                            @click="block.rejected = true; $wire.rejectBlock({{ $message['original_id'] }}, block.id, blocks.length)"
+                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-danger-500 text-white hover:bg-danger-600">
+                                                                            <x-heroicon-o-x-mark class="w-3 h-3" />
+                                                                            Refuser
+                                                                        </button>
+                                                                        @else
+                                                                        <button type="button"
+                                                                            @click="block.rejected = true"
+                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-danger-500 text-white hover:bg-danger-600">
+                                                                            <x-heroicon-o-x-mark class="w-3 h-3" />
+                                                                            Rejeter
+                                                                        </button>
+                                                                        @endif
+                                                                    </div>
+                                                                </template>
+                                                                <template x-if="block.validated && !block.rejected && !block.editing">
+                                                                    <button type="button"
+                                                                        @click="block.editing = true"
+                                                                        class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+                                                                        <x-heroicon-o-pencil class="w-3 h-3" />
+                                                                        Modifier
+                                                                    </button>
+                                                                </template>
+                                                            </div>
+                                                        </div>
+
+                                                        {{-- Bannière avertissement si suggestion --}}
+                                                        <template x-if="(block.is_suggestion || block.type === 'suggestion') && !block.validated && !block.rejected">
+                                                            <div class="mb-3 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded">
+                                                                <div class="flex items-center gap-2 text-xs text-warning-700 dark:text-warning-300">
+                                                                    <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
+                                                                    <span><strong>Suggestion IA</strong> - Aucune documentation trouvée. Vérifiez avant de valider.</span>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+
+                                                        {{-- Question --}}
+                                                        <div class="mb-3" x-show="!block.rejected">
+                                                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Question :</label>
+                                                            <template x-if="block.editing || (!block.validated && !sent)">
+                                                                <textarea
+                                                                    x-model="block.question"
+                                                                    rows="2"
+                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                    placeholder="Question du client..."
+                                                                ></textarea>
+                                                            </template>
+                                                            <template x-if="!block.editing && (block.validated || sent)">
+                                                                <div class="p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300" x-text="block.question"></div>
+                                                            </template>
+                                                        </div>
+
+                                                        {{-- Réponse --}}
+                                                        <div class="mb-3" x-show="!block.rejected">
+                                                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Réponse :</label>
+                                                            <template x-if="block.editing || (!block.validated && !sent)">
+                                                                <textarea
+                                                                    x-model="block.answer"
+                                                                    rows="4"
+                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                    placeholder="Réponse de l'IA..."
+                                                                ></textarea>
+                                                            </template>
+                                                            <template x-if="!block.editing && (block.validated || sent)">
+                                                                <div class="p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 text-sm prose prose-sm dark:prose-invert max-w-none" x-html="block.answer"></div>
+                                                            </template>
+                                                        </div>
+
+                                                        {{-- Checkbox handoff --}}
+                                                        <div class="flex items-center gap-2" x-show="!block.rejected && !sent && !block.validated">
+                                                            <input
+                                                                type="checkbox"
+                                                                x-model="block.requiresHandoff"
+                                                                :id="'handoff-' + block.id + '-{{ $message['original_id'] }}'"
+                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
+                                                            />
+                                                            <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-xs text-gray-700 dark:text-gray-300 cursor-pointer flex items-center gap-1">
+                                                                Nécessite toujours un suivi humain
+                                                                <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
+                                                            </label>
+                                                        </div>
+
+                                                        {{-- Bouton OK si en édition --}}
+                                                        <div class="mt-2" x-show="block.editing">
+                                                            <button type="button"
+                                                                @click="block.editing = false"
+                                                                class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded bg-primary-500 text-white hover:bg-primary-600">
+                                                                <x-heroicon-o-check class="w-3 h-3" />
+                                                                OK
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
+
+                                            {{-- ═══════════════════════════════════════════════════════════════ --}}
+                                            {{-- FOOTER GLOBAL --}}
+                                            {{-- ═══════════════════════════════════════════════════════════════ --}}
+                                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700" x-show="!sent">
+                                                <div class="flex items-center justify-between gap-3 flex-wrap">
+                                                    <div class="flex items-center gap-3">
+                                                        {{-- Bouton Envoyer --}}
+                                                        <button type="button"
+                                                            @click="sendAll()"
+                                                            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            :disabled="getValidatedBlocks().length === 0">
+                                                            <x-heroicon-o-paper-airplane class="w-4 h-4" />
+                                                            Envoyer
+                                                        </button>
+
+                                                        {{-- Compteur blocs validés --}}
+                                                        <span class="text-xs text-gray-500" x-show="blocks.length > 1">
+                                                            <span x-text="getValidatedBlocks().length"></span>/<span x-text="blocks.length"></span> validés
+                                                        </span>
+                                                    </div>
+
+                                                    {{-- Bouton Valider tout --}}
+                                                    <button type="button"
+                                                        @click="validateAllPending()"
+                                                        x-show="getPendingBlocks().length > 0"
+                                                        class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded bg-success-100 text-success-700 hover:bg-success-200 dark:bg-success-900 dark:text-success-300 dark:hover:bg-success-800">
+                                                        <x-heroicon-o-check class="w-3 h-3" />
+                                                        Tout valider
+                                                    </button>
                                                 </div>
-                                                {!! \Illuminate\Support\Str::markdown($message['corrected_content']) !!}
-                                            @elseif(empty(trim($message['content'] ?? '')))
-                                                {{-- Message IA en cours de génération --}}
-                                                <div class="flex items-center gap-2 text-gray-400 italic">
-                                                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                    </svg>
-                                                    <span>Génération en cours...</span>
+                                            </div>
+
+                                            {{-- Message envoyé --}}
+                                            <div class="mt-4 pt-4 border-t border-success-200 dark:border-success-700" x-show="sent" x-cloak>
+                                                <div class="flex items-center gap-2 text-success-600 dark:text-success-400">
+                                                    <x-heroicon-o-check-circle class="w-5 h-5" />
+                                                    <span class="text-sm font-medium">Réponse validée et envoyée</span>
                                                 </div>
-                                            @else
-                                                {!! \Illuminate\Support\Str::markdown($message['content'] ?? '') !!}
-                                            @endif
-                                        </div>
+                                            </div>
+                                        @endif
 
                                         {{-- Métadonnées --}}
-                                        <div class="flex items-center justify-between mt-2 text-xs text-gray-400">
+                                        <div class="flex items-center justify-between mt-3 text-xs text-gray-400">
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
                                             <div class="flex items-center gap-2">
                                                 @if($message['model_used'])
@@ -337,18 +608,15 @@
                                                 {{-- Bouton "Utiliser comme modèle" (visible uniquement si session escaladée) --}}
                                                 @if($session->isEscalated())
                                                     @php
-                                                        // Nettoyer le contenu : supprimer [HANDOFF_NEEDED] et les phrases d'invitation au support
                                                         $cleanedContent = $message['content'] ?? '';
-                                                        // Supprimer [HANDOFF_NEEDED] ou [HANDOFF\_NEEDED] (avec backslash d'échappement)
                                                         $cleanedContent = preg_replace('/\n*\[HANDOFF\\\\?_NEEDED\]\n*/i', '', $cleanedContent);
-                                                        // Supprimer toute phrase contenant "contacter/parler à" + "humain/conseiller/support"
                                                         $cleanedContent = preg_replace('/[^.!?\n]*(?:contacter|contactez|parler à|joindre).*(?:humain|conseiller|support)[^.!?\n]*[.!?]?\s*/i', '', $cleanedContent);
                                                         $cleanedContent = trim($cleanedContent);
                                                     @endphp
                                                     <button
                                                         type="button"
                                                         class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950 rounded transition-colors"
-                                                        x-on:click="$wire.set('supportMessage', @js($cleanedContent)); $el.closest('.flex').querySelector('button').classList.add('animate-pulse'); setTimeout(() => { $el.closest('.flex').querySelector('button').classList.remove('animate-pulse'); }, 500);"
+                                                        x-on:click="$wire.set('supportMessage', @js($cleanedContent))"
                                                         title="Copier cette suggestion dans le champ de réponse"
                                                     >
                                                         <x-heroicon-o-clipboard-document class="w-3.5 h-3.5" />
@@ -357,278 +625,6 @@
                                                 @endif
                                             </div>
                                         </div>
-
-                                        {{-- Boutons de validation (si en attente) --}}
-                                        @if($message['is_pending_validation'])
-                                            <div class="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                                                <div class="flex flex-wrap gap-2">
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="success"
-                                                        icon="heroicon-o-check"
-                                                        x-on:click="showValidation = !showValidation; showCorrection = false"
-                                                    >
-                                                        Valider
-                                                    </x-filament::button>
-
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="primary"
-                                                        icon="heroicon-o-pencil"
-                                                        x-on:click="showCorrection = !showCorrection; showValidation = false"
-                                                    >
-                                                        Corriger
-                                                    </x-filament::button>
-
-                                                    @if(!($message['is_direct_match'] ?? false))
-                                                        @if($this->isAcceleratedLearningMode())
-                                                            <x-filament::button
-                                                                size="xs"
-                                                                color="danger"
-                                                                icon="heroicon-o-x-mark"
-                                                                wire:click="rejectAndUnlock({{ $message['original_id'] }})"
-                                                            >
-                                                                Refuser et Rédiger
-                                                            </x-filament::button>
-                                                        @else
-                                                            <x-filament::button
-                                                                size="xs"
-                                                                color="danger"
-                                                                icon="heroicon-o-x-mark"
-                                                                wire:click="rejectMessage({{ $message['original_id'] }})"
-                                                            >
-                                                                Rejeter
-                                                            </x-filament::button>
-                                                        @endif
-                                                    @endif
-                                                </div>
-
-                                                {{-- Formulaire de validation (avec question modifiable) --}}
-                                                <div x-show="showValidation" x-cloak class="mt-3 pt-3 border-t border-success-200 dark:border-success-700 space-y-3">
-                                                    <div>
-                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question (du client)</label>
-                                                        <textarea
-                                                            x-model="validationQuestion"
-                                                            rows="2"
-                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                            placeholder="Question du client..."
-                                                        ></textarea>
-                                                    </div>
-                                                    <div>
-                                                        <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                                                            <input
-                                                                type="checkbox"
-                                                                x-model="requiresHandoff"
-                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
-                                                            />
-                                                            <span>Nécessite toujours un suivi humain</span>
-                                                            <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
-                                                        </label>
-                                                    </div>
-                                                    <div class="flex gap-2">
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="success"
-                                                            icon="heroicon-o-check"
-                                                            x-on:click="$wire.validateMessageWithQuestion({{ $message['original_id'] }}, validationQuestion, requiresHandoff); showValidation = false; requiresHandoff = false"
-                                                        >
-                                                            Enregistrer
-                                                        </x-filament::button>
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="gray"
-                                                            x-on:click="showValidation = false; requiresHandoff = false"
-                                                        >
-                                                            Annuler
-                                                        </x-filament::button>
-                                                    </div>
-                                                </div>
-
-                                                {{-- Formulaire de correction (question + réponse modifiables) --}}
-                                                <div x-show="showCorrection" x-cloak class="mt-3 pt-3 border-t border-primary-200 dark:border-primary-700 space-y-3">
-                                                    <div>
-                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question (du client)</label>
-                                                        <textarea
-                                                            x-model="correctionQuestion"
-                                                            rows="2"
-                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                            placeholder="Question du client..."
-                                                        ></textarea>
-                                                    </div>
-                                                    <div>
-                                                        <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Réponse (à enseigner)</label>
-                                                        <textarea
-                                                            x-model="correctedContent"
-                                                            rows="4"
-                                                            class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                            placeholder="Réponse à enseigner à l'IA..."
-                                                        ></textarea>
-                                                    </div>
-                                                    <div>
-                                                        <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                                                            <input
-                                                                type="checkbox"
-                                                                x-model="requiresHandoff"
-                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
-                                                            />
-                                                            <span>Nécessite toujours un suivi humain</span>
-                                                            <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
-                                                        </label>
-                                                    </div>
-                                                    <div class="flex gap-2">
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="primary"
-                                                            icon="heroicon-o-check"
-                                                            x-on:click="$wire.learnFromMessageWithQuestion({{ $message['original_id'] }}, correctionQuestion, correctedContent, requiresHandoff); showCorrection = false; requiresHandoff = false"
-                                                        >
-                                                            Enregistrer
-                                                        </x-filament::button>
-                                                        <x-filament::button
-                                                            size="xs"
-                                                            color="gray"
-                                                            x-on:click="showCorrection = false; requiresHandoff = false"
-                                                        >
-                                                            Annuler
-                                                        </x-filament::button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        @endif
-
-                                        {{-- Blocs Multi-Questions --}}
-                                        @if($isMultiQuestion && !empty($message['rag_context']['multi_question']['blocks']))
-                                            @php $blocks = $message['rag_context']['multi_question']['blocks']; @endphp
-                                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                                                <div class="flex items-center justify-between">
-                                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                                        Blocs Q/R individuels
-                                                    </span>
-                                                    @php
-                                                        $learnedCount = collect($blocks)->where('learned', true)->count();
-                                                        $totalBlocks = count($blocks);
-                                                    @endphp
-                                                    <span class="text-xs text-gray-500">
-                                                        {{ $learnedCount }}/{{ $totalBlocks }} validés
-                                                    </span>
-                                                </div>
-
-                                                @foreach($blocks as $blockIndex => $block)
-                                                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700"
-                                                         x-data="{
-                                                             showBlockForm: false,
-                                                             blockQuestion: @js($block['question']),
-                                                             blockAnswer: @js($block['answer']),
-                                                             validated: @js($block['learned'] ?? false),
-                                                             requiresHandoff: false
-                                                         }">
-
-                                                        {{-- Header du bloc --}}
-                                                        <div class="flex items-start justify-between gap-2 mb-2">
-                                                            <div class="flex-1">
-                                                                <div class="flex items-center gap-2 mb-1">
-                                                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
-                                                                        Question {{ $block['id'] }}
-                                                                    </span>
-
-                                                                    {{-- Badge de type pour CE bloc --}}
-                                                                    @if(($block['type'] ?? '') === 'suggestion' || ($block['is_suggestion'] ?? false))
-                                                                        <x-filament::badge color="warning" size="xs" icon="heroicon-o-light-bulb">
-                                                                            Suggestion
-                                                                        </x-filament::badge>
-                                                                    @elseif(($block['type'] ?? '') === 'documented')
-                                                                        <x-filament::badge color="info" size="xs" icon="heroicon-o-document-check">
-                                                                            Documenté
-                                                                        </x-filament::badge>
-                                                                    @endif
-                                                                </div>
-
-                                                                <div class="text-sm text-gray-600 dark:text-gray-400">
-                                                                    {{ \Illuminate\Support\Str::limit($block['question'], 100) }}
-                                                                </div>
-                                                            </div>
-
-                                                            {{-- Boutons de validation du bloc --}}
-                                                            <div class="flex items-center gap-2" x-show="!validated">
-                                                                <x-filament::button
-                                                                    size="xs"
-                                                                    color="success"
-                                                                    icon="heroicon-o-check"
-                                                                    x-on:click="showBlockForm = !showBlockForm"
-                                                                >
-                                                                    Valider
-                                                                </x-filament::button>
-                                                            </div>
-                                                            <x-filament::badge x-show="validated" color="success" size="sm">
-                                                                Validé
-                                                            </x-filament::badge>
-                                                        </div>
-
-                                                        {{-- Bannière d'avertissement si suggestion --}}
-                                                        @if(($block['type'] ?? '') === 'suggestion' || ($block['is_suggestion'] ?? false))
-                                                            <div class="mb-2 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded text-xs">
-                                                                <div class="flex items-center gap-1 text-warning-700 dark:text-warning-300">
-                                                                    <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
-                                                                    <span><strong>Suggestion IA</strong> - Pas de documentation trouvée</span>
-                                                                </div>
-                                                            </div>
-                                                        @endif
-
-                                                        {{-- Aperçu de la réponse --}}
-                                                        <div class="text-sm text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800 p-2 rounded border">
-                                                            {{ \Illuminate\Support\Str::limit($block['answer'], 200) }}
-                                                        </div>
-
-                                                        {{-- Formulaire de validation du bloc --}}
-                                                        <div x-show="showBlockForm" x-cloak class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
-                                                            <div>
-                                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question</label>
-                                                                <textarea
-                                                                    x-model="blockQuestion"
-                                                                    rows="2"
-                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                                ></textarea>
-                                                            </div>
-                                                            <div>
-                                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Réponse</label>
-                                                                <textarea
-                                                                    x-model="blockAnswer"
-                                                                    rows="3"
-                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
-                                                                ></textarea>
-                                                            </div>
-                                                            <div>
-                                                                <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        x-model="requiresHandoff"
-                                                                        class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
-                                                                    />
-                                                                    <span>Nécessite un suivi humain</span>
-                                                                </label>
-                                                            </div>
-                                                            <div class="flex gap-2">
-                                                                <x-filament::button
-                                                                    size="xs"
-                                                                    color="success"
-                                                                    icon="heroicon-o-check"
-                                                                    x-on:click="$wire.learnMultiQuestionBlock({{ $message['original_id'] }}, {{ $block['id'] }}, blockQuestion, blockAnswer, requiresHandoff); showBlockForm = false; validated = true"
-                                                                >
-                                                                    Enregistrer
-                                                                </x-filament::button>
-                                                                <x-filament::button
-                                                                    size="xs"
-                                                                    color="gray"
-                                                                    x-on:click="showBlockForm = false"
-                                                                >
-                                                                    Annuler
-                                                                </x-filament::button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                @endforeach
-                                            </div>
-                                        @endif
 
                                         {{-- Bouton contexte RAG --}}
                                         @if(!empty($message['rag_context']))
