@@ -35,14 +35,18 @@
             line-height: 1.5;
             color: var(--text-color);
             background: var(--bg-color);
+            /* Mobile-friendly height: JS variable > dvh > vh */
             height: 100vh;
+            height: var(--app-height, 100vh);
             margin: 0;
             padding: 0;
         }
 
         .chat-wrapper {
             width: 100%;
+            /* Mobile-friendly height: JS variable > dvh > vh */
             height: 100vh;
+            height: var(--app-height, 100vh);
             background: var(--bg-color);
             display: flex;
             flex-direction: column;
@@ -637,11 +641,15 @@
         @media (max-width: 520px) {
             body {
                 padding: 0;
+                /* Ensure proper height on mobile - use JS variable */
+                height: 100vh;
+                height: var(--app-height, 100vh);
             }
 
             .chat-wrapper {
                 max-width: 100%;
                 height: 100vh;
+                height: var(--app-height, 100vh);
                 max-height: none;
                 border-radius: 0;
             }
@@ -649,6 +657,16 @@
             .upload-button {
                 width: 40px;
                 height: 40px;
+            }
+
+            /* Ensure input container stays visible with safe area padding */
+            .input-container {
+                padding: 12px 16px;
+                padding-bottom: max(12px, env(safe-area-inset-bottom));
+            }
+
+            .messages-container {
+                padding: 12px;
             }
         }
     </style>
@@ -769,6 +787,20 @@
     <script>
         (function() {
             'use strict';
+
+            // Mobile viewport height fix
+            // Sets a CSS variable to the actual viewport height (accounting for browser chrome)
+            function setViewportHeight() {
+                var vh = window.innerHeight * 0.01;
+                document.documentElement.style.setProperty('--vh', vh + 'px');
+                // Also set full height for direct use
+                document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+            }
+            setViewportHeight();
+            window.addEventListener('resize', setViewportHeight);
+            window.addEventListener('orientationchange', function() {
+                setTimeout(setViewportHeight, 100);
+            });
 
             // Config from server
             var CONFIG = {
