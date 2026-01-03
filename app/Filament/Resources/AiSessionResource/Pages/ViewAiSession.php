@@ -1444,4 +1444,88 @@ class ViewAiSession extends ViewRecord
                 ->send();
         }
     }
+
+    /**
+     * Améliore la formulation d'une réponse en corrigeant les fautes
+     * et en rendant le texte plus professionnel.
+     *
+     * @param int $messageId ID du message IA
+     * @param int $blockId ID du bloc
+     * @param string $question Question de contexte
+     * @param string $answer Réponse à améliorer
+     * @return string|null Réponse améliorée ou null en cas d'erreur
+     */
+    public function improveBlockResponse(int $messageId, int $blockId, string $question, string $answer): ?string
+    {
+        $message = AiMessage::find($messageId);
+
+        if (!$message || $message->session_id !== $this->record->id) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Message non trouvé.')
+                ->danger()
+                ->send();
+            return null;
+        }
+
+        try {
+            $agent = $this->record->agent;
+            $llmService = \App\Services\AI\LLMServiceFactory::forAgent($agent);
+
+            $prompt = <<<PROMPT
+Tu es un assistant qui améliore les réponses du support client.
+
+Ta tâche : Corriger les fautes d'orthographe et de grammaire, puis reformuler le texte pour qu'il soit professionnel, clair et courtois.
+
+Règles :
+- Garde exactement le même sens et les mêmes informations
+- Ne rajoute pas d'informations inventées
+- Utilise un ton professionnel mais amical
+- Corrige toutes les fautes (orthographe, grammaire, ponctuation)
+- Améliore la structure si nécessaire
+- Réponds UNIQUEMENT avec le texte corrigé, sans explication ni commentaire
+
+Question du client : {$question}
+
+Réponse à améliorer :
+{$answer}
+
+Réponse améliorée :
+PROMPT;
+
+            $response = $llmService->generate($prompt, [
+                'temperature' => 0.3, // Faible pour rester fidèle au sens
+                'max_tokens' => 1024,
+            ]);
+
+            $improvedText = trim($response->content);
+
+            // Nettoyer si le LLM a ajouté des préfixes
+            $improvedText = preg_replace('/^(Réponse améliorée\s*:\s*)/i', '', $improvedText);
+            $improvedText = trim($improvedText, '"\'');
+
+            Log::info('Response improved', [
+                'message_id' => $messageId,
+                'block_id' => $blockId,
+                'original_length' => strlen($answer),
+                'improved_length' => strlen($improvedText),
+            ]);
+
+            return $improvedText;
+
+        } catch (\Throwable $e) {
+            Log::error('Failed to improve response', [
+                'message_id' => $messageId,
+                'error' => $e->getMessage(),
+            ]);
+
+            Notification::make()
+                ->title('Erreur')
+                ->body('Impossible d\'améliorer la réponse: ' . $e->getMessage())
+                ->danger()
+                ->send();
+
+            return null;
+        }
+    }
 }
