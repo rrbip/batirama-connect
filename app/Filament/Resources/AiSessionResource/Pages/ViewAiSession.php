@@ -1308,6 +1308,8 @@ class ViewAiSession extends ViewRecord
             ]);
 
             // Broadcast au client si escaladé
+            // IMPORTANT: refresh() pour que le broadcast ait les données à jour
+            $message->refresh();
             if ($this->record->isEscalated()) {
                 broadcast(new AiMessageValidated($message));
             }
