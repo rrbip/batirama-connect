@@ -262,7 +262,13 @@
                                 }
 
                                 $blockCount = count($qrBlocks);
-                                $originalRequiresHandoff = $message['rag_context']['stats']['requires_handoff'] ?? false;
+                                // requires_handoff peut venir de plusieurs sources:
+                                // 1. stats.requires_handoff (réponse LLM normale)
+                                // 2. Le raw de la réponse direct_qr_match
+                                // 3. Au niveau du bloc pour multi-questions
+                                $globalRequiresHandoff = $message['rag_context']['stats']['requires_handoff']
+                                    ?? $message['rag_context']['requires_handoff']
+                                    ?? false;
                                 $isPending = $message['validation_status'] === 'pending';
                                 $isSuggestionGlobal = $message['rag_context']['is_suggestion'] ?? false;
                             @endphp
@@ -271,7 +277,7 @@
                                     'id' => $b['id'] ?? $i + 1,
                                     'question' => $b['question'] ?? '',
                                     'answer' => $b['answer'] ?? '',
-                                    'requiresHandoff' => $originalRequiresHandoff,
+                                    'requiresHandoff' => $b['requires_handoff'] ?? $globalRequiresHandoff,
                                     'validated' => $b['learned'] ?? false,
                                     'rejected' => $b['rejected'] ?? false,
                                     'is_suggestion' => $b['is_suggestion'] ?? false,
