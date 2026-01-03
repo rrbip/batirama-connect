@@ -341,7 +341,7 @@
                                     }
                                 }
                             }">
-                                <div style="max-width: 75%;">
+                                <div style="max-width: 90%;">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -419,8 +419,7 @@
                                                             'opacity-70': block.rejected
                                                         }"
                                                         :style="{
-                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : null),
-                                                            backgroundColor: block.rejected ? 'rgba(254, 226, 226, 0.5)' : (block.validated ? 'rgba(220, 252, 231, 0.5)' : null)
+                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : null)
                                                         }">
                                                         {{-- Header du bloc (badges uniquement) --}}
                                                         <div class="flex items-center gap-2 flex-wrap mb-4">
