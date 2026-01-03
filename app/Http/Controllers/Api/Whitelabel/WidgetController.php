@@ -188,8 +188,10 @@ class WidgetController extends Controller
 
         // Mode async: dispatcher un job et retourner immédiatement
         // Utilisé quand le support humain est actif pour ne pas bloquer l'utilisateur
+        // IMPORTANT: Forcer async si human_support_enabled sur l'agent pour que le handoff fonctionne
         $isHumanSupportActive = in_array($session->support_status, ['escalated', 'assigned']);
-        $useAsync = $request->boolean('async', false) || $isHumanSupportActive;
+        $agentHasHumanSupport = $deployment->agent->human_support_enabled ?? false;
+        $useAsync = $request->boolean('async', false) || $isHumanSupportActive || $agentHasHumanSupport;
 
         if ($useAsync) {
             // Créer le message assistant en attente

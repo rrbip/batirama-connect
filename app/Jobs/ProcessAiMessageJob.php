@@ -87,7 +87,36 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             // Backup: Vérifier si l'utilisateur demande explicitement un humain
             $userRequestsHuman = $this->checkUserRequestsHuman($this->userContent);
 
+            // ═══════════════════════════════════════════════════════════════════
+            // VÉRIFIER SI HANDOFF NÉCESSAIRE AVANT DE BROADCASTER
+            // ═══════════════════════════════════════════════════════════════════
+            $requiresHandoff = false;
+            $handoffReason = null;
+            $maxRagScore = 0.0;
+
+            if ($agent->human_support_enabled) {
+                $maxRagScore = $this->extractMaxRagScore($response->raw);
+                $escalationThreshold = $agent->escalation_threshold ?? 0.60;
+                $scoreBelowThreshold = $maxRagScore < $escalationThreshold;
+
+                // Vérifier si c'est un direct_qr_match avec requires_handoff
+                $isDirectQrWithHandoff = ($response->raw['direct_qr'] ?? false)
+                    && ($response->raw['requires_handoff'] ?? false);
+
+                if ($needsHandoff || $userRequestsHuman || $scoreBelowThreshold || $isDirectQrWithHandoff) {
+                    $requiresHandoff = true;
+                    $handoffReason = match (true) {
+                        $userRequestsHuman => 'user_explicit_request',
+                        $needsHandoff => 'ai_handoff_request',
+                        $isDirectQrWithHandoff => 'learned_response_handoff',
+                        $scoreBelowThreshold => 'low_rag_score',
+                        default => 'unknown',
+                    };
+                }
+            }
+
             // Mettre à jour le message avec la réponse (sans le marqueur)
+            // Si handoff requis, marquer comme "pending" validation
             $this->message->markAsCompleted(
                 content: $cleanContent,
                 model: $response->model,
@@ -97,6 +126,11 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 ragContext: $response->raw['context'] ?? null,
                 usedFallback: $response->usedFallback
             );
+
+            // Si handoff requis, marquer le message en attente de validation
+            if ($requiresHandoff) {
+                $this->message->update(['validation_status' => 'pending']);
+            }
 
             // Incrémenter le compteur de messages de la session
             $session->increment('message_count');
@@ -109,53 +143,32 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
                 'generation_time_ms' => $response->generationTimeMs,
                 'tokens_total' => ($response->tokensPrompt ?? 0) + ($response->tokensCompletion ?? 0),
                 'needs_handoff' => $needsHandoff,
+                'requires_handoff' => $requiresHandoff,
             ]);
 
-            // Broadcast completion event via WebSocket AVANT l'escalade
-            // Cela garantit que le message IA est affiché avant le message d'escalade
+            // ═══════════════════════════════════════════════════════════════════
+            // BROADCASTER SELON LE CAS
+            // ═══════════════════════════════════════════════════════════════════
             $session = $this->message->session;
-            Log::info('Broadcasting AiMessageCompleted', [
-                'message_id' => $this->message->uuid,
-                'session_id' => $session->uuid,
-                'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
-            ]);
-            broadcast(new AiMessageCompleted($this->message));
 
-            // Déclencher l'escalade APRÈS le broadcast du message IA
-            // 1. L'IA a ajouté le marqueur [HANDOFF_NEEDED]
-            // 2. OU l'utilisateur a explicitement demandé un humain
-            // 3. OU le score RAG est inférieur au seuil d'escalade
-            // 4. OU la réponse apprise a été marquée comme nécessitant un handoff
-            if ($agent->human_support_enabled) {
-                $maxRagScore = $this->extractMaxRagScore($response->raw);
-                $escalationThreshold = $agent->escalation_threshold ?? 0.60;
-                $scoreBelowThreshold = $maxRagScore < $escalationThreshold;
+            if ($requiresHandoff) {
+                // HANDOFF: Ne pas envoyer la réponse IA au client, déclencher l'escalade
+                Log::info('ProcessAiMessageJob: Handoff triggered, not broadcasting AI response to client', [
+                    'message_id' => $this->message->uuid,
+                    'session_id' => $session->uuid,
+                    'reason' => $handoffReason,
+                    'max_rag_score' => $maxRagScore,
+                ]);
 
-                // Vérifier si c'est un direct_qr_match avec requires_handoff
-                $isDirectQrWithHandoff = ($response->raw['direct_qr'] ?? false)
-                    && ($response->raw['requires_handoff'] ?? false);
-
-                if ($needsHandoff || $userRequestsHuman || $scoreBelowThreshold || $isDirectQrWithHandoff) {
-                    $reason = match (true) {
-                        $userRequestsHuman => 'user_explicit_request',
-                        $needsHandoff => 'ai_handoff_request',
-                        $isDirectQrWithHandoff => 'learned_response_handoff',
-                        $scoreBelowThreshold => 'low_rag_score',
-                        default => 'unknown',
-                    };
-                    $this->triggerEscalation($session, $reason, $maxRagScore);
-
-                    Log::info('ProcessAiMessageJob: Handoff triggered', [
-                        'session_id' => $session->id,
-                        'reason' => $reason,
-                        'ai_marker' => $needsHandoff,
-                        'user_request' => $userRequestsHuman,
-                        'max_rag_score' => $maxRagScore,
-                        'escalation_threshold' => $escalationThreshold,
-                        'score_below_threshold' => $scoreBelowThreshold,
-                        'is_direct_qr_with_handoff' => $isDirectQrWithHandoff,
-                    ]);
-                }
+                $this->triggerEscalation($session, $handoffReason, $maxRagScore);
+            } else {
+                // PAS DE HANDOFF: Envoyer la réponse directement au client
+                Log::info('Broadcasting AiMessageCompleted', [
+                    'message_id' => $this->message->uuid,
+                    'session_id' => $session->uuid,
+                    'channels' => ['chat.message.' . $this->message->uuid, 'chat.session.' . $session->uuid],
+                ]);
+                broadcast(new AiMessageCompleted($this->message));
             }
 
         } catch (\Exception $e) {
