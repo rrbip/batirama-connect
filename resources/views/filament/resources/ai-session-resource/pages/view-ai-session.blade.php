@@ -250,11 +250,14 @@
                                     $qrBlocks = $message['rag_context']['multi_question']['blocks'];
                                 } else {
                                     // Mono-question : créer un bloc unique
+                                    // Note: response_type est dans stats pour direct_qr_match
                                     $qrBlocks = [[
                                         'id' => 1,
                                         'question' => $previousQuestion,
                                         'answer' => $message['content'] ?? '',
-                                        'type' => $message['rag_context']['response_type'] ?? 'unknown',
+                                        'type' => $message['rag_context']['stats']['response_type']
+                                            ?? $message['rag_context']['response_type']
+                                            ?? 'unknown',
                                         'is_suggestion' => $message['rag_context']['is_suggestion'] ?? false,
                                         'learned' => in_array($message['validation_status'], ['learned', 'validated']),
                                         'rejected' => $message['validation_status'] === 'rejected',
@@ -631,14 +634,8 @@
                                         <div class="flex items-center justify-between mt-3 text-xs text-gray-400">
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
                                             <div class="flex items-center gap-2">
-                                                @if($message['model_used'])
-                                                    @if($message['model_used'] === 'direct_qr_match')
-                                                        <x-filament::badge color="success" size="sm" icon="heroicon-s-bolt">
-                                                            RÉPONSE DIRECTE
-                                                        </x-filament::badge>
-                                                    @else
-                                                        <span>{{ $message['model_used'] }}</span>
-                                                    @endif
+                                                @if($message['model_used'] && $message['model_used'] !== 'direct_qr_match')
+                                                    <span>{{ $message['model_used'] }}</span>
                                                 @endif
                                                 @if($message['tokens'])
                                                     <span>{{ $message['tokens'] }} tokens</span>
