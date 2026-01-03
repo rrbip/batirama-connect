@@ -468,8 +468,8 @@
                                                         <div class="mb-3 transition-opacity"
                                                             x-show="block.is_suggestion || block.type === 'suggestion'"
                                                             :class="{'opacity-40': block.validated || block.rejected}">
-                                                            <div class="p-2 bg-warning-50 dark:bg-warning-950 border border-warning-300 dark:border-warning-700 rounded-lg">
-                                                                <div class="flex items-center gap-2 text-sm text-warning-700 dark:text-warning-300 font-medium">
+                                                            <div class="p-2 bg-warning-500 dark:bg-warning-600 border border-warning-600 dark:border-warning-500 rounded-lg">
+                                                                <div class="flex items-center gap-2 text-sm text-white font-medium">
                                                                     <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
                                                                     <span>Suggestion IA - Aucune documentation. Vérifiez avant validation.</span>
                                                                 </div>
