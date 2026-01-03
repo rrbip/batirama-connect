@@ -341,7 +341,7 @@
                                     }
                                 }
                             }">
-                                <div style="max-width: 90%;">
+                                <div style="width: 75%;">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
