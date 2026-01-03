@@ -219,6 +219,10 @@ class DispatcherService
     /**
      * Récupère l'historique d'une session
      * Inclut les messages IA et les messages de support (système, agent)
+     *
+     * Note: Pour les messages IA validés, on utilise validated_at pour le tri
+     * afin que le message apparaisse à sa date d'envoi réelle au client,
+     * pas à sa date de génération par l'IA.
      */
     public function getSessionHistory(AiSession $session, int $limit = 50): array
     {
@@ -246,6 +250,11 @@ class DispatcherService
                 'role' => $msg->role,
                 'content' => $msg->corrected_content ?? $msg->content,
                 'created_at' => $msg->created_at,
+                // Pour les messages IA validés, utiliser validated_at pour le tri
+                // Cela permet d'afficher le message à sa date d'envoi réelle
+                'sort_date' => ($msg->role === 'assistant' && $msg->validated_at)
+                    ? $msg->validated_at
+                    : $msg->created_at,
             ]);
 
         // Messages de support:
@@ -270,17 +279,18 @@ class DispatcherService
                 'content' => $msg->content,
                 'sender_name' => $msg->agent?->name ?? null,
                 'created_at' => $msg->created_at,
+                'sort_date' => $msg->created_at,
             ]);
 
-        // Fusionner et trier par date
+        // Fusionner et trier par sort_date (validated_at pour IA validées, created_at sinon)
         return $aiMessages->concat($supportMessages)
-            ->sortBy('created_at')
+            ->sortBy('sort_date')
             ->values()
             ->map(fn($msg) => [
                 'role' => $msg['role'],
                 'content' => $msg['content'],
                 'sender_name' => $msg['sender_name'] ?? null,
-                'created_at' => $msg['created_at']->toIso8601String(),
+                'created_at' => $msg['sort_date']->toIso8601String(),
             ])
             ->toArray();
     }
