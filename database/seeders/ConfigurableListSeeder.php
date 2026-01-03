@@ -41,6 +41,16 @@ class ConfigurableListSeeder extends Seeder
                 'is_system' => true,
                 'data' => ConfigurableList::getDefaultData(ConfigurableList::KEY_SKIP_REASONS),
             ],
+
+            // Raisons de clôture de session
+            [
+                'key' => ConfigurableList::KEY_RESOLUTION_TYPES,
+                'name' => 'Raisons de clôture',
+                'description' => 'Types de résolution pour la clôture des sessions de support',
+                'category' => ConfigurableList::CATEGORY_SUPPORT,
+                'is_system' => true,
+                'data' => ConfigurableList::getDefaultData(ConfigurableList::KEY_RESOLUTION_TYPES),
+            ],
         ];
 
         foreach ($lists as $listData) {

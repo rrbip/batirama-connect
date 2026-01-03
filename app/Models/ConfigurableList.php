@@ -17,6 +17,7 @@ class ConfigurableList extends Model
 {
     // Catégories prédéfinies
     public const CATEGORY_AI = 'ai';
+    public const CATEGORY_SUPPORT = 'support';
     public const CATEGORY_MARKETPLACE = 'marketplace';
     public const CATEGORY_GENERAL = 'general';
 
@@ -25,6 +26,7 @@ class ConfigurableList extends Model
     public const KEY_OPENAI_MODELS = 'openai_models';
     public const KEY_OLLAMA_MODELS = 'ollama_models';
     public const KEY_SKIP_REASONS = 'accelerated_learning_skip_reasons';
+    public const KEY_RESOLUTION_TYPES = 'session_resolution_types';
 
     protected $fillable = [
         'key',
@@ -91,6 +93,7 @@ class ConfigurableList extends Model
     {
         return [
             self::CATEGORY_AI => 'Intelligence Artificielle',
+            self::CATEGORY_SUPPORT => 'Support Client',
             self::CATEGORY_MARKETPLACE => 'Marketplace',
             self::CATEGORY_GENERAL => 'Général',
         ];
@@ -141,6 +144,12 @@ class ConfigurableList extends Model
                 'deja_traite' => 'Déjà traité ailleurs',
                 'pas_prioritaire' => 'Pas prioritaire',
                 'doublon' => 'Question en doublon',
+            ],
+            self::KEY_RESOLUTION_TYPES => [
+                'answered' => 'Question répondue',
+                'redirected' => 'Redirigé vers autre service',
+                'out_of_scope' => 'Hors périmètre',
+                'duplicate' => 'Question déjà traitée',
             ],
             default => [],
         };

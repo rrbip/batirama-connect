@@ -7,6 +7,7 @@ namespace App\Filament\Resources\AiSessionResource\Pages;
 use App\Events\Chat\AiMessageValidated;
 use App\Filament\Resources\AiSessionResource;
 use App\Models\AiMessage;
+use App\Models\ConfigurableList;
 use App\Models\SupportMessage;
 use App\Services\AI\LearningService;
 use App\Services\AI\MultiQuestionParser;
@@ -92,12 +93,10 @@ class ViewAiSession extends ViewRecord
                 ->form([
                     Select::make('resolution_type')
                         ->label('Type de résolution')
-                        ->options([
-                            'answered' => 'Question répondue',
-                            'redirected' => 'Redirigé vers autre service',
-                            'out_of_scope' => 'Hors périmètre',
-                            'duplicate' => 'Question déjà traitée',
-                        ])
+                        ->options(ConfigurableList::getOptionsForSelect(
+                            ConfigurableList::KEY_RESOLUTION_TYPES,
+                            ConfigurableList::getDefaultData(ConfigurableList::KEY_RESOLUTION_TYPES)
+                        ))
                         ->required(),
                     Textarea::make('notes')
                         ->label('Notes (optionnel)')
