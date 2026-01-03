@@ -415,9 +415,12 @@
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
                                                     <div class="rounded-lg p-4 transition-all border-2"
                                                         :class="{
-                                                            'border-gray-300 dark:border-gray-600 bg-transparent': !block.validated && !block.rejected,
-                                                            'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30': block.validated && !block.rejected,
-                                                            'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/30 opacity-70': block.rejected
+                                                            'border-gray-300 dark:border-gray-600': !block.validated && !block.rejected,
+                                                            'opacity-70': block.rejected
+                                                        }"
+                                                        :style="{
+                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : null),
+                                                            backgroundColor: block.rejected ? 'rgba(254, 226, 226, 0.5)' : (block.validated ? 'rgba(220, 252, 231, 0.5)' : null)
                                                         }">
                                                         {{-- Header du bloc (badges uniquement) --}}
                                                         <div class="flex items-center gap-2 flex-wrap mb-4">
