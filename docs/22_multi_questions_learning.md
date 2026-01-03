@@ -1412,12 +1412,493 @@ Je vous recommande de contacter notre service commercial pour connaître les opt
 
 ---
 
+# PARTIE 4 : Mode Apprentissage Accéléré
+
+## 21. Contexte et Objectif
+
+### 21.1 Problème Actuel
+
+Dans le workflow actuel de support humain :
+1. L'IA génère une réponse
+2. L'agent peut **soit** utiliser les boutons d'apprentissage, **soit** répondre librement
+3. Si l'agent répond librement, l'apprentissage est optionnel (bouton "Apprendre" sur son message)
+
+**Conséquence :** Beaucoup de réponses d'agents ne sont jamais indexées → l'IA n'apprend pas de toutes les interactions.
+
+### 21.2 Concept du Mode Apprentissage Accéléré
+
+Forcer l'agent à interagir avec la réponse de l'IA avant de pouvoir répondre au client :
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Réponse IA Générée                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  "Voici comment configurer le module XYZ..."                    │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [✓ Valider]  [✏️ Corriger]  [✗ Refuser]  [⏭️ Passer]         │
+│                                                                 │
+│  ─────────────────────────────────────────────────────────────  │
+│  ⚠️ Zone de réponse libre MASQUÉE                              │
+│     Utilisez les boutons ci-dessus pour répondre               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 21.3 Les 4 Actions Possibles
+
+| Action | Description | Apprentissage | Envoi au Client |
+|--------|-------------|---------------|-----------------|
+| **✓ Valider** | La réponse IA est correcte | ✅ Positif (Q/R indexée) | ✅ Réponse IA envoyée |
+| **✏️ Corriger** | La réponse nécessite des ajustements | ✅ Positif (Q/R corrigée indexée) | ✅ Version corrigée envoyée |
+| **✗ Refuser** | La réponse est incorrecte, l'agent rédige | ✅ Négatif (rejet) + Positif (nouvelle Q/R) | ✅ Réponse agent envoyée |
+| **⏭️ Passer** | Cas particulier, réponse libre sans impact IA | ❌ Aucun | ✅ Réponse agent envoyée |
+
+## 22. Détail des Actions
+
+### 22.1 Valider ✓
+
+**Quand l'utiliser :** La réponse de l'IA est parfaite ou quasi-parfaite.
+
+**Workflow :**
+1. L'agent clique sur "Valider"
+2. (Optionnel) Formulaire pour ajuster la question utilisateur
+3. La paire Q/R est indexée
+4. La réponse est envoyée au client
+
+**Impact apprentissage :** La réponse IA est considérée comme référence pour les futures questions similaires.
+
+### 22.2 Corriger ✏️
+
+**Quand l'utiliser :** La réponse de l'IA est une bonne base mais nécessite des modifications.
+
+**Workflow :**
+1. L'agent clique sur "Corriger"
+2. Formulaire avec :
+   - Question (pré-remplie, modifiable)
+   - Réponse (pré-remplie avec contenu IA, modifiable)
+   - Checkbox "Nécessite suivi humain"
+3. L'agent ajuste le texte
+4. La paire Q/R corrigée est indexée
+5. La version corrigée est envoyée au client
+
+**Impact apprentissage :** La version corrigée devient la référence. L'IA apprend la bonne formulation.
+
+### 22.3 Refuser et Répondre ✗
+
+**Quand l'utiliser :** La réponse de l'IA est complètement à côté de la plaque.
+
+**Workflow :**
+1. L'agent clique sur "Refuser"
+2. La réponse IA est marquée comme "rejetée" (signal négatif)
+3. **Zone de réponse libre apparaît**
+4. L'agent rédige sa réponse
+5. Formulaire d'apprentissage obligatoire :
+   - Question (pré-remplie)
+   - Réponse (contenu de l'agent)
+6. La nouvelle paire Q/R est indexée
+7. La réponse agent est envoyée au client
+
+**Impact apprentissage :**
+- Signal négatif sur la réponse IA (pour analyse/debugging)
+- Nouvelle référence créée avec la réponse de l'agent
+
+### 22.4 Passer ⏭️
+
+**Quand l'utiliser :**
+- Cas très spécifique au client (suivi de commande, données personnelles)
+- Urgence où le workflow standard est trop lent
+- Question hors périmètre de l'IA
+
+**Workflow :**
+1. L'agent clique sur "Passer"
+2. Sélection du motif (optionnel) :
+   - "Cas client spécifique"
+   - "Urgence"
+   - "Hors périmètre IA"
+   - "Autre"
+3. Zone de réponse libre apparaît
+4. L'agent répond librement
+5. Réponse envoyée au client
+
+**Impact apprentissage :** Aucun. Ce message n'est pas indexé et ne compte pas comme rejet.
+
+## 23. Interface Utilisateur
+
+### 23.1 Vue Agent - Mode Apprentissage Accéléré Activé
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Session #abc123                          [Mode Apprentissage]   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ ┌─ Client ───────────────────────────────────────────────────┐  │
+│ │ Comment puis-je configurer le module de facturation ?      │  │
+│ │                                               14:32        │  │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│ ┌─ Assistant IA ─────────────────── [💡 Suggestion] ─────────┐  │
+│ │                                                             │  │
+│ │ ⚠️ Cette réponse nécessite votre validation                │  │
+│ │                                                             │  │
+│ │ Pour configurer le module de facturation :                  │  │
+│ │ 1. Accédez à Paramètres > Modules                          │  │
+│ │ 2. Activez "Facturation"                                    │  │
+│ │ 3. Configurez les options...                                │  │
+│ │                                                             │  │
+│ ├─────────────────────────────────────────────────────────────┤  │
+│ │                                                             │  │
+│ │  [✓ Valider]  [✏️ Corriger]  [✗ Refuser]  [⏭️ Passer]     │  │
+│ │                                                             │  │
+│ └─────────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│ ┌─────────────────────────────────────────────────────────────┐  │
+│ │ 🔒 Zone de réponse verrouillée                             │  │
+│ │                                                             │  │
+│ │ Utilisez les boutons ci-dessus pour :                      │  │
+│ │ • Valider la réponse IA                                    │  │
+│ │ • La corriger avant envoi                                  │  │
+│ │ • La refuser et rédiger votre réponse                      │  │
+│ │ • Passer pour répondre librement (cas exceptionnels)       │  │
+│ └─────────────────────────────────────────────────────────────┘  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 23.2 Après clic sur "Refuser"
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ┌─ Assistant IA ──────────────────── [❌ Rejetée] ────────────┐  │
+│ │ Pour configurer le module de facturation :                  │  │
+│ │ 1. Accédez à Paramètres > Modules...                        │  │
+│ │                                          (réponse barrée)   │  │
+│ └─────────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│ ┌─ Votre réponse ─────────────────────────────────────────────┐  │
+│ │                                                             │  │
+│ │ ┌─────────────────────────────────────────────────────────┐ │  │
+│ │ │ Rédigez votre réponse ici...                            │ │  │
+│ │ │                                                         │ │  │
+│ │ │                                                         │ │  │
+│ │ └─────────────────────────────────────────────────────────┘ │  │
+│ │                                                             │  │
+│ │  [📤 Envoyer et Apprendre]                                 │  │
+│ │                                                             │  │
+│ │  ℹ️ Votre réponse sera automatiquement indexée pour       │  │
+│ │     l'apprentissage de l'IA                                │  │
+│ │                                                             │  │
+│ └─────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 24. Configuration Agent
+
+### 24.1 Nouvelle Option
+
+```php
+// Migration
+Schema::table('agents', function (Blueprint $table) {
+    $table->boolean('accelerated_learning_mode')->default(false);
+    $table->json('accelerated_learning_config')->nullable();
+});
+```
+
+### 24.2 Structure de Configuration
+
+```json
+{
+    "accelerated_learning_config": {
+        "enabled": true,
+        "allow_skip": true,
+        "skip_reasons": [
+            "Cas client spécifique",
+            "Urgence",
+            "Hors périmètre IA",
+            "Autre"
+        ],
+        "require_skip_reason": false,
+        "auto_validate_high_confidence": false,
+        "high_confidence_threshold": 0.95
+    }
+}
+```
+
+### 24.3 Interface Filament
+
+```php
+Forms\Components\Section::make('Mode Apprentissage')
+    ->schema([
+        Forms\Components\Toggle::make('accelerated_learning_mode')
+            ->label('Mode apprentissage accéléré')
+            ->helperText('Force les agents à interagir avec les réponses IA avant de répondre. Maximise l\'apprentissage.')
+            ->live(),
+
+        Forms\Components\Fieldset::make('Options')
+            ->visible(fn ($get) => $get('accelerated_learning_mode'))
+            ->schema([
+                Forms\Components\Toggle::make('accelerated_learning_config.allow_skip')
+                    ->label('Autoriser "Passer"')
+                    ->helperText('Permet aux agents de contourner le workflow pour les cas exceptionnels')
+                    ->default(true),
+
+                Forms\Components\Toggle::make('accelerated_learning_config.require_skip_reason')
+                    ->label('Motif obligatoire pour "Passer"')
+                    ->default(false),
+
+                Forms\Components\TagsInput::make('accelerated_learning_config.skip_reasons')
+                    ->label('Motifs de "Passer"')
+                    ->default(['Cas client spécifique', 'Urgence', 'Hors périmètre IA']),
+            ]),
+    ]),
+```
+
+## 25. Modifications Techniques
+
+### 25.1 Modification de ViewAiSession.php
+
+```php
+/**
+ * Vérifie si le mode apprentissage accéléré est actif.
+ */
+public function isAcceleratedLearningMode(): bool
+{
+    return $this->record->agent?->accelerated_learning_mode ?? false;
+}
+
+/**
+ * Vérifie si l'agent peut répondre librement (après refus ou skip).
+ */
+public bool $canRespondFreely = false;
+public ?string $rejectedMessageId = null;
+
+/**
+ * Rejette la réponse IA et déverrouille la zone de réponse.
+ */
+public function rejectAndUnlock(int $messageId): void
+{
+    $message = AiMessage::findOrFail($messageId);
+
+    if ($message->session_id !== $this->record->id) {
+        return;
+    }
+
+    // Marquer comme rejeté
+    app(LearningService::class)->reject($message, auth()->id(), 'Agent a préféré rédiger');
+
+    // Déverrouiller la zone de réponse
+    $this->canRespondFreely = true;
+    $this->rejectedMessageId = $messageId;
+
+    Notification::make()
+        ->title('Réponse rejetée')
+        ->body('Vous pouvez maintenant rédiger votre réponse.')
+        ->info()
+        ->send();
+}
+
+/**
+ * Passe sans impact sur l'apprentissage.
+ */
+public function skipToFreeResponse(?string $reason = null): void
+{
+    $this->canRespondFreely = true;
+
+    // Logger le skip pour analyse (optionnel)
+    Log::info('Agent skipped accelerated learning', [
+        'session_id' => $this->record->id,
+        'agent_id' => auth()->id(),
+        'reason' => $reason,
+    ]);
+
+    Notification::make()
+        ->title('Mode libre activé')
+        ->body('Vous pouvez répondre librement.')
+        ->info()
+        ->send();
+}
+
+/**
+ * Envoie la réponse libre ET l'indexe (après refus).
+ */
+public function sendAndLearn(): void
+{
+    if (empty(trim($this->supportMessage))) {
+        return;
+    }
+
+    // Envoyer le message
+    app(SupportService::class)->sendAgentMessage(
+        $this->record,
+        auth()->user(),
+        $this->supportMessage
+    );
+
+    // Récupérer la dernière question utilisateur
+    $lastUserMessage = $this->record->messages()
+        ->where('role', 'user')
+        ->orderBy('created_at', 'desc')
+        ->first();
+
+    if ($lastUserMessage) {
+        // Indexer la nouvelle paire Q/R
+        app(LearningService::class)->indexLearnedResponse(
+            question: $lastUserMessage->content,
+            answer: $this->supportMessage,
+            agentId: $this->record->agent_id,
+            agentSlug: $this->record->agent->slug,
+            messageId: $lastUserMessage->id,
+            validatorId: auth()->id()
+        );
+    }
+
+    $this->supportMessage = '';
+    $this->canRespondFreely = false;
+
+    Notification::make()
+        ->title('Message envoyé et indexé')
+        ->body('Votre réponse a été envoyée et l\'IA a appris de cette interaction.')
+        ->success()
+        ->send();
+}
+```
+
+### 25.2 Modification du Template Blade
+
+```blade
+{{-- Zone de réponse conditionnelle --}}
+@if($this->isAcceleratedLearningMode())
+    @if(!$this->canRespondFreely)
+        {{-- Mode verrouillé : afficher message explicatif --}}
+        <div class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+            <div class="flex items-center gap-3 text-gray-500 dark:text-gray-400">
+                <x-heroicon-o-lock-closed class="w-6 h-6" />
+                <div>
+                    <p class="font-medium">Zone de réponse verrouillée</p>
+                    <p class="text-sm">Utilisez les boutons de la réponse IA ci-dessus pour :</p>
+                    <ul class="text-sm mt-1 list-disc list-inside">
+                        <li><strong>Valider</strong> - Si la réponse est correcte</li>
+                        <li><strong>Corriger</strong> - Pour ajuster avant envoi</li>
+                        <li><strong>Refuser</strong> - Pour rédiger votre propre réponse</li>
+                        <li><strong>Passer</strong> - Pour cas exceptionnels</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    @else
+        {{-- Mode déverrouillé : zone de réponse libre --}}
+        <div class="space-y-3">
+            @if($this->rejectedMessageId)
+                <div class="p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs text-primary-700 dark:text-primary-300">
+                    <x-heroicon-o-academic-cap class="w-4 h-4 inline" />
+                    Votre réponse sera automatiquement indexée pour l'apprentissage de l'IA.
+                </div>
+            @endif
+
+            <textarea
+                wire:model="supportMessage"
+                rows="4"
+                class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900"
+                placeholder="Rédigez votre réponse..."
+            ></textarea>
+
+            <div class="flex gap-2">
+                @if($this->rejectedMessageId)
+                    <x-filament::button
+                        color="success"
+                        icon="heroicon-o-paper-airplane"
+                        wire:click="sendAndLearn"
+                    >
+                        Envoyer et Apprendre
+                    </x-filament::button>
+                @else
+                    <x-filament::button
+                        color="primary"
+                        icon="heroicon-o-paper-airplane"
+                        wire:click="sendSupportMessage"
+                    >
+                        Envoyer
+                    </x-filament::button>
+                @endif
+            </div>
+        </div>
+    @endif
+@else
+    {{-- Mode normal : zone de réponse toujours visible --}}
+    {{-- ... code existant ... --}}
+@endif
+```
+
+## 26. Métriques et Tableau de Bord
+
+### 26.1 Nouvelles Métriques
+
+| Métrique | Description | Objectif |
+|----------|-------------|----------|
+| Taux de validation | % de réponses IA validées directement | > 60% |
+| Taux de correction | % de réponses nécessitant ajustement | < 30% |
+| Taux de rejet | % de réponses complètement rejetées | < 10% |
+| Taux de skip | % d'utilisation du bouton "Passer" | < 5% |
+| Temps moyen de traitement | Durée entre réception et envoi | À suivre |
+
+### 26.2 Dashboard Apprentissage
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 📊 Statistiques Apprentissage Accéléré - Agent "Support Client"│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Cette semaine :                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  ✓ 156 Validations (62%)      ████████████░░░░░░░░      │  │
+│  │  ✏️  78 Corrections (31%)      ██████░░░░░░░░░░░░░░      │  │
+│  │  ✗  12 Rejets (5%)             █░░░░░░░░░░░░░░░░░░░      │  │
+│  │  ⏭️   5 Passés (2%)            ░░░░░░░░░░░░░░░░░░░░      │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  📈 Évolution qualité IA :                                     │
+│  Semaine -4 : 45% validation → Cette semaine : 62% (+17%)      │
+│                                                                 │
+│  🎯 Top 5 questions corrigées :                                │
+│  1. "Comment créer un devis ?" (8 corrections)                 │
+│  2. "Délais de livraison" (6 corrections)                      │
+│  ...                                                            │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 27. Avantages du Mode
+
+| Aspect | Mode Normal | Mode Apprentissage Accéléré |
+|--------|-------------|----------------------------|
+| **Apprentissage** | Optionnel, souvent oublié | Systématique, chaque interaction compte |
+| **Cohérence** | Réponses parallèles IA/Agent | Une seule source de vérité |
+| **Feedback IA** | Incomplet | Complet (valider/corriger/rejeter) |
+| **Mesurabilité** | Difficile | Métriques claires |
+| **Amélioration IA** | Lente | Rapide, chaque jour l'IA s'améliore |
+
+## 28. Plan d'Implémentation (Additionnel)
+
+### Phase 6 : Mode Apprentissage Accéléré (3-4 jours)
+- [ ] Migration `accelerated_learning_mode` + `accelerated_learning_config`
+- [ ] Modifier ViewAiSession pour les nouvelles actions
+- [ ] Modifier le template Blade pour le verrouillage conditionnel
+- [ ] Ajouter les options dans le formulaire Agent Filament
+- [ ] Dashboard métriques d'apprentissage
+
+**Durée estimée totale révisée : 15-20 jours**
+
+---
+
 **Auteur :** Claude
 **Date :** 2025-01-03
-**Version :** 1.2
+**Version :** 1.3
 **Statut :** Proposition
 
 **Changelog :**
+- v1.3 : Ajout de la Partie 4 - Mode Apprentissage Accéléré
 - v1.2 : Ajout de la Partie 3 - Intégration Multi-Questions + Strict Assisté (badge par bloc)
 - v1.1 : Ajout de la Partie 2 - Mode Strict Assisté avec Handoff Humain
 - v1.0 : Partie 1 - Détection Multi-Questions et Apprentissage Granulaire
