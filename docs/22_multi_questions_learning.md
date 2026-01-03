@@ -615,25 +615,462 @@ Pour l'admin, l'interface affiche :
 - Validation automatique du message parent quand tous les blocs sont validés
 - Notification de succès par bloc
 
-## 9. Risques et Mitigations
+---
+
+# PARTIE 2 : Mode Strict Assisté avec Handoff Humain
+
+## 9. Contexte et Problématique
+
+### 9.1 Comportement Actuel
+
+Le mode **strict** (`strict_mode = true`) ajoute des contraintes fortes au prompt :
+
+```
+- Ne réponds QU'avec les informations présentes dans le contexte fourni
+- Si l'information demandée n'est pas dans le contexte, indique clairement :
+  "Je n'ai pas cette information dans ma base de connaissances"
+```
+
+**Problème observé :** Chaque LLM interprète ces instructions différemment :
+
+| LLM | Comportement en mode strict sans contexte |
+|-----|-------------------------------------------|
+| **Mistral** | Tente quand même de fournir une réponse utile |
+| **Gemini** | Refuse systématiquement, propose le support humain |
+| **GPT-4** | Comportement intermédiaire, dépend du prompt |
+| **Claude** | Respecte strictement, mais peut suggérer des pistes |
+
+### 9.2 Cas d'Usage Problématique
+
+Quand le **mode handoff humain** est activé :
+
+1. L'IA génère une réponse (potentiellement un refus type "Je n'ai pas cette info")
+2. La réponse N'EST PAS affichée au client (en attente de validation)
+3. L'agent humain voit la réponse dans le back-office
+
+**Le problème :** Si l'IA refuse de répondre (mode strict + pas de contexte), l'agent humain n'a AUCUNE piste. Il doit rédiger sa réponse de zéro.
+
+**L'opportunité :** Puisque la réponse passe par un humain avant d'atteindre le client, l'IA pourrait proposer une réponse "best effort" basée sur ses connaissances générales, clairement marquée comme non-documentée.
+
+### 9.3 Objectif
+
+Créer un mode **"Strict Assisté"** qui :
+1. Maintient la rigueur du mode strict pour les réponses directes au client
+2. Permet à l'IA de faire des **propositions** quand un humain valide la réponse
+3. Marque clairement les propositions comme "non-documentées" pour l'agent
+
+## 10. Architecture Proposée
+
+### 10.1 Logique de Décision
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Configuration Agent                           │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │  strict_mode  │
+                    │   = true ?    │
+                    └───────┬───────┘
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+              ▼                           ▼
+        [strict=true]               [strict=false]
+              │                           │
+              ▼                           │
+    ┌─────────────────┐                   │
+    │ human_support   │                   │
+    │  _enabled ?     │                   │
+    └────────┬────────┘                   │
+             │                            │
+   ┌─────────┴─────────┐                  │
+   │                   │                  │
+   ▼                   ▼                  │
+[handoff=true]    [handoff=false]         │
+   │                   │                  │
+   ▼                   ▼                  │
+┌──────────┐      ┌──────────┐           │
+│ MODE     │      │ MODE     │           │
+│ STRICT   │      │ STRICT   │           │
+│ ASSISTÉ  │      │ PUR      │           │
+└──────────┘      └──────────┘           │
+                                          │
+                                          ▼
+                                    ┌──────────┐
+                                    │ MODE     │
+                                    │ LIBRE    │
+                                    └──────────┘
+```
+
+### 10.2 Comportement par Mode
+
+| Mode | Contexte RAG disponible | Comportement IA | Affichage Admin |
+|------|------------------------|-----------------|-----------------|
+| **Strict Pur** | Oui | Répond avec les sources | Normal |
+| **Strict Pur** | Non | Refuse, propose support | Normal |
+| **Strict Assisté** | Oui | Répond avec les sources | Badge "Documenté" |
+| **Strict Assisté** | Non | Propose une réponse générale | Badge "Suggestion IA" ⚠️ |
+| **Libre** | Oui/Non | Répond librement | Normal |
+
+## 11. Modifications Techniques
+
+### 11.1 Modification du PromptBuilder
+
+**Fichier :** `app/Services/AI/PromptBuilder.php`
+
+Modifier la méthode `buildChatMessages()` pour passer les flags nécessaires :
+
+```php
+public function buildChatMessages(
+    Agent $agent,
+    string $userMessage,
+    array $ragResults = [],
+    ?AiSession $session = null,
+    array $learnedResponses = []
+): array {
+    // ...existing code...
+
+    // Déterminer le mode de réponse
+    $hasContext = !empty($ragResults) || !empty($learnedResponses);
+    $isStrictAssisted = $agent->strict_mode && $agent->human_support_enabled;
+
+    // Ajouter les garde-fous adaptés au contexte
+    if ($agent->strict_mode) {
+        if ($isStrictAssisted) {
+            // Mode Strict Assisté : permettre les suggestions
+            $systemContent .= $this->getStrictAssistedGuardrails($hasContext);
+        } else {
+            // Mode Strict Pur : comportement actuel
+            $systemContent .= $agent->getStrictModeGuardrails();
+        }
+    }
+
+    // ...rest of existing code...
+}
+```
+
+### 11.2 Nouvelles Instructions "Strict Assisté"
+
+**Fichier :** `app/Services/AI/PromptBuilder.php`
+
+```php
+/**
+ * Retourne les garde-fous pour le mode Strict Assisté.
+ * Ce mode permet des suggestions quand il n'y a pas de contexte documentaire,
+ * car un humain validera la réponse avant qu'elle n'atteigne le client.
+ */
+private function getStrictAssistedGuardrails(bool $hasContext): string
+{
+    if ($hasContext) {
+        // Avec contexte : comportement strict normal + marqueur
+        return <<<'GUARDRAILS'
+
+## CONTRAINTES DE RÉPONSE (Mode Strict avec Validation Humaine)
+
+- Réponds en priorité avec les informations présentes dans le contexte fourni
+- NE CITE PAS les sources dans ta réponse (pas de "Source:", "Document:", etc.)
+- IGNORE les sources qui ne parlent pas du sujet demandé
+- Si plusieurs sources se contredisent, signale cette incohérence
+
+Ta réponse sera validée par un agent avant d'être transmise au client.
+Ajoute le marqueur `[DOCUMENTED]` à la fin de ta réponse.
+
+GUARDRAILS;
+    }
+
+    // Sans contexte : permettre une suggestion
+    return <<<'GUARDRAILS'
+
+## MODE SUGGESTION (Contexte Documentaire Insuffisant)
+
+⚠️ **IMPORTANT** : Aucune information pertinente n'a été trouvée dans la base de connaissances pour cette question.
+
+Cependant, ta réponse sera **validée par un agent humain** avant d'être transmise au client.
+Tu peux donc proposer une réponse basée sur tes connaissances générales.
+
+### Instructions :
+1. Propose une réponse utile basée sur tes connaissances générales du domaine
+2. Sois honnête sur le fait que tu n'as pas de source spécifique
+3. Formule ta réponse de manière à aider l'agent humain à la compléter/corriger
+4. Ajoute le marqueur `[SUGGESTION]` à la fin de ta réponse
+
+### Format de réponse :
+- Commence par une réponse utile (même générale)
+- Si tu identifies des points qui nécessitent vérification, mentionne-les
+- L'agent humain pourra corriger, compléter ou remplacer ta suggestion
+
+**RAPPEL** : Cette réponse NE SERA PAS envoyée directement au client.
+Elle servira de base de travail pour l'agent de support.
+
+GUARDRAILS;
+}
+```
+
+### 11.3 Parsing des Marqueurs
+
+**Fichier :** `app/Services/AI/ResponseParser.php` (nouveau ou existant)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\AI;
+
+class ResponseParser
+{
+    /**
+     * Analyse une réponse IA pour détecter son type.
+     *
+     * @return array{
+     *   type: 'documented'|'suggestion'|'unknown',
+     *   content: string,
+     *   requires_review: bool
+     * }
+     */
+    public function parseResponseType(string $content): array
+    {
+        $type = 'unknown';
+        $requiresReview = false;
+
+        // Détecter le marqueur [DOCUMENTED]
+        if (preg_match('/\[DOCUMENTED\]\s*$/i', $content)) {
+            $type = 'documented';
+            $content = preg_replace('/\s*\[DOCUMENTED\]\s*$/i', '', $content);
+        }
+        // Détecter le marqueur [SUGGESTION]
+        elseif (preg_match('/\[SUGGESTION\]\s*$/i', $content)) {
+            $type = 'suggestion';
+            $requiresReview = true;
+            $content = preg_replace('/\s*\[SUGGESTION\]\s*$/i', '', $content);
+        }
+
+        return [
+            'type' => $type,
+            'content' => trim($content),
+            'requires_review' => $requiresReview,
+        ];
+    }
+}
+```
+
+### 11.4 Stockage dans AiMessage
+
+Modifier le `ProcessAiMessageJob` pour stocker le type de réponse :
+
+```php
+// Après génération de la réponse
+$parser = app(ResponseParser::class);
+$parsed = $parser->parseResponseType($response);
+
+// Stocker dans rag_context
+$ragContext['response_type'] = $parsed['type'];
+$ragContext['is_suggestion'] = $parsed['type'] === 'suggestion';
+
+$message->update([
+    'content' => $parsed['content'],
+    'rag_context' => $ragContext,
+]);
+```
+
+### 11.5 Affichage dans le Back-Office
+
+**Fichier :** `view-ai-session.blade.php`
+
+Ajouter un badge visuel pour distinguer les types de réponses :
+
+```blade
+{{-- Header IA avec type de réponse --}}
+<div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+    <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
+    <span class="text-xs text-gray-500">{{ $message['sender_name'] }}</span>
+
+    {{-- Type de réponse --}}
+    @php
+        $responseType = $message['rag_context']['response_type'] ?? 'unknown';
+        $isSuggestion = $message['rag_context']['is_suggestion'] ?? false;
+    @endphp
+
+    @if($isSuggestion)
+        <x-filament::badge color="warning" size="sm" icon="heroicon-o-light-bulb">
+            Suggestion IA
+        </x-filament::badge>
+        <span class="text-xs text-warning-600 dark:text-warning-400">
+            (sans documentation)
+        </span>
+    @elseif($responseType === 'documented')
+        <x-filament::badge color="info" size="sm" icon="heroicon-o-document-check">
+            Documenté
+        </x-filament::badge>
+    @endif
+
+    {{-- Status de validation existant --}}
+    @if($message['validation_status'] === 'pending')
+        <x-filament::badge color="warning" size="sm">En attente</x-filament::badge>
+    @elseif($message['validation_status'] === 'validated')
+        <x-filament::badge color="success" size="sm">Validée</x-filament::badge>
+    {{-- ...etc --}}
+    @endif
+</div>
+
+{{-- Bannière d'avertissement pour les suggestions --}}
+@if($isSuggestion)
+    <div class="mb-3 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded-lg">
+        <div class="flex items-start gap-2">
+            <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
+            <div class="text-xs text-warning-700 dark:text-warning-300">
+                <strong>Attention :</strong> Cette réponse est une suggestion basée sur les connaissances générales de l'IA.
+                Aucune source documentaire ou cas similaire n'a été trouvé.
+                <strong>Vérifiez et corrigez si nécessaire avant validation.</strong>
+            </div>
+        </div>
+    </div>
+@endif
+```
+
+## 12. Configuration Agent
+
+### 12.1 Nouvelle Option
+
+Pas besoin de nouvelle colonne ! Le comportement est automatique :
+- `strict_mode = true` + `human_support_enabled = true` → Mode Strict Assisté
+- `strict_mode = true` + `human_support_enabled = false` → Mode Strict Pur
+
+Optionnellement, ajouter un toggle pour désactiver les suggestions :
+
+```php
+// Migration optionnelle
+Schema::table('agents', function (Blueprint $table) {
+    $table->boolean('allow_suggestions_without_context')->default(true);
+});
+```
+
+### 12.2 Interface Filament
+
+Dans le formulaire Agent, ajouter une explication :
+
+```php
+Forms\Components\Toggle::make('strict_mode')
+    ->label('Mode strict')
+    ->helperText(fn ($get) => $get('human_support_enabled')
+        ? 'En mode strict avec support humain : l\'IA proposera des suggestions même sans documentation (visibles uniquement par les agents).'
+        : 'En mode strict sans support humain : l\'IA refusera de répondre sans documentation.'
+    ),
+```
+
+## 13. Flux Complet
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Question utilisateur : "Comment configurer le module XYZ ?" │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. Recherche RAG : Aucun résultat pertinent (score < seuil)    │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. Mode Strict Assisté détecté (strict + handoff)              │
+│    → Prompt avec instructions "MODE SUGGESTION"                 │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. Réponse IA :                                                 │
+│    "Le module XYZ se configure généralement via le menu        │
+│     Paramètres > Modules. Vous devriez trouver les options     │
+│     de configuration dans l'onglet 'Avancé'.                   │
+│                                                                 │
+│     Note: Je n'ai pas de documentation spécifique pour votre   │
+│     version. Un conseiller pourra confirmer ces étapes.        │
+│                                                                 │
+│     [SUGGESTION]"                                               │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. Parsing : type='suggestion', contenu nettoyé                │
+│    → Stockage dans rag_context                                  │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. Affichage Back-Office :                                      │
+│    ┌──────────────────────────────────────────────────────┐    │
+│    │ 🤖 Assistant IA    [⚠️ Suggestion IA] [En attente]  │    │
+│    ├──────────────────────────────────────────────────────┤    │
+│    │ ⚠️ Attention : Cette réponse est une suggestion...   │    │
+│    ├──────────────────────────────────────────────────────┤    │
+│    │ Le module XYZ se configure généralement via le menu │    │
+│    │ Paramètres > Modules...                              │    │
+│    ├──────────────────────────────────────────────────────┤    │
+│    │ [✓ Valider] [✏️ Corriger] [✗ Rejeter]              │    │
+│    └──────────────────────────────────────────────────────┘    │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 7. Agent corrige et valide → Réponse envoyée au client         │
+│    + Indexation pour apprentissage futur                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 14. Avantages de cette Approche
+
+| Aspect | Avant | Après |
+|--------|-------|-------|
+| **Agent sans contexte** | Doit rédiger de zéro | A une base de travail |
+| **Temps de réponse** | Long (rédaction manuelle) | Réduit (correction/validation) |
+| **Cohérence LLM** | Varie selon le provider | Comportement unifié |
+| **Qualité finale** | Dépend de l'agent | IA + validation humaine |
+| **Apprentissage** | Limité aux cas documentés | S'enrichit des corrections |
+
+## 15. Risques et Mitigations
 
 | Risque | Impact | Mitigation |
 |--------|--------|------------|
-| L'IA ne respecte pas le format | Haut | Fallback sur mode simple, prompt robuste avec exemples |
+| Agent valide sans vérifier | Haut | Bannière d'avertissement très visible, logs d'audit |
+| Suggestion erronée indexée | Haut | Flag `is_suggestion` dans l'indexation, possibilité de filtrer |
+| Confusion client | Moyen | La réponse ne passe JAMAIS sans validation en mode handoff |
+| Surcharge cognitive agent | Faible | Badge clair, UI intuitive |
+
+## 16. Métriques de Succès
+
+- **Taux de correction** des suggestions vs réponses documentées
+- **Temps moyen de traitement** par l'agent (devrait diminuer)
+- **Satisfaction agent** (feedback qualitatif)
+- **Taux de réponse** (moins de "Je ne sais pas" côté client)
+
+---
+
+## 17. Risques et Mitigations (Global)
+
+| Risque | Impact | Mitigation |
+|--------|--------|------------|
+| L'IA ne respecte pas le format multi-questions | Haut | Fallback sur mode simple, prompt robuste avec exemples |
 | Performance (parsing sur chaque message) | Moyen | Parser léger, cache si nécessaire |
 | Confusion utilisateur | Moyen | Option désactivée par défaut, documentation claire |
 | Blocs partiellement validés | Faible | Tracking du statut par bloc, interface claire |
+| Agent valide suggestion sans vérifier | Haut | Bannière d'avertissement, logs d'audit |
 
-## 10. Métriques de Succès
+## 18. Métriques de Succès (Global)
 
 - Taux de détection correct des multi-questions (>90% visé)
 - Augmentation du nombre de paires Q/R indexées
 - Amélioration du score de similarité moyen sur les recherches
-- Réduction du temps de validation admin (moins de corrections manuelles)
+- Réduction du temps de validation admin
+- Taux de correction des suggestions vs réponses documentées
 
 ---
 
 **Auteur :** Claude
 **Date :** 2025-01-03
-**Version :** 1.0
+**Version :** 1.1
 **Statut :** Proposition
+
+**Changelog :**
+- v1.1 : Ajout de la Partie 2 - Mode Strict Assisté avec Handoff Humain
