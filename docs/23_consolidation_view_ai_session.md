@@ -1,356 +1,447 @@
-# Document de Travail : Consolidation UI ViewAiSession
+# Document de Travail : Refonte UX Bloc Suggestion IA
 
 ## Date : 2026-01-03
 ## Statut : EN COURS
 
 ---
 
-## 1. Contexte du Problème
+## 1. Problème Identifié
 
-### Symptômes Observés
-Le développement précédent a créé **deux zones UI distinctes** dans la page ViewAiSession qui se chevauchent fonctionnellement :
-
-1. **Zone Haute (Messages IA inline)** - Lignes ~232-631
-   - Boutons par message IA : Valider, Corriger, Rejeter
-   - Badges : En attente, Validée, Apprise, Rejetée
-   - Badges de type : Suggestion IA, Documenté, Multi-questions
-   - Formulaires inline pour validation/correction
-   - Blocs multi-questions avec validation individuelle
-   - Modal contexte RAG
-
-2. **Zone Basse (Zone de réponse Support)** - Lignes ~1359-1493
-   - Zone de réponse pour agent support
-   - Suggestion IA (via RAG)
-   - Mode Apprentissage Accéléré (zone verrouillée/déverrouillée)
-   - Boutons : Envoyer, Suggérer, Envoyer et Apprendre
-   - Passer (cas exceptionnel)
-
-### Problèmes Identifiés
-
-| Zone | Manque | Présent |
-|------|--------|---------|
-| **Zone Haute** | Retours à la ligne dans le contenu, boutons contextuels selon mode | Badges, validation par bloc multi-questions, modal RAG |
-| **Zone Basse** | Badges de type réponse, blocs multi-questions, boutons Corriger/Refuser | Zone de saisie libre, mode accéléré verrouillé |
-
-### Impact Utilisateur
-- Confusion sur quelle zone utiliser
-- Duplication des actions de validation
-- Flux de travail non intuitif
-- Impossibilité de valider toutes les Q/R en un seul clic
-
----
-
-## 2. Fonctionnalités Existantes à Préserver
-
-### 2.1 Validation des Messages IA
-
-#### Boutons d'Action (Zone Haute actuelle)
-```blade
-@if($message['is_pending_validation'])
-    - Valider : Ouvre formulaire avec question modifiable
-    - Corriger : Ouvre formulaire avec question ET réponse modifiables
-    - Rejeter : Simple rejet (mode normal) ou "Refuser et Rédiger" (mode accéléré)
-```
-
-#### Formulaire de Validation
-- Champ question (pré-rempli avec question client)
-- Checkbox "Nécessite toujours un suivi humain" (requires_handoff)
-- Boutons Enregistrer / Annuler
-
-#### Formulaire de Correction
-- Champ question (pré-rempli)
-- Champ réponse (pré-rempli avec réponse IA)
-- Checkbox requires_handoff
-- Boutons Enregistrer / Annuler
-
-### 2.2 Multi-Questions (Blocs Q/R)
-
-Quand `$isMultiQuestion` est vrai :
-- Affichage de N blocs individuels
-- Chaque bloc a :
-  - Numéro de question
-  - Badge de type (Suggestion/Documenté)
-  - Aperçu Q/R limité
-  - Bouton "Valider" par bloc
-  - Bannière d'avertissement si suggestion
-  - Formulaire d'édition Q/R + handoff
-- Compteur "X/Y validés"
-
-### 2.3 Mode Apprentissage Accéléré
-
-Quand `$this->isAcceleratedLearningMode()` est vrai :
-
-**Zone verrouillée** (`!$this->canRespondFreely`) :
-- Message explicatif des 3 options
-- Instructions : Valider / Corriger / Rejeter depuis la réponse IA
-- Bouton "Passer (cas exceptionnel)" si autorisé
-
-**Zone déverrouillée** (`$this->canRespondFreely`) :
-- Zone de saisie libre
-- Info "Votre réponse sera indexée"
-- Bouton "Envoyer et Apprendre"
-
-### 2.4 Suggestion IA (RAG)
-
-- Affichage de la suggestion proposée
-- Boutons "Utiliser" / "Ignorer"
-- Rendu markdown de la suggestion
-
-### 2.5 Badges et Indicateurs
-
-#### Badges de statut validation
-- `pending` : Warning "En attente"
-- `validated` : Success "Validée"
-- `learned` : Primary "Apprise"
-- `rejected` : Danger "Rejetée"
-
-#### Badges de type réponse
-- `is_suggestion` : Warning "Suggestion IA" + icône ampoule
-- `documented` : Info "Documenté" + icône document
-- `isMultiQuestion` : Gray "X questions" + icône queue
-
-### 2.6 Modal Contexte RAG
-
-- Stats de génération
-- Détection de catégorie
-- System prompt envoyé
-- Historique conversation
-- Sources apprises
-- Documents RAG
-- Évaluation Handoff
-- Rapport complet (copiable)
-
-### 2.7 Bouton "Utiliser comme modèle"
-
-Visible si session escaladée :
-- Copie le contenu IA (nettoyé de HANDOFF_NEEDED) dans le champ de réponse
-
----
-
-## 3. Exigences UX (Demandées par l'Utilisateur)
-
-### 3.1 Bouton "Valider" Unique
-> "Un seul bouton 'Valider' pour toutes les questions/réponses qui seront envoyées en un bloc au client"
-
-**Comportement attendu :**
-- En mode multi-questions : valider TOUTES les Q/R d'un coup
-- Envoi groupé au client (pas de validation bloc par bloc obligatoire)
-- Possibilité de modifier chaque question avant validation globale
-
-### 3.2 Modification Universelle des Questions
-> "Le bouton 'Valider' permet de modifier la question"
-
-Déjà implémenté dans le formulaire de validation.
-
-### 3.3 "Corriger" = Q + R Modifiables
-> "Le bouton 'Corriger' permet de modifier la question ET la réponse"
-
-Déjà implémenté dans le formulaire de correction.
-
-### 3.4 "Refuser" = Q + R Modifiables
-> "Le bouton 'Refuser et Rédiger' permet de modifier la question ET la réponse"
-
-**À implémenter :**
-- En mode accéléré : après rejet, ouvrir un formulaire Q/R
-- La réponse écrite sera indexée avec la question (éventuellement modifiée)
-
----
-
-## 4. Proposition de Consolidation
-
-### 4.1 Architecture Proposée
+### Description
+Dans un message IA multi-questions, les données sont affichées **2 FOIS** sous 2 formats différents :
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Zone Messages Unifiée                    │
-│  (Client → IA → Support → Client → IA → ...)                │
+│ Message IA                                                  │
 ├─────────────────────────────────────────────────────────────┤
-│  Message Client (bleu, droite)                              │
-├─────────────────────────────────────────────────────────────┤
-│  Message IA (gris, gauche)                                  │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ [Badges: Statut + Type + Multi-questions]               ││
-│  │ [Bannière avertissement si suggestion]                  ││
-│  │ [Contenu avec retours à la ligne préservés]             ││
-│  │ ─────────────────────────────────────────────────────── ││
-│  │ [Boutons: Valider Tout | Corriger | Refuser et Rédiger] ││
-│  │ (visibles si pending_validation)                        ││
-│  │ ─────────────────────────────────────────────────────── ││
-│  │ [Blocs Multi-Questions] (si multi)                      ││
-│  │   - Affichage groupé, édition inline possible           ││
-│  │   - Pas de validation bloc par bloc obligatoire         ││
-│  │ ─────────────────────────────────────────────────────── ││
-│  │ [Bouton contexte RAG]                                   ││
-│  └─────────────────────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────┤
-│  Zone Réponse Support (si escaladé et non résolu)           │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │ [Mode Accéléré Verrouillé] ou [Zone Libre]              ││
-│  │ [Suggestion IA si disponible]                           ││
-│  │ [Champ de saisie + Boutons]                             ││
-│  └─────────────────────────────────────────────────────────┘│
+│ [Badges: En attente, Suggestion IA, 3 questions]            │
+│ [Bannière avertissement suggestion]                         │
+│                                                             │
+│ ══════════════════════════════════════════════════════════  │
+│ ZONE 1 : CONTENU COMPLET (lignes 306-325)                   │
+│ ══════════════════════════════════════════════════════════  │
+│                                                             │
+│ **Question 1 : Comment faire X ?**                          │
+│ Réponse complète pour X...                                  │
+│                                                             │
+│ **Question 2 : Comment faire Y ?**                          │
+│ Réponse complète pour Y...                                  │
+│                                                             │
+│ **Question 3 : Comment faire Z ?**                          │
+│ Réponse complète pour Z...                                  │
+│                                                             │
+│ ──────────────────────────────────────────────────────────  │
+│ [Métadonnées: heure, modèle, tokens]                        │
+│ ──────────────────────────────────────────────────────────  │
+│ [Boutons: Valider | Corriger | Rejeter] (lignes 361-404)    │
+│ [Formulaires validation/correction] (lignes 406-496)        │
+│                                                             │
+│ ══════════════════════════════════════════════════════════  │
+│ ZONE 2 : BLOCS MULTI-QUESTIONS (lignes 499-631)             │
+│ ══════════════════════════════════════════════════════════  │
+│                                                             │
+│ Blocs Q/R individuels                          0/3 validés  │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 1    [Badge: Suggestion]           [Valider]   │ │
+│ │ Comment faire X ?                                       │ │
+│ │ ┌─────────────────────────────────────────────────────┐ │ │
+│ │ │ Réponse complète pour X... (tronquée)               │ │ │
+│ │ └─────────────────────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 2    [Badge: Documenté]            [Valider]   │ │
+│ │ Comment faire Y ?                                       │ │
+│ │ ┌─────────────────────────────────────────────────────┐ │ │
+│ │ │ Réponse complète pour Y... (tronquée)               │ │ │
+│ │ └─────────────────────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 3    [Badge: Suggestion]           [Valider]   │ │
+│ │ Comment faire Z ?                                       │ │
+│ │ ┌─────────────────────────────────────────────────────┐ │ │
+│ │ │ Réponse complète pour Z... (tronquée)               │ │ │
+│ │ └─────────────────────────────────────────────────────┘ │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ [Bouton contexte RAG]                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Changements Proposés
+### Problèmes UX
 
-#### A. Bouton "Valider Tout" pour Multi-Questions
+1. **Duplication des données** : Les Q/R sont visibles 2 fois
+2. **Confusion sur les boutons** : Faut-il utiliser les boutons globaux ou ceux par bloc ?
+3. **Incohérence** : Zone 1 montre le texte complet, Zone 2 le tronque
+4. **Surcharge visuelle** : Trop d'informations redondantes
 
-**Nouveau comportement :**
-1. Si multi-questions : afficher un bouton "Valider Tout" en plus des boutons par bloc
-2. Ce bouton ouvre un formulaire récapitulatif de TOUTES les Q/R
-3. Chaque Q/R est éditable dans ce formulaire
-4. Un seul clic final pour tout valider et envoyer
+---
 
-**Nouvelle méthode PHP à créer :**
+## 2. Code Source Actuel
+
+### Fichier : `view-ai-session.blade.php`
+
+```
+Lignes 306-325  : Contenu complet ($message['content'])
+Lignes 361-404  : Boutons globaux (Valider/Corriger/Rejeter)
+Lignes 406-496  : Formulaires globaux (validation/correction)
+Lignes 499-631  : Blocs multi-questions individuels
+```
+
+### Structure des Blocs Multi-Questions (rag_context)
+
 ```php
-public function validateAllMultiQuestionBlocks(int $messageId, array $blocks): void
-{
-    // $blocks = [
-    //   ['id' => 1, 'question' => '...', 'answer' => '...', 'requires_handoff' => false],
-    //   ['id' => 2, 'question' => '...', 'answer' => '...', 'requires_handoff' => false],
-    // ]
-    // - Indexer chaque Q/R
-    // - Broadcaster la validation au client
-    // - Envoyer email si user_email
+$message['rag_context']['multi_question'] = [
+    'is_multi' => true,
+    'block_count' => 3,
+    'blocks' => [
+        [
+            'id' => 1,
+            'question' => 'Comment faire X ?',
+            'answer' => 'Réponse complète pour X...',
+            'type' => 'suggestion', // ou 'documented'
+            'is_suggestion' => true,
+            'learned' => false,
+            'learned_at' => null,
+            'learned_by' => null,
+        ],
+        // ...
+    ]
+];
+```
+
+---
+
+## 3. Proposition de Refonte UX
+
+### Option A : Blocs Uniquement (Recommandée)
+
+**Principe** : Pour les messages multi-questions, NE PAS afficher le contenu complet. Afficher UNIQUEMENT les blocs individuels avec une UX améliorée.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Message IA                                                  │
+├─────────────────────────────────────────────────────────────┤
+│ [Badges: En attente, 3 questions]                           │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 1/3    [Suggestion]                            │ │
+│ │ ───────────────────────────────────────────────────────│ │
+│ │ Q: Comment faire X ?                          [Éditer]  │ │
+│ │ ───────────────────────────────────────────────────────│ │
+│ │ R: Réponse complète pour X avec tous les détails...    │ │
+│ │    (expandable si longue)                     [Éditer]  │ │
+│ │ ───────────────────────────────────────────────────────│ │
+│ │ [ ] Nécessite suivi humain                              │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 2/3    [Documenté] ✓ Validée                   │ │
+│ │ ... (collapsed car validé)                              │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ Question 3/3    [Suggestion]                            │ │
+│ │ ...                                                     │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ ──────────────────────────────────────────────────────────  │
+│ [Valider Tout (2 restantes)] [Rejeter Tout]  [Contexte RAG] │
+│ ──────────────────────────────────────────────────────────  │
+│ 12:34 • gemini-2.0-flash • 1234 tokens                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Avantages** :
+- Pas de duplication
+- Chaque Q/R est éditable individuellement
+- Vision claire du statut par bloc
+- Boutons globaux pour actions en masse
+
+### Option B : Contenu Complet Seulement
+
+**Principe** : NE PAS afficher les blocs. Garder le contenu complet avec un seul bouton "Valider Tout".
+
+**Inconvénient** : Perd la granularité (badge par bloc, validation individuelle)
+
+### Option C : Mode Accordéon
+
+**Principe** : Contenu complet collapsed par défaut, blocs expanded. Ou l'inverse.
+
+---
+
+## 4. Spécifications Détaillées (Option A)
+
+### 4.1 Condition d'Affichage
+
+```blade
+@if($isMultiQuestion && !empty($message['rag_context']['multi_question']['blocks']))
+    {{-- Afficher UNIQUEMENT les blocs --}}
+    @include('partials.multi-question-blocks')
+@else
+    {{-- Afficher le contenu simple --}}
+    {!! \Illuminate\Support\Str::markdown($message['content']) !!}
+@endif
+```
+
+### 4.2 Structure d'un Bloc Q/R
+
+```blade
+<div class="border rounded-lg p-4 mb-3" x-data="{
+    expanded: true,
+    editing: false,
+    question: @js($block['question']),
+    answer: @js($block['answer']),
+    requiresHandoff: false,
+    validated: @js($block['learned'] ?? false)
+}">
+    {{-- Header --}}
+    <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+            <span class="font-medium">Question {{ $block['id'] }}/{{ $blockCount }}</span>
+            @if($block['is_suggestion'])
+                <x-filament::badge color="warning" size="xs">Suggestion</x-filament::badge>
+            @else
+                <x-filament::badge color="info" size="xs">Documenté</x-filament::badge>
+            @endif
+        </div>
+        <div x-show="validated">
+            <x-filament::badge color="success" size="xs">Validée</x-filament::badge>
+        </div>
+    </div>
+
+    {{-- Question --}}
+    <div class="mb-3">
+        <label class="text-xs text-gray-500 mb-1">Question</label>
+        <div x-show="!editing" class="p-2 bg-gray-50 rounded">
+            <span x-text="question"></span>
+            <button x-on:click="editing = true" class="ml-2 text-primary-500">
+                <x-heroicon-o-pencil class="w-3 h-3" />
+            </button>
+        </div>
+        <textarea x-show="editing" x-model="question" rows="2"
+                  class="w-full rounded border-gray-300 text-sm"></textarea>
+    </div>
+
+    {{-- Réponse --}}
+    <div class="mb-3">
+        <label class="text-xs text-gray-500 mb-1">Réponse</label>
+        <div x-show="!editing" class="p-2 bg-gray-50 rounded prose prose-sm max-w-none">
+            <div x-html="marked.parse(answer)"></div>
+            <button x-on:click="editing = true" class="ml-2 text-primary-500">
+                <x-heroicon-o-pencil class="w-3 h-3" />
+            </button>
+        </div>
+        <textarea x-show="editing" x-model="answer" rows="4"
+                  class="w-full rounded border-gray-300 text-sm"></textarea>
+    </div>
+
+    {{-- Options --}}
+    <div class="flex items-center gap-4 mb-3" x-show="!validated">
+        <label class="flex items-center gap-2 text-xs">
+            <input type="checkbox" x-model="requiresHandoff" class="rounded" />
+            Nécessite suivi humain
+        </label>
+    </div>
+
+    {{-- Actions --}}
+    <div class="flex gap-2" x-show="!validated">
+        <x-filament::button size="xs" color="success"
+            x-on:click="$wire.learnMultiQuestionBlock({{ $message['original_id'] }}, {{ $block['id'] }}, question, answer, requiresHandoff); validated = true; editing = false">
+            Valider ce bloc
+        </x-filament::button>
+        <x-filament::button size="xs" color="gray" x-show="editing"
+            x-on:click="editing = false; question = @js($block['question']); answer = @js($block['answer'])">
+            Annuler
+        </x-filament::button>
+    </div>
+</div>
+```
+
+### 4.3 Boutons Globaux
+
+```blade
+<div class="flex items-center justify-between pt-4 border-t mt-4">
+    <div class="flex gap-2">
+        {{-- Valider Tout --}}
+        @php $pendingCount = collect($blocks)->where('learned', false)->count(); @endphp
+        @if($pendingCount > 0)
+            <x-filament::button size="sm" color="success" icon="heroicon-o-check"
+                x-on:click="validateAll()">
+                Valider Tout ({{ $pendingCount }})
+            </x-filament::button>
+
+            <x-filament::button size="sm" color="danger" icon="heroicon-o-x-mark"
+                wire:click="rejectMessage({{ $message['original_id'] }})">
+                Rejeter Tout
+            </x-filament::button>
+        @endif
+    </div>
+
+    {{-- Contexte RAG --}}
+    <button @click="openContext = true" class="text-xs text-gray-500">
+        Voir le contexte ({{ $totalSources }})
+    </button>
+</div>
+
+{{-- Métadonnées --}}
+<div class="text-xs text-gray-400 mt-2">
+    {{ $message['created_at']->format('H:i') }} •
+    {{ $message['model_used'] }} •
+    {{ $message['tokens'] }} tokens
+</div>
+```
+
+### 4.4 Fonction "Valider Tout"
+
+```javascript
+function validateAll() {
+    // Collecter toutes les Q/R non validées avec leurs valeurs éditées
+    const blocks = [];
+    document.querySelectorAll('[data-block-id]').forEach(el => {
+        if (!el.dataset.validated) {
+            blocks.push({
+                id: parseInt(el.dataset.blockId),
+                question: el.querySelector('[x-model="question"]').value,
+                answer: el.querySelector('[x-model="answer"]').value,
+                requiresHandoff: el.querySelector('[x-model="requiresHandoff"]').checked
+            });
+        }
+    });
+
+    // Appeler la méthode Livewire
+    $wire.validateAllMultiQuestionBlocks(messageId, blocks);
 }
 ```
 
-#### B. "Refuser et Rédiger" avec Formulaire Q/R
+---
 
-**Nouveau comportement :**
-1. Clic sur "Refuser et Rédiger"
-2. Au lieu de déverrouiller la zone basse, ouvrir un formulaire inline
-3. Question pré-remplie (modifiable)
-4. Réponse vide (à rédiger)
-5. Checkbox requires_handoff
-6. Bouton "Envoyer et Apprendre"
+## 5. Backend : Nouvelles Méthodes
 
-**Avantage :** Cohérence avec les autres formulaires, pas de zone basse séparée.
+### ViewAiSession.php
 
-#### C. Unification Mode Accéléré
+```php
+/**
+ * Valide tous les blocs d'un message multi-questions en une fois.
+ */
+public function validateAllMultiQuestionBlocks(int $messageId, array $blocks): void
+{
+    $message = AiMessage::findOrFail($messageId);
 
-**Supprimer la zone verrouillée en bas.**
+    if ($message->session_id !== $this->record->id) {
+        return;
+    }
 
-À la place :
-- Si mode accéléré ET message IA pending :
-  - Afficher les 3 boutons : Valider / Corriger / Refuser et Rédiger
-  - Chaque bouton ouvre son formulaire inline
-- Si mode accéléré ET aucun message pending :
-  - Autoriser la saisie libre en bas (pour les questions suivantes)
+    try {
+        foreach ($blocks as $blockData) {
+            // Indexer chaque Q/R
+            app(LearningService::class)->indexLearnedResponse(
+                question: trim($blockData['question']),
+                answer: trim($blockData['answer']),
+                agentId: $this->record->agent_id,
+                agentSlug: $this->record->agent->slug,
+                messageId: $messageId,
+                validatorId: auth()->id(),
+                requiresHandoff: $blockData['requiresHandoff'] ?? false
+            );
 
-#### D. Préservation des Retours à la Ligne
+            // Marquer le bloc comme appris
+            $this->updateBlockLearnedStatus($message, $blockData['id']);
+        }
 
-Vérifier que le contenu IA est rendu avec `{!! nl2br(e($content)) !!}` ou mieux via markdown qui gère les retours à la ligne.
+        // Marquer le message global comme validé
+        $message->update([
+            'validation_status' => 'learned',
+            'validated_by' => auth()->id(),
+            'validated_at' => now(),
+        ]);
 
-**Actuel :**
-```blade
-{!! \Illuminate\Support\Str::markdown($message['content']) !!}
+        // Broadcaster au client
+        if ($this->record->isEscalated()) {
+            broadcast(new AiMessageValidated($message));
+        }
+
+        // Email si nécessaire
+        if ($this->record->user_email) {
+            app(SupportService::class)->sendValidatedAiMessageByEmail(
+                $this->record,
+                $message,
+                auth()->user()
+            );
+        }
+
+        Notification::make()
+            ->title('Toutes les réponses validées')
+            ->body(count($blocks) . ' Q/R indexées avec succès.')
+            ->success()
+            ->send();
+
+    } catch (\Throwable $e) {
+        Notification::make()
+            ->title('Erreur')
+            ->body($e->getMessage())
+            ->danger()
+            ->send();
+    }
+}
 ```
 
-Le markdown préserve déjà les retours à la ligne si double-saut ou `<br>`. Vérifier le format du contenu stocké.
-
 ---
 
-## 5. Plan d'Implémentation
+## 6. Plan d'Implémentation
 
-### Phase 1 : Backend (ViewAiSession.php)
+### Phase 1 : Backend
+- [ ] Créer `validateAllMultiQuestionBlocks()` dans ViewAiSession.php
+- [ ] Tester avec des données mock
 
-- [ ] **5.1** Créer méthode `validateAllMultiQuestionBlocks(int $messageId, array $blocks)`
-- [ ] **5.2** Modifier `rejectAndUnlock()` pour accepter un formulaire Q/R inline
-- [ ] **5.3** Créer méthode `rejectAndLearnWithEdit(int $messageId, string $question, string $answer, bool $requiresHandoff)`
-
-### Phase 2 : Frontend (Blade)
-
-- [ ] **5.4** Ajouter bouton "Valider Tout" pour multi-questions
-- [ ] **5.5** Créer formulaire récapitulatif multi-questions (Alpine.js)
-- [ ] **5.6** Modifier "Refuser et Rédiger" pour ouvrir formulaire inline (pas zone basse)
-- [ ] **5.7** Simplifier/supprimer la zone verrouillée du mode accéléré
-- [ ] **5.8** Vérifier rendu retours à la ligne dans contenu IA
+### Phase 2 : Frontend - Refonte Bloc IA
+- [ ] Créer condition : si multi-question → afficher blocs seulement
+- [ ] Implémenter le nouveau design de bloc Q/R
+- [ ] Ajouter édition inline (question + réponse)
+- [ ] Ajouter boutons globaux (Valider Tout, Rejeter Tout)
 
 ### Phase 3 : Nettoyage
+- [ ] Supprimer l'ancien affichage du contenu complet pour multi-questions
+- [ ] Supprimer les anciens boutons globaux pour multi-questions
+- [ ] Garder le code pour messages simples (non multi-questions)
 
-- [ ] **5.9** Supprimer code dupliqué de la zone basse (si remplacé par inline)
-- [ ] **5.10** Tester tous les modes : Simple, Multi-Q, Accéléré, Support
-- [ ] **5.11** Vérifier régressions sur boutons existants
-
----
-
-## 6. Tests à Effectuer
-
-### 6.1 Mode Simple (1 question)
-- [ ] Valider avec question modifiée
-- [ ] Corriger avec Q/R modifiées
-- [ ] Rejeter simple
-- [ ] Refuser et Rédiger (mode accéléré)
-
-### 6.2 Mode Multi-Questions
-- [ ] Valider bloc par bloc (conserver pour flexibilité)
-- [ ] Valider Tout en un clic
-- [ ] Modifier Q/R dans le récapitulatif
-- [ ] Vérifier envoi groupé au client
-
-### 6.3 Mode Apprentissage Accéléré
-- [ ] Zone verrouillée → actions depuis message IA
-- [ ] Refuser et Rédiger → formulaire inline
-- [ ] Passer (si autorisé) → zone libre en bas
-
-### 6.4 Support Humain
-- [ ] Zone de réponse fonctionnelle
-- [ ] Suggestion IA
-- [ ] Envoyer message
-- [ ] Session résolue = zone masquée
+### Phase 4 : Tests
+- [ ] Tester message simple (1 Q/R)
+- [ ] Tester message multi-questions (2-5 Q/R)
+- [ ] Tester édition Q/R
+- [ ] Tester Valider Tout
+- [ ] Tester Rejeter Tout
+- [ ] Tester mode Apprentissage Accéléré
 
 ---
 
-## 7. Fichiers Impactés
+## 7. Fichiers à Modifier
 
-| Fichier | Modifications |
-|---------|---------------|
-| `app/Filament/Resources/AiSessionResource/Pages/ViewAiSession.php` | Nouvelles méthodes PHP |
-| `resources/views/filament/resources/ai-session-resource/pages/view-ai-session.blade.php` | Refonte UI |
-
----
-
-## 8. Risques et Mitigations
-
-| Risque | Impact | Mitigation |
-|--------|--------|------------|
-| Régression sur validation existante | Élevé | Tests exhaustifs avant merge |
-| Perte de la validation par bloc | Moyen | Conserver en plus du "Valider Tout" |
-| Confusion utilisateur sur nouveaux boutons | Moyen | Labels clairs + tooltips |
-| WebSocket ne broadcast pas correctement | Élevé | Tester avec client standalone |
+| Fichier | Action |
+|---------|--------|
+| `ViewAiSession.php` | Ajouter `validateAllMultiQuestionBlocks()` |
+| `view-ai-session.blade.php` | Refonte complète du bloc message IA |
 
 ---
 
-## 9. Questions Ouvertes
+## 8. Questions pour Validation
 
-1. **Validation par bloc obligatoire ?**
-   - Option A : Garder les deux (bloc + tout)
-   - Option B : Supprimer bloc, forcer tout
-
-2. **Zone basse : garder ou supprimer ?**
-   - Si tous les formulaires sont inline, la zone basse devient inutile
-   - Exception : mode libre après "Passer"
-
-3. **Envoi au client : immédiat ou différé ?**
-   - Actuellement : validation = envoi immédiat
-   - Alternative : valider tout, puis bouton "Envoyer au client"
+1. **Option A confirmée ?** (Blocs uniquement, pas de contenu complet pour multi-Q)
+2. **Édition inline ou formulaire popup ?**
+3. **Collapse automatique des blocs validés ?**
+4. **Garder la possibilité de valider bloc par bloc ?** (en plus de Valider Tout)
 
 ---
 
-## 10. Décisions Prises
+## 9. Suivi
 
-*(À remplir après discussion)*
-
-- [ ] Option validation par bloc : ___
-- [ ] Zone basse : ___
-- [ ] Envoi immédiat vs différé : ___
-
----
-
-## 11. Suivi des Modifications
-
-| Date | Auteur | Modification |
-|------|--------|--------------|
-| 2026-01-03 | Claude | Création du document |
+| Date | Action | Statut |
+|------|--------|--------|
+| 2026-01-03 | Création document | ✅ |
+| 2026-01-03 | Correction analyse (zones dans même bloc) | ✅ |
+| - | Validation utilisateur | En attente |
+| - | Implémentation Phase 1 | - |
+| - | Implémentation Phase 2 | - |
+| - | Tests | - |
