@@ -341,7 +341,7 @@
                                     }
                                 }
                             }">
-                                <div class="max-w-3xl">
+                                <div class="max-w-[75%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -413,79 +413,41 @@
                                         @else
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
-                                                    <div class="rounded-lg p-4 transition-all"
-                                                        :class="{
-                                                            'border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800': !block.rejected && !block.validated,
-                                                            'border-2 border-success-400 dark:border-success-600 bg-success-50 dark:bg-success-900/30': block.validated && !block.rejected,
-                                                            'border-2 border-danger-400 dark:border-danger-600 bg-danger-50 dark:bg-danger-900/30 opacity-60': block.rejected
+                                                    <div class="rounded-lg p-4 transition-all border-2"
+                                                        :style="{
+                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : '#e5e7eb'),
+                                                            backgroundColor: block.rejected ? '#fef2f2' : (block.validated ? '#f0fdf4' : 'transparent'),
+                                                            opacity: block.rejected ? 0.7 : 1
                                                         }">
-                                                        {{-- Header du bloc --}}
-                                                        <div class="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
-                                                            <div class="flex items-center gap-2 flex-wrap">
-                                                                {{-- Numéro de question (multi-questions) --}}
-                                                                <x-filament::badge color="primary" x-show="blocks.length > 1">
-                                                                    Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
-                                                                </x-filament::badge>
+                                                        {{-- Header du bloc (badges uniquement) --}}
+                                                        <div class="flex items-center gap-2 flex-wrap mb-4">
+                                                            {{-- Numéro de question (multi-questions) --}}
+                                                            <x-filament::badge color="primary" x-show="blocks.length > 1">
+                                                                Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
+                                                            </x-filament::badge>
 
-                                                                {{-- Badge type: Suggestion --}}
-                                                                <x-filament::badge color="warning" icon="heroicon-s-light-bulb" x-show="block.is_suggestion || block.type === 'suggestion'">
-                                                                    SUGGESTION IA
-                                                                </x-filament::badge>
+                                                            {{-- Badge type: Suggestion --}}
+                                                            <x-filament::badge color="warning" icon="heroicon-s-light-bulb" x-show="block.is_suggestion || block.type === 'suggestion'">
+                                                                SUGGESTION IA
+                                                            </x-filament::badge>
 
-                                                                {{-- Badge type: Documenté --}}
-                                                                <x-filament::badge color="info" icon="heroicon-s-document-check" x-show="!block.is_suggestion && block.type === 'documented'">
-                                                                    DOCUMENTÉ
-                                                                </x-filament::badge>
+                                                            {{-- Badge type: Documenté --}}
+                                                            <x-filament::badge color="info" icon="heroicon-s-document-check" x-show="!block.is_suggestion && block.type === 'documented'">
+                                                                DOCUMENTÉ
+                                                            </x-filament::badge>
 
-                                                                {{-- Badge état: Validé --}}
-                                                                <x-filament::badge color="success" icon="heroicon-s-check" x-show="block.validated && !block.rejected">
-                                                                    VALIDÉ
-                                                                </x-filament::badge>
+                                                            {{-- Badge état: Validé --}}
+                                                            <x-filament::badge color="success" icon="heroicon-s-check" x-show="block.validated && !block.rejected">
+                                                                VALIDÉ
+                                                            </x-filament::badge>
 
-                                                                {{-- Badge état: Rejeté --}}
-                                                                <x-filament::badge color="danger" icon="heroicon-s-x-mark" x-show="block.rejected">
-                                                                    REJETÉ
-                                                                </x-filament::badge>
-                                                            </div>
-
-                                                            {{-- Boutons Filament --}}
-                                                            <div class="flex items-center gap-2" x-show="!sent">
-                                                                {{-- Valider --}}
-                                                                <x-filament::button
-                                                                    color="success"
-                                                                    size="sm"
-                                                                    icon="heroicon-s-check"
-                                                                    x-show="!block.validated && !block.rejected"
-                                                                    x-on:click="block.validated = true"
-                                                                >
-                                                                    Valider
-                                                                </x-filament::button>
-
-                                                                {{-- Rejeter --}}
-                                                                <x-filament::button
-                                                                    color="danger"
-                                                                    size="sm"
-                                                                    icon="heroicon-s-x-mark"
-                                                                    x-show="!block.validated && !block.rejected"
-                                                                    x-on:click="block.rejected = true"
-                                                                >
-                                                                    Rejeter
-                                                                </x-filament::button>
-
-                                                                {{-- Annuler --}}
-                                                                <x-filament::button
-                                                                    color="gray"
-                                                                    size="sm"
-                                                                    icon="heroicon-o-arrow-uturn-left"
-                                                                    x-show="block.validated || block.rejected"
-                                                                    x-on:click="block.validated = false; block.rejected = false"
-                                                                >
-                                                                    Annuler
-                                                                </x-filament::button>
-                                                            </div>
+                                                            {{-- Badge état: Rejeté --}}
+                                                            <x-filament::badge color="danger" icon="heroicon-s-x-mark" x-show="block.rejected">
+                                                                REJETÉ
+                                                            </x-filament::badge>
                                                         </div>
 
-                                                        {{-- Avertissement suggestion - TOUJOURS VISIBLE si suggestion --}}
+                                                        {{-- Avertissement suggestion --}}
                                                         <div class="mb-3 transition-opacity"
                                                             x-show="block.is_suggestion || block.type === 'suggestion'"
                                                             :class="{'opacity-40': block.validated || block.rejected}">
@@ -533,8 +495,8 @@
                                                             ></textarea>
                                                         </div>
 
-                                                        {{-- Checkbox handoff - TOUJOURS VISIBLE, désactivée si verrouillé --}}
-                                                        <div class="transition-opacity"
+                                                        {{-- Checkbox handoff --}}
+                                                        <div class="mb-4 transition-opacity"
                                                             x-show="!sent"
                                                             :class="{'opacity-40 pointer-events-none': block.validated || block.rejected}">
                                                             <div class="flex items-center gap-3 p-2 rounded-lg bg-warning-50 dark:bg-warning-900 border border-warning-300 dark:border-warning-700">
@@ -550,6 +512,42 @@
                                                                     Nécessite toujours un suivi humain
                                                                 </label>
                                                             </div>
+                                                        </div>
+
+                                                        {{-- Boutons Valider/Rejeter/Annuler (en bas du bloc) --}}
+                                                        <div class="flex items-center gap-2 pt-3 border-t border-gray-200 dark:border-gray-700" x-show="!sent">
+                                                            {{-- Valider --}}
+                                                            <x-filament::button
+                                                                color="success"
+                                                                size="sm"
+                                                                icon="heroicon-s-check"
+                                                                x-show="!block.validated && !block.rejected"
+                                                                x-on:click="block.validated = true"
+                                                            >
+                                                                Valider
+                                                            </x-filament::button>
+
+                                                            {{-- Rejeter --}}
+                                                            <x-filament::button
+                                                                color="danger"
+                                                                size="sm"
+                                                                icon="heroicon-s-x-mark"
+                                                                x-show="!block.validated && !block.rejected"
+                                                                x-on:click="block.rejected = true"
+                                                            >
+                                                                Rejeter
+                                                            </x-filament::button>
+
+                                                            {{-- Annuler --}}
+                                                            <x-filament::button
+                                                                color="gray"
+                                                                size="sm"
+                                                                icon="heroicon-o-arrow-uturn-left"
+                                                                x-show="block.validated || block.rejected"
+                                                                x-on:click="block.validated = false; block.rejected = false"
+                                                            >
+                                                                Annuler
+                                                            </x-filament::button>
                                                         </div>
                                                     </div>
                                                 </template>
