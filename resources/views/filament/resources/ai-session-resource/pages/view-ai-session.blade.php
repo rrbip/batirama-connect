@@ -332,8 +332,8 @@
                                     }
                                 }
                             }">
-                                <div class="max-w-[75%]">
-                                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3 shadow-sm">
+                                <div class="w-full max-w-[95%]">
+                                    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
                                             <x-heroicon-o-cpu-chip class="w-4 h-4 text-gray-400" />
@@ -412,21 +412,22 @@
                                                         {{-- Header du bloc --}}
                                                         <div class="flex items-center justify-between gap-2 mb-3">
                                                             <div class="flex items-center gap-2 flex-wrap">
-                                                                <span class="text-xs font-medium text-gray-700 dark:text-gray-300" x-show="blocks.length > 1">
+                                                                {{-- Numéro de question (visible multi-questions) --}}
+                                                                <span class="inline-flex items-center px-2.5 py-1 text-xs font-bold rounded bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200" x-show="blocks.length > 1">
                                                                     Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
                                                                 </span>
 
-                                                                {{-- Badge type (Suggestion/Documenté) --}}
+                                                                {{-- Badge type (Suggestion/Documenté) - TRÈS VISIBLE --}}
                                                                 <template x-if="block.is_suggestion || block.type === 'suggestion'">
-                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-warning-100 text-warning-700 dark:bg-warning-900 dark:text-warning-300">
-                                                                        <x-heroicon-o-light-bulb class="w-3 h-3" />
-                                                                        Suggestion
+                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-bold rounded-lg bg-amber-500 text-white shadow-sm">
+                                                                        <x-heroicon-s-light-bulb class="w-4 h-4" />
+                                                                        SUGGESTION IA
                                                                     </span>
                                                                 </template>
                                                                 <template x-if="!block.is_suggestion && block.type === 'documented'">
-                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-info-100 text-info-700 dark:bg-info-900 dark:text-info-300">
-                                                                        <x-heroicon-o-document-check class="w-3 h-3" />
-                                                                        Documenté
+                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-bold rounded-lg bg-cyan-500 text-white shadow-sm">
+                                                                        <x-heroicon-s-document-check class="w-4 h-4" />
+                                                                        DOCUMENTÉ
                                                                     </span>
                                                                 </template>
 
@@ -447,28 +448,28 @@
                                                                 </template>
                                                             </div>
 
-                                                            {{-- Boutons Valider/Rejeter/Modifier --}}
+                                                            {{-- Boutons Valider/Rejeter/Modifier - COLORÉS --}}
                                                             <div class="flex items-center gap-2" x-show="!sent">
                                                                 <template x-if="!block.validated && !block.rejected">
-                                                                    <div class="flex gap-1">
+                                                                    <div class="flex gap-2">
                                                                         <button type="button"
                                                                             @click="block.validated = true; block.editing = false"
-                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-success-500 text-white hover:bg-success-600">
-                                                                            <x-heroicon-o-check class="w-3 h-3" />
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 shadow-md hover:shadow-lg transition-all">
+                                                                            <x-heroicon-s-check class="w-4 h-4" />
                                                                             Valider
                                                                         </button>
                                                                         @if($this->isAcceleratedLearningMode())
                                                                         <button type="button"
                                                                             @click="block.rejected = true; $wire.rejectBlock({{ $message['original_id'] }}, block.id, blocks.length)"
-                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-danger-500 text-white hover:bg-danger-600">
-                                                                            <x-heroicon-o-x-mark class="w-3 h-3" />
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg transition-all">
+                                                                            <x-heroicon-s-x-mark class="w-4 h-4" />
                                                                             Refuser
                                                                         </button>
                                                                         @else
                                                                         <button type="button"
                                                                             @click="block.rejected = true"
-                                                                            class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-danger-500 text-white hover:bg-danger-600">
-                                                                            <x-heroicon-o-x-mark class="w-3 h-3" />
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg transition-all">
+                                                                            <x-heroicon-s-x-mark class="w-4 h-4" />
                                                                             Rejeter
                                                                         </button>
                                                                         @endif
@@ -477,8 +478,8 @@
                                                                 <template x-if="block.validated && !block.rejected && !block.editing">
                                                                     <button type="button"
                                                                         @click="block.editing = true"
-                                                                        class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
-                                                                        <x-heroicon-o-pencil class="w-3 h-3" />
+                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800 border border-blue-300 dark:border-blue-700">
+                                                                        <x-heroicon-o-pencil class="w-4 h-4" />
                                                                         Modifier
                                                                     </button>
                                                                 </template>
@@ -496,48 +497,48 @@
                                                         </template>
 
                                                         {{-- Question --}}
-                                                        <div class="mb-3" x-show="!block.rejected">
-                                                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Question :</label>
+                                                        <div class="mb-4" x-show="!block.rejected">
+                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Question :</label>
                                                             <template x-if="block.editing || (!block.validated && !sent)">
                                                                 <textarea
                                                                     x-model="block.question"
-                                                                    rows="2"
-                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                    rows="3"
+                                                                    class="w-full rounded-lg border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
                                                                     placeholder="Question du client..."
                                                                 ></textarea>
                                                             </template>
                                                             <template x-if="!block.editing && (block.validated || sent)">
-                                                                <div class="p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300" x-text="block.question"></div>
+                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300" x-text="block.question"></div>
                                                             </template>
                                                         </div>
 
                                                         {{-- Réponse --}}
-                                                        <div class="mb-3" x-show="!block.rejected">
-                                                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Réponse :</label>
+                                                        <div class="mb-4" x-show="!block.rejected">
+                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Réponse :</label>
                                                             <template x-if="block.editing || (!block.validated && !sent)">
                                                                 <textarea
                                                                     x-model="block.answer"
-                                                                    rows="4"
-                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                    rows="8"
+                                                                    class="w-full rounded-lg border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
                                                                     placeholder="Réponse de l'IA..."
                                                                 ></textarea>
                                                             </template>
                                                             <template x-if="!block.editing && (block.validated || sent)">
-                                                                <div class="p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 text-sm prose prose-sm dark:prose-invert max-w-none" x-html="block.answer"></div>
+                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm prose prose-sm dark:prose-invert max-w-none" x-html="block.answer"></div>
                                                             </template>
                                                         </div>
 
-                                                        {{-- Checkbox handoff --}}
-                                                        <div class="flex items-center gap-2" x-show="!block.rejected && !sent && !block.validated">
+                                                        {{-- Checkbox handoff - BIEN VISIBLE --}}
+                                                        <div class="flex items-center gap-3 p-2 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800" x-show="!block.rejected && !sent && !block.validated">
                                                             <input
                                                                 type="checkbox"
                                                                 x-model="block.requiresHandoff"
                                                                 :id="'handoff-' + block.id + '-{{ $message['original_id'] }}'"
-                                                                class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
+                                                                class="w-5 h-5 rounded border-orange-400 dark:border-orange-600 text-orange-600 focus:ring-orange-500"
                                                             />
-                                                            <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-xs text-gray-700 dark:text-gray-300 cursor-pointer flex items-center gap-1">
+                                                            <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-sm font-semibold text-orange-700 dark:text-orange-300 cursor-pointer flex items-center gap-2">
+                                                                <x-heroicon-s-user-group class="w-5 h-5 text-orange-600 dark:text-orange-400" />
                                                                 Nécessite toujours un suivi humain
-                                                                <x-heroicon-o-user-group class="w-4 h-4 text-warning-500" />
                                                             </label>
                                                         </div>
 
@@ -555,22 +556,22 @@
                                             </div>
 
                                             {{-- ═══════════════════════════════════════════════════════════════ --}}
-                                            {{-- FOOTER GLOBAL --}}
+                                            {{-- FOOTER GLOBAL - COLORÉ --}}
                                             {{-- ═══════════════════════════════════════════════════════════════ --}}
-                                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700" x-show="!sent">
-                                                <div class="flex items-center justify-between gap-3 flex-wrap">
-                                                    <div class="flex items-center gap-3">
-                                                        {{-- Bouton Envoyer --}}
+                                            <div class="mt-5 pt-4 border-t-2 border-gray-300 dark:border-gray-600" x-show="!sent">
+                                                <div class="flex items-center justify-between gap-4 flex-wrap">
+                                                    <div class="flex items-center gap-4">
+                                                        {{-- Bouton Envoyer - PROMINENT --}}
                                                         <button type="button"
                                                             @click="sendAll()"
-                                                            class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            class="inline-flex items-center gap-2 px-6 py-3 text-base font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
                                                             :disabled="getValidatedBlocks().length === 0">
-                                                            <x-heroicon-o-paper-airplane class="w-4 h-4" />
+                                                            <x-heroicon-s-paper-airplane class="w-5 h-5" />
                                                             Envoyer
                                                         </button>
 
                                                         {{-- Compteur blocs validés --}}
-                                                        <span class="text-xs text-gray-500" x-show="blocks.length > 1">
+                                                        <span class="px-3 py-1.5 text-sm font-semibold rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200" x-show="blocks.length > 1">
                                                             <span x-text="getValidatedBlocks().length"></span>/<span x-text="blocks.length"></span> validés
                                                         </span>
                                                     </div>
@@ -579,8 +580,8 @@
                                                     <button type="button"
                                                         @click="validateAllPending()"
                                                         x-show="getPendingBlocks().length > 0"
-                                                        class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded bg-success-100 text-success-700 hover:bg-success-200 dark:bg-success-900 dark:text-success-300 dark:hover:bg-success-800">
-                                                        <x-heroicon-o-check class="w-3 h-3" />
+                                                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-200 dark:hover:bg-green-800 border border-green-400 dark:border-green-600">
+                                                        <x-heroicon-s-check-circle class="w-4 h-4" />
                                                         Tout valider
                                                     </button>
                                                 </div>
@@ -776,10 +777,10 @@
                                                 <button
                                                     type="button"
                                                     @click="openContext = true"
-                                                    class="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                                                    class="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900 dark:text-purple-200 dark:hover:bg-purple-800 border border-purple-300 dark:border-purple-700 transition-colors"
                                                 >
-                                                    <x-heroicon-o-document-magnifying-glass class="w-3 h-3" />
-                                                    Voir le contexte ({{ $totalSources }})
+                                                    <x-heroicon-o-document-magnifying-glass class="w-4 h-4" />
+                                                    Voir le contexte RAG ({{ $totalSources }} sources)
                                                 </button>
 
                                                 {{-- Modal contexte RAG --}}
