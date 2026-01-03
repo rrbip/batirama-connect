@@ -682,6 +682,12 @@ class ViewAiSession extends ViewRecord
             );
 
             if ($result) {
+                // Marquer le message support comme appris
+                SupportMessage::where('id', $supportMessageId)->update([
+                    'learned_at' => now(),
+                    'learned_by' => auth()->id(),
+                ]);
+
                 Notification::make()
                     ->title('Réponse apprise')
                     ->body("Q: " . \Illuminate\Support\Str::limit($question, 50) . "\nR: " . \Illuminate\Support\Str::limit($answer, 50))
@@ -779,6 +785,7 @@ class ViewAiSession extends ViewRecord
                     'attachments' => $supportMsg->attachments ?? collect(),
                     'original' => $supportMsg,
                     'is_pending_validation' => false,
+                    'learned_at' => $supportMsg->learned_at,
                 ];
             }
         }

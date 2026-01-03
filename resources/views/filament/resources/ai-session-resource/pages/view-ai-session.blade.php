@@ -1074,6 +1074,9 @@
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-success-100 dark:border-success-800">
                                             <x-heroicon-o-user-circle class="w-4 h-4 text-success-600" />
                                             <span class="text-xs font-medium text-success-700 dark:text-success-300">{{ $message['sender_name'] }}</span>
+                                            @if($message['learned_at'] ?? false)
+                                                <x-filament::badge size="sm" color="primary">Apprise</x-filament::badge>
+                                            @endif
                                             @if($message['was_ai_improved'] ?? false)
                                                 <x-filament::badge size="sm" color="info">Amélioré par IA</x-filament::badge>
                                             @endif
@@ -1101,14 +1104,18 @@
 
                                         {{-- Bouton Apprendre et Heure --}}
                                         <div class="flex items-center justify-between mt-2 text-xs text-success-600 dark:text-success-400">
-                                            <x-filament::button
-                                                size="xs"
-                                                color="success"
-                                                icon="heroicon-o-academic-cap"
-                                                x-on:click="showLearnForm = !showLearnForm"
-                                            >
-                                                Apprendre
-                                            </x-filament::button>
+                                            @if(!($message['learned_at'] ?? false))
+                                                <x-filament::button
+                                                    size="xs"
+                                                    color="success"
+                                                    icon="heroicon-o-academic-cap"
+                                                    x-on:click="showLearnForm = !showLearnForm"
+                                                >
+                                                    Apprendre
+                                                </x-filament::button>
+                                            @else
+                                                <span></span>
+                                            @endif
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
                                         </div>
 

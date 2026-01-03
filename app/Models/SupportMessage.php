@@ -37,6 +37,8 @@ class SupportMessage extends Model
         'email_metadata',
         'is_read',
         'read_at',
+        'learned_at',
+        'learned_by',
     ];
 
     protected $casts = [
@@ -44,6 +46,7 @@ class SupportMessage extends Model
         'was_ai_improved' => 'boolean',
         'is_read' => 'boolean',
         'read_at' => 'datetime',
+        'learned_at' => 'datetime',
     ];
 
     // ─────────────────────────────────────────────────────────────────
@@ -64,6 +67,14 @@ class SupportMessage extends Model
     public function agent(): BelongsTo
     {
         return $this->belongsTo(User::class, 'agent_id');
+    }
+
+    /**
+     * Utilisateur qui a validé l'apprentissage.
+     */
+    public function learnedByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'learned_by');
     }
 
     /**
@@ -100,6 +111,14 @@ class SupportMessage extends Model
     public function isSystemMessage(): bool
     {
         return $this->sender_type === 'system';
+    }
+
+    /**
+     * Vérifie si le message a été appris.
+     */
+    public function isLearned(): bool
+    {
+        return $this->learned_at !== null;
     }
 
     /**
