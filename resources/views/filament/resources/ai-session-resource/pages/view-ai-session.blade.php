@@ -215,7 +215,7 @@
                         {{-- Message Client (droite, bleu) --}}
                         @elseif($isClient)
                             <div class="flex justify-end">
-                                <div class="max-w-[75%]">
+                                <div style="max-width: 75%;">
                                     <div class="bg-primary-500 text-white rounded-lg p-3 shadow-sm">
                                         <div class="prose prose-sm prose-invert max-w-none">
                                             {!! \Illuminate\Support\Str::markdown($message['content']) !!}
@@ -341,7 +341,7 @@
                                     }
                                 }
                             }">
-                                <div class="max-w-[75%]">
+                                <div style="max-width: 75%;">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -414,10 +414,10 @@
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
                                                     <div class="rounded-lg p-4 transition-all border-2"
-                                                        :style="{
-                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : '#e5e7eb'),
-                                                            backgroundColor: block.rejected ? '#fef2f2' : (block.validated ? '#f0fdf4' : 'transparent'),
-                                                            opacity: block.rejected ? 0.7 : 1
+                                                        :class="{
+                                                            'border-gray-300 dark:border-gray-600 bg-transparent': !block.validated && !block.rejected,
+                                                            'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30': block.validated && !block.rejected,
+                                                            'border-red-500 dark:border-red-400 bg-red-50 dark:bg-red-900/30 opacity-70': block.rejected
                                                         }">
                                                         {{-- Header du bloc (badges uniquement) --}}
                                                         <div class="flex items-center gap-2 flex-wrap mb-4">
@@ -466,11 +466,11 @@
                                                                 x-model="block.question"
                                                                 :disabled="block.validated || block.rejected || sent"
                                                                 :class="{
-                                                                    'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-not-allowed': block.validated || block.rejected || sent,
+                                                                    'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                class="w-full p-3 rounded-lg text-sm border resize-none dark:text-gray-100"
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none"
                                                                 rows="2"
                                                                 x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
                                                                 @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
@@ -484,11 +484,11 @@
                                                                 x-model="block.answer"
                                                                 :disabled="block.validated || block.rejected || sent"
                                                                 :class="{
-                                                                    'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-not-allowed': block.validated || block.rejected || sent,
+                                                                    'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                class="w-full p-3 rounded-lg text-sm border resize-none dark:text-gray-100"
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none"
                                                                 rows="4"
                                                                 x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
                                                                 @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
@@ -1270,7 +1270,7 @@
                                 learnQuestion: @js($previousQuestion),
                                 learnAnswer: @js($message['content'])
                             }">
-                                <div class="max-w-[75%]">
+                                <div style="max-width: 75%;">
                                     <div class="bg-success-50 dark:bg-success-950 border border-success-200 dark:border-success-800 rounded-lg p-3 shadow-sm">
                                         {{-- Header Support --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-success-100 dark:border-success-800">
