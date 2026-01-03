@@ -408,8 +408,8 @@
                                                             'border-success-500 bg-success-50 dark:bg-success-950': block.validated && !block.rejected,
                                                             'border-danger-500 bg-danger-50 dark:bg-danger-950 opacity-70': block.rejected
                                                         }">
-                                                        {{-- Header du bloc - hauteur fixe --}}
-                                                        <div class="flex items-center justify-between gap-3 mb-3 min-h-[40px]">
+                                                        {{-- Header du bloc --}}
+                                                        <div class="flex items-center justify-between gap-3 mb-3">
                                                             <div class="flex items-center gap-2 flex-wrap">
                                                                 {{-- Numéro de question (multi-questions) --}}
                                                                 <x-filament::badge color="primary" x-show="blocks.length > 1">
@@ -437,37 +437,47 @@
                                                                 </x-filament::badge>
                                                             </div>
 
-                                                            {{-- Boutons - Largeur fixe pour éviter les sauts --}}
-                                                            <div class="flex items-center gap-2 min-w-[200px] justify-end" x-show="!sent">
-                                                                {{-- Valider + Rejeter (état initial) --}}
-                                                                <button type="button"
-                                                                    @click="block.validated = true"
+                                                            {{-- Boutons Filament --}}
+                                                            <div class="flex items-center gap-2" x-show="!sent">
+                                                                {{-- Valider --}}
+                                                                <x-filament::button
+                                                                    color="success"
+                                                                    size="sm"
+                                                                    icon="heroicon-s-check"
                                                                     x-show="!block.validated && !block.rejected"
-                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-success-600 text-white hover:bg-success-700 shadow-sm transition-all">
-                                                                    <x-heroicon-s-check class="w-4 h-4" />
+                                                                    x-on:click="block.validated = true"
+                                                                >
                                                                     Valider
-                                                                </button>
-                                                                <button type="button"
-                                                                    @click="block.rejected = true"
-                                                                    x-show="!block.validated && !block.rejected"
-                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-danger-600 text-white hover:bg-danger-700 shadow-sm transition-all">
-                                                                    <x-heroicon-s-x-mark class="w-4 h-4" />
-                                                                    Rejeter
-                                                                </button>
+                                                                </x-filament::button>
 
-                                                                {{-- Annuler (état verrouillé) --}}
-                                                                <button type="button"
-                                                                    @click="block.validated = false; block.rejected = false"
+                                                                {{-- Rejeter --}}
+                                                                <x-filament::button
+                                                                    color="danger"
+                                                                    size="sm"
+                                                                    icon="heroicon-s-x-mark"
+                                                                    x-show="!block.validated && !block.rejected"
+                                                                    x-on:click="block.rejected = true"
+                                                                >
+                                                                    Rejeter
+                                                                </x-filament::button>
+
+                                                                {{-- Annuler --}}
+                                                                <x-filament::button
+                                                                    color="gray"
+                                                                    size="sm"
+                                                                    icon="heroicon-o-arrow-uturn-left"
                                                                     x-show="block.validated || block.rejected"
-                                                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 border border-gray-400 dark:border-gray-500 transition-all">
-                                                                    <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
+                                                                    x-on:click="block.validated = false; block.rejected = false"
+                                                                >
                                                                     Annuler
-                                                                </button>
+                                                                </x-filament::button>
                                                             </div>
                                                         </div>
 
-                                                        {{-- Avertissement suggestion (hauteur fixe réservée) --}}
-                                                        <div class="mb-3" x-show="(block.is_suggestion || block.type === 'suggestion') && !block.validated && !block.rejected">
+                                                        {{-- Avertissement suggestion - TOUJOURS VISIBLE si suggestion --}}
+                                                        <div class="mb-3 transition-opacity"
+                                                            x-show="block.is_suggestion || block.type === 'suggestion'"
+                                                            :class="{'opacity-40': block.validated || block.rejected}">
                                                             <div class="p-2 bg-warning-50 dark:bg-warning-950 border border-warning-300 dark:border-warning-700 rounded-lg">
                                                                 <div class="flex items-center gap-2 text-sm text-warning-700 dark:text-warning-300 font-medium">
                                                                     <x-heroicon-s-exclamation-triangle class="w-5 h-5" />
@@ -476,13 +486,13 @@
                                                             </div>
                                                         </div>
 
-                                                        {{-- Question - Toujours visible, édition conditionnelle --}}
+                                                        {{-- Question --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Question :</label>
                                                             <div class="p-3 rounded-lg text-sm min-h-[2.5rem]"
                                                                 :class="{
                                                                     'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400': block.validated || block.rejected || sent,
+                                                                    'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
                                                                 :contenteditable="!block.validated && !block.rejected && !sent"
@@ -491,27 +501,29 @@
                                                             </div>
                                                         </div>
 
-                                                        {{-- Réponse - Toujours visible, édition conditionnelle --}}
+                                                        {{-- Réponse --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Réponse :</label>
                                                             <div class="p-3 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none min-h-[4rem]"
                                                                 :class="{
                                                                     'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800': block.validated || block.rejected || sent,
+                                                                    'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
                                                                 x-html="block.answer">
                                                             </div>
                                                         </div>
 
-                                                        {{-- Checkbox handoff - hauteur réservée --}}
-                                                        <div class="min-h-[44px]" x-show="!sent">
-                                                            <div class="flex items-center gap-3 p-2 rounded-lg bg-warning-50 dark:bg-warning-900 border border-warning-300 dark:border-warning-700"
-                                                                x-show="!block.validated && !block.rejected">
+                                                        {{-- Checkbox handoff - TOUJOURS VISIBLE, désactivée si verrouillé --}}
+                                                        <div class="transition-opacity"
+                                                            x-show="!sent"
+                                                            :class="{'opacity-40 pointer-events-none': block.validated || block.rejected}">
+                                                            <div class="flex items-center gap-3 p-2 rounded-lg bg-warning-50 dark:bg-warning-900 border border-warning-300 dark:border-warning-700">
                                                                 <input
                                                                     type="checkbox"
                                                                     x-model="block.requiresHandoff"
                                                                     :id="'handoff-' + block.id + '-{{ $message['original_id'] }}'"
+                                                                    :disabled="block.validated || block.rejected"
                                                                     class="w-5 h-5 rounded border-warning-400 text-warning-600 focus:ring-warning-500"
                                                                 />
                                                                 <label :for="'handoff-' + block.id + '-{{ $message['original_id'] }}'" class="text-sm font-semibold text-warning-700 dark:text-warning-300 cursor-pointer flex items-center gap-2">
@@ -531,13 +543,15 @@
                                                 <div class="flex items-center justify-between gap-4 flex-wrap">
                                                     <div class="flex items-center gap-4">
                                                         {{-- Bouton Envoyer --}}
-                                                        <button type="button"
-                                                            @click="sendAll()"
-                                                            class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-lg bg-primary-600 text-white hover:bg-primary-700 shadow-md disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                                                            :disabled="getValidatedBlocks().length === 0">
-                                                            <x-heroicon-s-paper-airplane class="w-5 h-5" />
+                                                        <x-filament::button
+                                                            color="primary"
+                                                            size="lg"
+                                                            icon="heroicon-s-paper-airplane"
+                                                            x-on:click="sendAll()"
+                                                            ::disabled="getValidatedBlocks().length === 0"
+                                                        >
                                                             Envoyer
-                                                        </button>
+                                                        </x-filament::button>
 
                                                         {{-- Compteur blocs validés --}}
                                                         <x-filament::badge color="gray" x-show="blocks.length > 1">
@@ -546,13 +560,16 @@
                                                     </div>
 
                                                     {{-- Bouton Valider tout --}}
-                                                    <button type="button"
-                                                        @click="validateAllPending()"
+                                                    <x-filament::button
+                                                        color="success"
+                                                        size="sm"
+                                                        icon="heroicon-s-check-circle"
+                                                        outlined
                                                         x-show="getPendingBlocks().length > 0"
-                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold rounded-lg bg-success-100 text-success-700 hover:bg-success-200 dark:bg-success-900 dark:text-success-300 dark:hover:bg-success-800 border border-success-300 dark:border-success-700 transition-all">
-                                                        <x-heroicon-s-check-circle class="w-4 h-4" />
+                                                        x-on:click="validateAllPending()"
+                                                    >
                                                         Tout valider
-                                                    </button>
+                                                    </x-filament::button>
                                                 </div>
                                             </div>
 
