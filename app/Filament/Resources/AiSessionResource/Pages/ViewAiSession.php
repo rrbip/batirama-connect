@@ -1294,6 +1294,13 @@ class ViewAiSession extends ViewRecord
                 return;
             }
 
+            // Auto-assigner la session si escaladée mais pas encore assignée
+            // Cela crée le message "X a pris en charge" AVANT de valider le message IA
+            if ($this->record->isEscalated() && !$this->record->isBeingHandled()) {
+                app(SupportService::class)->takeOverSession($this->record, auth()->user());
+                $this->record->refresh();
+            }
+
             // Construire le corrected_content (toutes les réponses concaténées pour multi, ou la réponse unique pour mono)
             $correctedContent = count($allAnswers) > 1
                 ? implode("\n\n---\n\n", $allAnswers)
