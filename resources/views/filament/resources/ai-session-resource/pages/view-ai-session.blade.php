@@ -472,9 +472,9 @@
                                                                     'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                class="w-full p-3 rounded-lg text-sm border resize-none"
-                                                                rows="2"
-                                                                x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
+                                                                rows="1"
+                                                                x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
                                                                 @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
                                                             ></textarea>
                                                         </div>
@@ -490,9 +490,9 @@
                                                                     'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                class="w-full p-3 rounded-lg text-sm border resize-none"
-                                                                rows="4"
-                                                                x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
+                                                                rows="1"
+                                                                x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'; })"
                                                                 @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
                                                             ></textarea>
                                                         </div>
