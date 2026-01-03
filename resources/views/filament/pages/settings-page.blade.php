@@ -17,9 +17,43 @@
         </x-filament::section>
 
         {{-- Formulaire --}}
-        <form wire:submit.prevent="saveList">
-            {{ $this->form }}
-        </form>
+        {{ $this->form }}
+
+        {{-- Boutons d'action --}}
+        @if($this->selectedList)
+            <div class="flex items-center gap-3 mt-4">
+                <x-filament::button
+                    wire:click="saveList"
+                    color="success"
+                    icon="heroicon-o-check"
+                >
+                    Sauvegarder
+                </x-filament::button>
+
+                <x-filament::button
+                    wire:click="resetToDefault"
+                    wire:confirm="Restaurer les valeurs par défaut ? Les modifications non sauvegardées seront perdues."
+                    color="warning"
+                    icon="heroicon-o-arrow-path"
+                >
+                    Valeurs par défaut
+                </x-filament::button>
+
+                @php
+                    $currentList = \App\Models\ConfigurableList::where('key', $this->selectedList)->first();
+                @endphp
+                @if($currentList && !$currentList->is_system)
+                    <x-filament::button
+                        wire:click="deleteList"
+                        wire:confirm="Supprimer cette liste ? Cette action est irréversible."
+                        color="danger"
+                        icon="heroicon-o-trash"
+                    >
+                        Supprimer
+                    </x-filament::button>
+                @endif
+            </div>
+        @endif
 
         {{-- Aide contextuelle --}}
         @if($this->selectedList)
