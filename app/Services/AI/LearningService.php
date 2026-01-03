@@ -90,6 +90,9 @@ class LearningService
         // Générer l'embedding de la question
         $vector = $this->embeddingService->embed($question);
 
+        // Supprimer les questions similaires existantes (évite les doublons sémantiques)
+        $this->deleteSimilarQuestions($vector, $agentId, $agentSlug);
+
         $pointId = Str::uuid()->toString();
 
         // 1. Indexer dans learned_responses
@@ -400,6 +403,79 @@ class LearningService
                 Log::info('Deleted existing FAQ point in agent collection', [
                     'message_id' => $messageId,
                     'collection' => $agent->qdrant_collection,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Supprime les doublons basés sur la similarité de la question (même question = même réponse attendue)
+     * Utilise la recherche vectorielle pour trouver les questions très similaires (score > 0.98)
+     */
+    private function deleteSimilarQuestions(array $vector, int $agentId, string $agentSlug): void
+    {
+        // Chercher les questions très similaires dans learned_responses
+        try {
+            $similarResults = $this->qdrantService->search(
+                vector: $vector,
+                collection: self::LEARNED_RESPONSES_COLLECTION,
+                limit: 5,
+                filter: [
+                    'must' => [
+                        ['key' => 'agent_slug', 'match' => ['value' => $agentSlug]]
+                    ]
+                ],
+                scoreThreshold: 0.98 // Très similaire = même question
+            );
+
+            if (!empty($similarResults)) {
+                $pointIds = array_column($similarResults, 'id');
+
+                if (!empty($pointIds)) {
+                    $this->qdrantService->delete(self::LEARNED_RESPONSES_COLLECTION, $pointIds);
+                    Log::info('Deleted similar questions from learned_responses', [
+                        'agent' => $agentSlug,
+                        'deleted_count' => count($pointIds),
+                    ]);
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Failed to delete similar questions from learned_responses', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Faire de même dans la collection de l'agent
+        $agent = Agent::find($agentId);
+        if ($agent && !empty($agent->qdrant_collection)) {
+            try {
+                $similarResults = $this->qdrantService->search(
+                    vector: $vector,
+                    collection: $agent->qdrant_collection,
+                    limit: 5,
+                    filter: [
+                        'must' => [
+                            ['key' => 'type', 'match' => ['value' => 'qa_pair']]
+                        ]
+                    ],
+                    scoreThreshold: 0.98
+                );
+
+                if (!empty($similarResults)) {
+                    $pointIds = array_column($similarResults, 'id');
+
+                    if (!empty($pointIds)) {
+                        $this->qdrantService->delete($agent->qdrant_collection, $pointIds);
+                        Log::info('Deleted similar questions from agent collection', [
+                            'agent' => $agentSlug,
+                            'collection' => $agent->qdrant_collection,
+                            'deleted_count' => count($pointIds),
+                        ]);
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('Failed to delete similar questions from agent collection', [
+                    'error' => $e->getMessage(),
                 ]);
             }
         }
