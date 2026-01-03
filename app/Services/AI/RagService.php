@@ -199,7 +199,7 @@ class RagService
     {
         $enrichedBlocks = [];
         $directMatchThreshold = 0.92;
-        $documentedThreshold = 0.65;
+        $documentedThreshold = 0.75;
 
         foreach ($blocks as $block) {
             $question = $block['question'] ?? '';
