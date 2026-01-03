@@ -274,7 +274,6 @@
                                     'requiresHandoff' => $originalRequiresHandoff,
                                     'validated' => $b['learned'] ?? false,
                                     'rejected' => $b['rejected'] ?? false,
-                                    'editing' => false,
                                     'is_suggestion' => $b['is_suggestion'] ?? false,
                                     'type' => $b['type'] ?? 'unknown',
                                 ])->values()->toArray()),
@@ -297,7 +296,6 @@
                                     this.blocks.forEach(b => {
                                         if (!b.rejected) {
                                             b.validated = true;
-                                            b.editing = false;
                                         }
                                     });
                                 },
@@ -332,7 +330,7 @@
                                     }
                                 }
                             }">
-                                <div class="w-full max-w-[95%]">
+                                <div class="max-w-[80%]">
                                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 shadow-sm">
                                         {{-- Header IA --}}
                                         <div class="flex items-center gap-2 mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
@@ -404,10 +402,10 @@
                                         @else
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
-                                                    <div class="border rounded-lg p-3" :class="{
-                                                        'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700': !block.rejected && !block.validated,
-                                                        'bg-success-50 dark:bg-success-950 border-success-200 dark:border-success-800': block.validated && !block.rejected,
-                                                        'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 opacity-50 line-through': block.rejected
+                                                    <div class="border-2 rounded-lg p-4" :class="{
+                                                        'border-gray-300 dark:border-gray-600': !block.rejected && !block.validated,
+                                                        'border-green-500 dark:border-green-400': block.validated && !block.rejected,
+                                                        'border-red-500 dark:border-red-400 opacity-60': block.rejected
                                                     }">
                                                         {{-- Header du bloc --}}
                                                         <div class="flex items-center justify-between gap-2 mb-3">
@@ -448,53 +446,33 @@
                                                                 </template>
                                                             </div>
 
-                                                            {{-- Boutons Valider/Rejeter/Annuler/Restaurer - TOUT LOCAL jusqu'à Envoyer --}}
+                                                            {{-- Boutons - TOUT LOCAL jusqu'à Envoyer --}}
                                                             <div class="flex items-center gap-2" x-show="!sent">
-                                                                {{-- État: Non validé, Non rejeté → Afficher Valider + Rejeter --}}
+                                                                {{-- État: En attente → Valider + Rejeter --}}
                                                                 <template x-if="!block.validated && !block.rejected">
                                                                     <div class="flex gap-2">
                                                                         <button type="button"
-                                                                            @click="block.validated = true; block.editing = false"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 shadow-md hover:shadow-lg transition-all">
+                                                                            @click="block.validated = true"
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 shadow transition-all">
                                                                             <x-heroicon-s-check class="w-4 h-4" />
                                                                             Valider
                                                                         </button>
                                                                         <button type="button"
                                                                             @click="block.rejected = true"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow-md hover:shadow-lg transition-all">
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow transition-all">
                                                                             <x-heroicon-s-x-mark class="w-4 h-4" />
                                                                             Rejeter
                                                                         </button>
                                                                     </div>
                                                                 </template>
 
-                                                                {{-- État: Validé → Afficher Modifier + Annuler --}}
-                                                                <template x-if="block.validated && !block.rejected">
-                                                                    <div class="flex gap-2">
-                                                                        <template x-if="!block.editing">
-                                                                            <button type="button"
-                                                                                @click="block.editing = true"
-                                                                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:hover:bg-blue-800 border border-blue-300 dark:border-blue-700">
-                                                                                <x-heroicon-o-pencil class="w-4 h-4" />
-                                                                                Modifier
-                                                                            </button>
-                                                                        </template>
-                                                                        <button type="button"
-                                                                            @click="block.validated = false; block.editing = false"
-                                                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
-                                                                            <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
-                                                                            Annuler
-                                                                        </button>
-                                                                    </div>
-                                                                </template>
-
-                                                                {{-- État: Rejeté → Afficher Restaurer --}}
-                                                                <template x-if="block.rejected">
+                                                                {{-- État: Verrouillé (validé OU rejeté) → Annuler --}}
+                                                                <template x-if="block.validated || block.rejected">
                                                                     <button type="button"
-                                                                        @click="block.rejected = false"
-                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900 dark:text-amber-200 dark:hover:bg-amber-800 border border-amber-300 dark:border-amber-700">
-                                                                        <x-heroicon-o-arrow-path class="w-4 h-4" />
-                                                                        Restaurer
+                                                                        @click="block.validated = false; block.rejected = false"
+                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 border border-gray-400 dark:border-gray-500">
+                                                                        <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
+                                                                        Annuler
                                                                     </button>
                                                                 </template>
                                                             </div>
@@ -511,39 +489,43 @@
                                                         </template>
 
                                                         {{-- Question --}}
-                                                        <div class="mb-4" x-show="!block.rejected">
+                                                        <div class="mb-4">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Question :</label>
-                                                            <template x-if="block.editing || (!block.validated && !sent)">
+                                                            {{-- Éditable si pas verrouillé --}}
+                                                            <template x-if="!block.validated && !block.rejected && !sent">
                                                                 <textarea
                                                                     x-model="block.question"
-                                                                    rows="3"
-                                                                    class="w-full rounded-lg border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
+                                                                    rows="2"
+                                                                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
                                                                     placeholder="Question du client..."
                                                                 ></textarea>
                                                             </template>
-                                                            <template x-if="!block.editing && (block.validated || sent)">
-                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300" x-text="block.question"></div>
+                                                            {{-- Lecture seule si verrouillé --}}
+                                                            <template x-if="block.validated || block.rejected || sent">
+                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300" :class="{'line-through opacity-50': block.rejected}" x-text="block.question"></div>
                                                             </template>
                                                         </div>
 
                                                         {{-- Réponse --}}
-                                                        <div class="mb-4" x-show="!block.rejected">
+                                                        <div class="mb-4">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Réponse :</label>
-                                                            <template x-if="block.editing || (!block.validated && !sent)">
+                                                            {{-- Éditable si pas verrouillé --}}
+                                                            <template x-if="!block.validated && !block.rejected && !sent">
                                                                 <textarea
                                                                     x-model="block.answer"
-                                                                    rows="8"
-                                                                    class="w-full rounded-lg border-2 border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
+                                                                    rows="6"
+                                                                    class="w-full rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm p-3"
                                                                     placeholder="Réponse de l'IA..."
                                                                 ></textarea>
                                                             </template>
-                                                            <template x-if="!block.editing && (block.validated || sent)">
-                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm prose prose-sm dark:prose-invert max-w-none" x-html="block.answer"></div>
+                                                            {{-- Lecture seule si verrouillé --}}
+                                                            <template x-if="block.validated || block.rejected || sent">
+                                                                <div class="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none" :class="{'line-through opacity-50': block.rejected}" x-html="block.answer"></div>
                                                             </template>
                                                         </div>
 
-                                                        {{-- Checkbox handoff - BIEN VISIBLE --}}
-                                                        <div class="flex items-center gap-3 p-2 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800" x-show="!block.rejected && !sent && !block.validated">
+                                                        {{-- Checkbox handoff - visible seulement si éditable --}}
+                                                        <div class="flex items-center gap-3 p-2 rounded-lg bg-orange-50 dark:bg-orange-950 border border-orange-200 dark:border-orange-800" x-show="!block.validated && !block.rejected && !sent">
                                                             <input
                                                                 type="checkbox"
                                                                 x-model="block.requiresHandoff"
@@ -554,16 +536,6 @@
                                                                 <x-heroicon-s-user-group class="w-5 h-5 text-orange-600 dark:text-orange-400" />
                                                                 Nécessite toujours un suivi humain
                                                             </label>
-                                                        </div>
-
-                                                        {{-- Bouton OK si en édition --}}
-                                                        <div class="mt-2" x-show="block.editing">
-                                                            <button type="button"
-                                                                @click="block.editing = false"
-                                                                class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded bg-primary-500 text-white hover:bg-primary-600">
-                                                                <x-heroicon-o-check class="w-3 h-3" />
-                                                                OK
-                                                            </button>
                                                         </div>
                                                     </div>
                                                 </template>
