@@ -125,9 +125,6 @@ class GeminiService implements LLMServiceInterface
         $model = $options['model'] ?? $this->defaultModel;
 
         try {
-            // Convertir les messages au format Gemini
-            $contents = $this->convertMessagesToGeminiFormat($messages);
-
             // Extraire le system prompt si présent
             $systemInstruction = null;
             foreach ($messages as $msg) {
@@ -136,6 +133,9 @@ class GeminiService implements LLMServiceInterface
                     break;
                 }
             }
+
+            // Convertir les messages au format Gemini
+            $contents = $this->convertMessagesToGeminiFormat($messages, $model, $systemInstruction);
 
             $requestBody = [
                 'contents' => $contents,
@@ -146,8 +146,9 @@ class GeminiService implements LLMServiceInterface
                 ],
             ];
 
-            // Ajouter le system prompt si présent
-            if ($systemInstruction) {
+            // Ajouter le system prompt si présent ET si le modèle le supporte
+            // Les modèles Gemma ne supportent pas systemInstruction
+            if ($systemInstruction && !$this->isGemmaModel($model)) {
                 $requestBody['systemInstruction'] = [
                     'parts' => [['text' => $systemInstruction]]
                 ];
@@ -188,10 +189,27 @@ class GeminiService implements LLMServiceInterface
 
     /**
      * Convertit les messages du format Ollama vers le format Gemini.
+     *
+     * Pour les modèles Gemma qui ne supportent pas systemInstruction,
+     * le system prompt est injecté comme premier message utilisateur.
      */
-    private function convertMessagesToGeminiFormat(array $messages): array
+    private function convertMessagesToGeminiFormat(array $messages, string $model = '', ?string $systemInstruction = null): array
     {
         $contents = [];
+        $isGemma = $this->isGemmaModel($model);
+
+        // Pour Gemma, injecter le system prompt comme premier message user
+        if ($isGemma && $systemInstruction) {
+            $contents[] = [
+                'role' => 'user',
+                'parts' => [['text' => "[Instructions système]\n{$systemInstruction}\n[Fin des instructions]"]],
+            ];
+            // Ajouter une réponse model vide pour maintenir l'alternance user/model
+            $contents[] = [
+                'role' => 'model',
+                'parts' => [['text' => "Compris, je suivrai ces instructions."]],
+            ];
+        }
 
         foreach ($messages as $message) {
             $role = $message['role'] ?? 'user';
@@ -211,6 +229,14 @@ class GeminiService implements LLMServiceInterface
         }
 
         return $contents;
+    }
+
+    /**
+     * Vérifie si le modèle est un modèle Gemma (ne supporte pas systemInstruction).
+     */
+    private function isGemmaModel(string $model): bool
+    {
+        return str_starts_with(strtolower($model), 'gemma');
     }
 
     /**
