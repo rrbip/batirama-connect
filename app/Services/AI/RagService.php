@@ -142,15 +142,21 @@ class RagService
             $multiQuestionResult = $this->multiQuestionParser->parse($content);
 
             if ($multiQuestionResult['is_multi_question'] || $multiQuestionResult['block_count'] > 0) {
+                // Enrichir chaque bloc avec une recherche RAG individuelle
+                $enrichedBlocks = $this->enrichBlocksWithRagMatches(
+                    $multiQuestionResult['blocks'],
+                    $agent
+                );
+
                 Log::info('RagService: Multi-question response detected', [
                     'agent' => $agent->slug,
-                    'block_count' => $multiQuestionResult['block_count'],
-                    'type_stats' => $this->multiQuestionParser->getTypeStats($multiQuestionResult['blocks']),
+                    'block_count' => count($enrichedBlocks),
+                    'type_stats' => $this->multiQuestionParser->getTypeStats($enrichedBlocks),
                 ]);
 
                 return [
                     'is_multi_question' => $multiQuestionResult['is_multi_question'],
-                    'blocks' => $multiQuestionResult['blocks'],
+                    'blocks' => $enrichedBlocks,
                     'display_content' => $multiQuestionResult['display_content'],
                     'raw_content' => $multiQuestionResult['raw_content'],
                     'global_type' => null, // Chaque bloc a son propre type
@@ -172,6 +178,99 @@ class RagService
             'response_type' => $parsedType['type'],
             'is_suggestion' => $parsedType['requires_review'],
         ];
+    }
+
+    /**
+     * Enrichit chaque bloc multi-question avec une recherche RAG individuelle.
+     *
+     * Pour chaque question extraite, on fait une recherche dans les learned responses
+     * pour déterminer si la question a une vraie correspondance documentée.
+     *
+     * Seuils :
+     * - Score >= 0.92 : DIRECT MATCH → on peut remplacer la réponse LLM par la réponse apprise
+     * - Score >= 0.65 : DOCUMENTED → la question a du contexte pertinent
+     * - Score < 0.65 : SUGGESTION → pas de source fiable, à vérifier par l'humain
+     *
+     * @param array $blocks Les blocs extraits par MultiQuestionParser
+     * @param Agent $agent L'agent pour les configurations
+     * @return array Les blocs enrichis avec le bon type
+     */
+    private function enrichBlocksWithRagMatches(array $blocks, Agent $agent): array
+    {
+        $enrichedBlocks = [];
+        $directMatchThreshold = 0.92;
+        $documentedThreshold = 0.65;
+
+        foreach ($blocks as $block) {
+            $question = $block['question'] ?? '';
+
+            if (empty($question)) {
+                $enrichedBlocks[] = $block;
+                continue;
+            }
+
+            // Recherche de learned responses pour cette question spécifique
+            $matches = $this->learningService->findSimilarLearnedResponses(
+                question: $question,
+                agentSlug: $agent->slug,
+                limit: 1,
+                minScore: $documentedThreshold
+            );
+
+            if (!empty($matches)) {
+                $bestMatch = $matches[0];
+                $score = $bestMatch['score'] ?? 0;
+
+                if ($score >= $directMatchThreshold) {
+                    // DIRECT MATCH : on remplace la réponse LLM par la réponse apprise
+                    $block['type'] = 'direct_qr_match';
+                    $block['is_suggestion'] = false;
+                    $block['answer'] = $bestMatch['answer'] ?? $block['answer'];
+                    $block['rag_match'] = [
+                        'score' => $score,
+                        'source' => 'learned_response',
+                        'matched_question' => $bestMatch['question'] ?? null,
+                        'replaced' => true,
+                    ];
+
+                    Log::info('RagService: Block enriched with DIRECT MATCH', [
+                        'block_id' => $block['id'] ?? null,
+                        'question' => Str::limit($question, 50),
+                        'score' => $score,
+                    ]);
+                } else {
+                    // DOCUMENTED : on a du contexte mais on garde la réponse LLM
+                    $block['type'] = ResponseParser::TYPE_DOCUMENTED;
+                    $block['is_suggestion'] = false;
+                    $block['rag_match'] = [
+                        'score' => $score,
+                        'source' => 'learned_response',
+                        'matched_question' => $bestMatch['question'] ?? null,
+                        'replaced' => false,
+                    ];
+
+                    Log::debug('RagService: Block enriched as DOCUMENTED', [
+                        'block_id' => $block['id'] ?? null,
+                        'question' => Str::limit($question, 50),
+                        'score' => $score,
+                    ]);
+                }
+            } else {
+                // SUGGESTION : pas de correspondance, c'est une suggestion IA
+                $block['type'] = ResponseParser::TYPE_SUGGESTION;
+                $block['is_suggestion'] = true;
+                $block['rag_match'] = null;
+
+                Log::debug('RagService: Block marked as SUGGESTION (no RAG match)', [
+                    'block_id' => $block['id'] ?? null,
+                    'question' => Str::limit($question, 50),
+                ]);
+            }
+
+            $enrichedBlocks[] = $block;
+        }
+
+        return $enrichedBlocks;
     }
 
     /**
