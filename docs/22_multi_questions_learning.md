@@ -1047,7 +1047,317 @@ Forms\Components\Toggle::make('strict_mode')
 
 ---
 
-## 17. Risques et Mitigations (Global)
+# PARTIE 3 : Intégration Multi-Questions + Strict Assisté
+
+## 17. Compatibilité des Deux Fonctionnalités
+
+### 17.1 Cas d'Usage Combiné
+
+Quand un utilisateur pose plusieurs questions, certaines peuvent avoir du contexte documentaire et d'autres non.
+
+**Exemple :**
+```
+Utilisateur : "Comment ajouter un client et comment configurer le module XYZ ?"
+```
+
+- **Question 1** : "Comment ajouter un client ?" → Documentation trouvée → `[DOCUMENTED]`
+- **Question 2** : "Comment configurer le module XYZ ?" → Pas de documentation → `[SUGGESTION]`
+
+Chaque bloc Q/R doit donc avoir **son propre type** (documenté ou suggestion).
+
+### 17.2 Format de Réponse Combiné
+
+L'IA doit utiliser un format qui combine les deux systèmes :
+
+```markdown
+[QUESTION_BLOCK id="1" question="Comment ajouter un nouveau client ?" type="documented"]
+Pour ajouter un nouveau client dans le système :
+1. Rendez-vous dans le menu **Clients** > **Nouveau client**
+2. Remplissez le formulaire avec les informations de la société
+3. Cliquez sur **Enregistrer**
+[/QUESTION_BLOCK]
+
+[QUESTION_BLOCK id="2" question="Comment configurer le module XYZ ?" type="suggestion"]
+Le module XYZ se configure généralement via le menu Paramètres > Modules.
+Vous devriez trouver les options de configuration dans l'onglet 'Avancé'.
+
+Note: Je n'ai pas de documentation spécifique pour ce module.
+Un conseiller pourra confirmer ces étapes.
+[/QUESTION_BLOCK]
+```
+
+### 17.3 Modification du MultiQuestionParser
+
+**Fichier :** `app/Services/AI/MultiQuestionParser.php`
+
+```php
+private const BLOCK_PATTERN = '/\[QUESTION_BLOCK\s+id="(\d+)"\s+question="([^"]+)"(?:\s+type="(documented|suggestion)")?\](.*?)\[\/QUESTION_BLOCK\]/s';
+
+public function parse(string $content): array
+{
+    $matches = [];
+    preg_match_all(self::BLOCK_PATTERN, $content, $matches, PREG_SET_ORDER);
+
+    if (empty($matches)) {
+        // Fallback : vérifier les marqueurs simples [DOCUMENTED] ou [SUGGESTION]
+        $responseParser = app(ResponseParser::class);
+        $parsed = $responseParser->parseResponseType($content);
+
+        return [
+            'is_multi_question' => false,
+            'blocks' => [],
+            'raw_content' => $content,
+            'display_content' => $parsed['content'],
+            'global_type' => $parsed['type'], // Pour les réponses simples
+        ];
+    }
+
+    $blocks = [];
+    foreach ($matches as $match) {
+        $blocks[] = [
+            'id' => (int) $match[1],
+            'question' => trim($match[2]),
+            'type' => $match[3] ?? 'unknown', // documented, suggestion, ou unknown
+            'is_suggestion' => ($match[3] ?? '') === 'suggestion',
+            'answer' => trim($match[4]),
+            'learned' => false,
+        ];
+    }
+
+    return [
+        'is_multi_question' => count($blocks) > 1,
+        'blocks' => $blocks,
+        'raw_content' => $content,
+        'display_content' => $this->formatForDisplay($blocks),
+        'global_type' => null, // Pas de type global, chaque bloc a le sien
+    ];
+}
+```
+
+### 17.4 Affichage Admin avec Badge par Bloc
+
+**Fichier :** `view-ai-session.blade.php`
+
+```blade
+@foreach($blocks as $blockIndex => $block)
+    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700"
+         x-data="{
+             showForm: false,
+             question: @js($block['question']),
+             answer: @js($block['answer']),
+             validated: @js($block['learned'] ?? false),
+             requiresHandoff: false
+         }">
+
+        {{-- Header du bloc avec badge de type --}}
+        <div class="flex items-start justify-between gap-2 mb-2">
+            <div class="flex-1">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
+                        Question {{ $blockIndex + 1 }}
+                    </span>
+
+                    {{-- Badge de type pour CE bloc --}}
+                    @if($block['type'] === 'suggestion' || $block['is_suggestion'])
+                        <x-filament::badge color="warning" size="xs" icon="heroicon-o-light-bulb">
+                            Suggestion
+                        </x-filament::badge>
+                    @elseif($block['type'] === 'documented')
+                        <x-filament::badge color="info" size="xs" icon="heroicon-o-document-check">
+                            Documenté
+                        </x-filament::badge>
+                    @endif
+                </div>
+
+                <div class="text-sm text-gray-600 dark:text-gray-400">
+                    {{ \Illuminate\Support\Str::limit($block['question'], 100) }}
+                </div>
+            </div>
+
+            {{-- Boutons de validation --}}
+            <div class="flex items-center gap-2" x-show="!validated">
+                <x-filament::button
+                    size="xs"
+                    color="success"
+                    icon="heroicon-o-check"
+                    x-on:click="showForm = !showForm"
+                >
+                    Valider
+                </x-filament::button>
+            </div>
+            <x-filament::badge x-show="validated" color="success" size="sm">
+                Validé
+            </x-filament::badge>
+        </div>
+
+        {{-- Bannière d'avertissement si suggestion --}}
+        @if($block['type'] === 'suggestion' || $block['is_suggestion'])
+            <div class="mb-2 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded text-xs">
+                <div class="flex items-center gap-1 text-warning-700 dark:text-warning-300">
+                    <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
+                    <span><strong>Suggestion IA</strong> - Pas de documentation trouvée pour cette question</span>
+                </div>
+            </div>
+        @endif
+
+        {{-- Aperçu de la réponse --}}
+        <div class="text-sm text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800 p-2 rounded border">
+            {{ \Illuminate\Support\Str::limit($block['answer'], 200) }}
+        </div>
+
+        {{-- Formulaire de validation/correction (inchangé) --}}
+        <div x-show="showForm" x-cloak class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
+            {{-- ... formulaire existant ... --}}
+        </div>
+    </div>
+@endforeach
+```
+
+### 17.5 Instructions Prompt Combinées
+
+Modifier les instructions du mode Strict Assisté pour inclure le format multi-questions :
+
+```php
+private function getStrictAssistedGuardrails(bool $hasContext, bool $multiQuestionEnabled): string
+{
+    $baseInstructions = $hasContext
+        ? $this->getDocumentedModeInstructions()
+        : $this->getSuggestionModeInstructions();
+
+    if (!$multiQuestionEnabled) {
+        return $baseInstructions;
+    }
+
+    // Instructions combinées pour multi-questions + strict assisté
+    return <<<GUARDRAILS
+
+## MODE RÉPONSE AVEC VALIDATION HUMAINE
+
+Ta réponse sera validée par un agent humain avant d'être transmise au client.
+
+### Si le message contient PLUSIEURS questions :
+
+Pour CHAQUE question, détermine si tu as du contexte documentaire :
+- **Avec contexte** : Réponds en utilisant les sources, ajoute `type="documented"` au bloc
+- **Sans contexte** : Propose une suggestion basée sur tes connaissances, ajoute `type="suggestion"` au bloc
+
+**Format obligatoire :**
+```
+[QUESTION_BLOCK id="1" question="Question reformulée" type="documented|suggestion"]
+Ta réponse pour cette question...
+[/QUESTION_BLOCK]
+
+[QUESTION_BLOCK id="2" question="Autre question" type="documented|suggestion"]
+Ta réponse pour cette autre question...
+[/QUESTION_BLOCK]
+```
+
+### Règles :
+- Chaque bloc est AUTONOME (la réponse doit être complète et utilisable seule)
+- Indique `type="documented"` si tu utilises les sources fournies
+- Indique `type="suggestion"` si tu réponds avec tes connaissances générales
+- Pour les suggestions, mentionne les points à vérifier par l'agent
+
+{$baseInstructions}
+
+GUARDRAILS;
+}
+```
+
+### 17.6 Exemple Complet
+
+**Question utilisateur :**
+```
+"Bonjour, comment ajouter un client dans le logiciel,
+et est-ce que vous faites des formations sur place ?"
+```
+
+**Contexte RAG :** Documentation trouvée pour "ajouter un client", rien pour "formations"
+
+**Réponse IA :**
+```markdown
+[QUESTION_BLOCK id="1" question="Comment ajouter un client dans le logiciel ?" type="documented"]
+Pour ajouter un nouveau client :
+1. Allez dans **Clients** > **Nouveau client**
+2. Remplissez les champs obligatoires (nom, email, téléphone)
+3. Cliquez sur **Enregistrer**
+
+Le client apparaîtra immédiatement dans votre liste de contacts.
+[/QUESTION_BLOCK]
+
+[QUESTION_BLOCK id="2" question="Proposez-vous des formations sur place ?" type="suggestion"]
+Nous proposons généralement plusieurs formats de formation :
+- Formations en ligne (webinaires)
+- Formations sur site (à vérifier la disponibilité dans votre région)
+- Documentation et tutoriels vidéo
+
+Je vous recommande de contacter notre service commercial pour connaître les options de formation disponibles pour votre entreprise.
+
+*Note : Cette information est basée sur les pratiques courantes. Un conseiller pourra vous confirmer les modalités exactes.*
+[/QUESTION_BLOCK]
+```
+
+**Affichage Back-Office :**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 🤖 Assistant IA                           [En attente]         │
+│ 2 questions détectées                                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Question 1  [📄 Documenté]                        [Valider] │ │
+│ │ Comment ajouter un client dans le logiciel ?                │ │
+│ ├─────────────────────────────────────────────────────────────┤ │
+│ │ Pour ajouter un nouveau client :                            │ │
+│ │ 1. Allez dans Clients > Nouveau client...                   │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│ ┌─────────────────────────────────────────────────────────────┐ │
+│ │ Question 2  [💡 Suggestion]                       [Valider] │ │
+│ │ Proposez-vous des formations sur place ?                    │ │
+│ ├─────────────────────────────────────────────────────────────┤ │
+│ │ ⚠️ Suggestion IA - Pas de documentation trouvée            │ │
+│ ├─────────────────────────────────────────────────────────────┤ │
+│ │ Nous proposons généralement plusieurs formats...            │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 17.7 Stockage dans rag_context
+
+```json
+{
+    "multi_question": {
+        "is_multi": true,
+        "blocks": [
+            {
+                "id": 1,
+                "question": "Comment ajouter un client dans le logiciel ?",
+                "answer": "Pour ajouter un nouveau client...",
+                "type": "documented",
+                "is_suggestion": false,
+                "learned": false
+            },
+            {
+                "id": 2,
+                "question": "Proposez-vous des formations sur place ?",
+                "answer": "Nous proposons généralement...",
+                "type": "suggestion",
+                "is_suggestion": true,
+                "learned": false
+            }
+        ]
+    },
+    "stats": { ... },
+    "document_sources": [ ... ]
+}
+```
+
+---
+
+## 18. Risques et Mitigations (Global)
 
 | Risque | Impact | Mitigation |
 |--------|--------|------------|
@@ -1056,21 +1366,58 @@ Forms\Components\Toggle::make('strict_mode')
 | Confusion utilisateur | Moyen | Option désactivée par défaut, documentation claire |
 | Blocs partiellement validés | Faible | Tracking du statut par bloc, interface claire |
 | Agent valide suggestion sans vérifier | Haut | Bannière d'avertissement, logs d'audit |
+| Format combiné trop complexe pour l'IA | Moyen | Instructions claires avec exemples, tests par LLM |
 
-## 18. Métriques de Succès (Global)
+## 19. Métriques de Succès (Global)
 
 - Taux de détection correct des multi-questions (>90% visé)
 - Augmentation du nombre de paires Q/R indexées
 - Amélioration du score de similarité moyen sur les recherches
 - Réduction du temps de validation admin
 - Taux de correction des suggestions vs réponses documentées
+- Répartition documenté/suggestion par bloc (pour mesurer la couverture documentaire)
+
+## 20. Plan d'Implémentation Révisé
+
+### Phase 1 : Infrastructure de Base (3-4 jours)
+- [ ] Créer `MultiQuestionParser.php` avec support du type par bloc
+- [ ] Créer `ResponseParser.php` pour les réponses simples
+- [ ] Tests unitaires des parsers
+- [ ] Migration optionnelle `allow_suggestions_without_context`
+
+### Phase 2 : Modification du PromptBuilder (2-3 jours)
+- [ ] Ajouter `getStrictAssistedGuardrails()`
+- [ ] Intégrer la logique mode strict/assisté dans `buildChatMessages()`
+- [ ] Instructions combinées multi-questions + strict assisté
+- [ ] Tests d'intégration avec différents LLM
+
+### Phase 3 : Intégration ProcessAiMessageJob (2 jours)
+- [ ] Parser les réponses après génération
+- [ ] Stocker le type par bloc dans `rag_context`
+- [ ] Nettoyer le contenu pour l'affichage
+
+### Phase 4 : Interface Admin (3-4 jours)
+- [ ] Modifier le template Blade pour l'affichage multi-blocs
+- [ ] Ajouter les badges de type par bloc
+- [ ] Bannières d'avertissement pour les suggestions
+- [ ] Méthode `learnMultiQuestionBlock()` dans ViewAiSession
+
+### Phase 5 : Tests et Ajustements (2-3 jours)
+- [ ] Tests end-to-end avec différents LLM (Mistral, Gemini, Claude, GPT)
+- [ ] Ajustement des prompts selon le comportement observé
+- [ ] Tests de charge (parsing sur volume élevé)
+- [ ] Documentation utilisateur
+
+**Durée estimée totale : 12-16 jours**
 
 ---
 
 **Auteur :** Claude
 **Date :** 2025-01-03
-**Version :** 1.1
+**Version :** 1.2
 **Statut :** Proposition
 
 **Changelog :**
+- v1.2 : Ajout de la Partie 3 - Intégration Multi-Questions + Strict Assisté (badge par bloc)
 - v1.1 : Ajout de la Partie 2 - Mode Strict Assisté avec Handoff Humain
+- v1.0 : Partie 1 - Détection Multi-Questions et Apprentissage Granulaire
