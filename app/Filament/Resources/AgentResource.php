@@ -10,6 +10,7 @@ use App\Filament\Resources\AgentResource\Pages;
 use Filament\Forms\Get;
 use App\Filament\Resources\AgentResource\RelationManagers;
 use App\Models\Agent;
+use App\Models\ConfigurableList;
 use App\Services\AgentResetService;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -134,17 +135,14 @@ class AgentResource extends Resource
                                         Forms\Components\Select::make('llm_api_model')
                                             ->label('Modèle API')
                                             ->options(fn (Get $get) => match ($get('llm_provider')) {
-                                                'gemini' => [
-                                                    'gemini-2.5-flash' => 'Gemini 2.5 Flash (Recommandé)',
-                                                    'gemini-2.5-flash-lite' => 'Gemini 2.5 Flash Lite (Plus rapide)',
-                                                    'gemini-2.5-pro' => 'Gemini 2.5 Pro (Plus puissant)',
-                                                    'gemini-2.0-flash' => 'Gemini 2.0 Flash',
-                                                ],
-                                                'openai' => [
-                                                    'gpt-4o-mini' => 'GPT-4o Mini (Économique)',
-                                                    'gpt-4o' => 'GPT-4o (Performant)',
-                                                    'gpt-4-turbo' => 'GPT-4 Turbo',
-                                                ],
+                                                'gemini' => ConfigurableList::getOptionsForSelect(
+                                                    ConfigurableList::KEY_GEMINI_MODELS,
+                                                    ConfigurableList::getDefaultData(ConfigurableList::KEY_GEMINI_MODELS)
+                                                ),
+                                                'openai' => ConfigurableList::getOptionsForSelect(
+                                                    ConfigurableList::KEY_OPENAI_MODELS,
+                                                    ConfigurableList::getDefaultData(ConfigurableList::KEY_OPENAI_MODELS)
+                                                ),
                                                 default => [],
                                             })
                                             ->visible(fn (Get $get) => in_array($get('llm_provider'), ['gemini', 'openai']))
@@ -152,7 +150,8 @@ class AgentResource extends Resource
                                                 'gemini' => 'gemini-2.5-flash',
                                                 'openai' => 'gpt-4o-mini',
                                                 default => null,
-                                            }),
+                                            })
+                                            ->helperText('Gérez les modèles dans Administration > Paramètres'),
 
                                         // Champs Ollama
                                         Forms\Components\TextInput::make('model')

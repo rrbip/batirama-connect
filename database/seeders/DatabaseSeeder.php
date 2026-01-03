@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             OuvrageSeeder::class,
             SupportDocSeeder::class,
             PartnerSeeder::class,
+            ConfigurableListSeeder::class,
         ]);
     }
 }
