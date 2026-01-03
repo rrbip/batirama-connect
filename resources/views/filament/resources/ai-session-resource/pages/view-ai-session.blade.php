@@ -286,6 +286,7 @@
                                     'is_suggestion' => $b['is_suggestion'] ?? false,
                                     'type' => $b['type'] ?? 'unknown',
                                     'improving' => false,
+                                    'rag_match' => $b['rag_match'] ?? null,
                                 ])->values()->toArray()),
                                 sent: @js($message['validation_status'] === 'learned' || $message['validation_status'] === 'validated'),
                                 openContext: false,
@@ -443,15 +444,37 @@
                                                                 SUGGESTION IA
                                                             </x-filament::badge>
 
-                                                            {{-- Badge type: Documenté --}}
-                                                            <x-filament::badge color="info" icon="heroicon-s-document-check" x-show="!block.is_suggestion && block.type === 'documented'">
-                                                                DOCUMENTÉ
-                                                            </x-filament::badge>
+                                                            {{-- Badge type: Documenté (avec tooltip au survol) --}}
+                                                            <div class="relative group" x-show="!block.is_suggestion && block.type === 'documented'">
+                                                                <x-filament::badge color="info" icon="heroicon-s-document-check" class="cursor-help">
+                                                                    DOCUMENTÉ
+                                                                </x-filament::badge>
+                                                                {{-- Tooltip avec la question source --}}
+                                                                <div x-show="block.rag_match && block.rag_match.matched_question"
+                                                                    class="absolute z-50 hidden group-hover:block left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+                                                                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Source correspondante :</div>
+                                                                    <div class="text-sm text-gray-700 dark:text-gray-200" x-text="block.rag_match?.matched_question"></div>
+                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                                                        Score : <span x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(0) + '%' : 'N/A'"></span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
 
-                                                            {{-- Badge type: Direct QR Match (Qdrant sans LLM) --}}
-                                                            <x-filament::badge color="success" icon="heroicon-s-bolt" x-show="block.type === 'direct_qr_match'">
-                                                                RÉPONSE DIRECTE
-                                                            </x-filament::badge>
+                                                            {{-- Badge type: Direct QR Match (Qdrant sans LLM) avec tooltip --}}
+                                                            <div class="relative group" x-show="block.type === 'direct_qr_match'">
+                                                                <x-filament::badge color="success" icon="heroicon-s-bolt" class="cursor-help">
+                                                                    RÉPONSE DIRECTE
+                                                                </x-filament::badge>
+                                                                {{-- Tooltip avec la question source --}}
+                                                                <div x-show="block.rag_match && block.rag_match.matched_question"
+                                                                    class="absolute z-50 hidden group-hover:block left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
+                                                                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Question source (match exact) :</div>
+                                                                    <div class="text-sm text-gray-700 dark:text-gray-200" x-text="block.rag_match?.matched_question"></div>
+                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+                                                                        Score : <span x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(0) + '%' : 'N/A'"></span>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
 
                                                             {{-- Badge état: Validé --}}
                                                             <x-filament::badge color="success" icon="heroicon-s-check" x-show="block.validated && !block.rejected">
@@ -495,12 +518,24 @@
 
                                                         {{-- Réponse --}}
                                                         <div class="mb-3">
-                                                            <div class="flex items-center justify-between mb-1">
-                                                                <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200">Réponse :</label>
-                                                                {{-- Bouton Améliorer (visible seulement si éditable) --}}
+                                                            <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Réponse :</label>
+                                                            <textarea
+                                                                x-model="block.answer"
+                                                                :disabled="block.validated || block.rejected || sent"
+                                                                :class="{
+                                                                    'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
+                                                                    'line-through opacity-50': block.rejected
+                                                                }"
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
+                                                                rows="1"
+                                                                x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = ($el.scrollHeight + 2) + 'px'; })"
+                                                            ></textarea>
+                                                            {{-- Bouton Améliorer (sous le textarea, aligné à droite) --}}
+                                                            <div class="flex justify-end mt-1"
+                                                                x-show="!block.validated && !block.rejected && !sent && block.answer.length > 0">
                                                                 <button
                                                                     type="button"
-                                                                    x-show="!block.validated && !block.rejected && !sent && block.answer.length > 0"
                                                                     x-on:click="
                                                                         block.improving = true;
                                                                         $wire.improveBlockResponse({{ $message['original_id'] }}, block.id, block.question, block.answer)
@@ -531,18 +566,6 @@
                                                                     </template>
                                                                 </button>
                                                             </div>
-                                                            <textarea
-                                                                x-model="block.answer"
-                                                                :disabled="block.validated || block.rejected || sent"
-                                                                :class="{
-                                                                    'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 cursor-not-allowed': block.validated || block.rejected || sent,
-                                                                    'line-through opacity-50': block.rejected
-                                                                }"
-                                                                class="w-full p-3 rounded-lg text-sm border resize-none overflow-hidden"
-                                                                rows="1"
-                                                                x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = ($el.scrollHeight + 2) + 'px'; })"
-                                                            ></textarea>
                                                         </div>
 
                                                         {{-- Checkbox handoff --}}
