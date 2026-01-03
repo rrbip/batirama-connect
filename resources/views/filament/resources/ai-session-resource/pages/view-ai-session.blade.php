@@ -626,7 +626,13 @@
                                             <span>{{ $message['created_at']->format('H:i') }}</span>
                                             <div class="flex items-center gap-2">
                                                 @if($message['model_used'])
-                                                    <span>{{ $message['model_used'] }}</span>
+                                                    @if($message['model_used'] === 'direct_qr_match')
+                                                        <x-filament::badge color="success" size="sm" icon="heroicon-s-bolt">
+                                                            RÉPONSE DIRECTE
+                                                        </x-filament::badge>
+                                                    @else
+                                                        <span>{{ $message['model_used'] }}</span>
+                                                    @endif
                                                 @endif
                                                 @if($message['tokens'])
                                                     <span>{{ $message['tokens'] }} tokens</span>
