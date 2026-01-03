@@ -409,7 +409,7 @@
                                                             'border-danger-500 bg-danger-50 dark:bg-danger-950 opacity-70': block.rejected
                                                         }">
                                                         {{-- Header du bloc --}}
-                                                        <div class="flex items-center justify-between gap-3 mb-3">
+                                                        <div class="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
                                                             <div class="flex items-center gap-2 flex-wrap">
                                                                 {{-- Numéro de question (multi-questions) --}}
                                                                 <x-filament::badge color="primary" x-show="blocks.length > 1">
@@ -489,7 +489,7 @@
                                                         {{-- Question --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Question :</label>
-                                                            <div class="p-3 rounded-lg text-sm min-h-[2.5rem]"
+                                                            <div class="p-3 rounded-lg text-sm min-h-[2.5rem] whitespace-pre-wrap"
                                                                 :class="{
                                                                     'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
                                                                     'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
@@ -504,7 +504,7 @@
                                                         {{-- Réponse --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Réponse :</label>
-                                                            <div class="p-3 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none min-h-[4rem]"
+                                                            <div class="p-3 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none min-h-[4rem] whitespace-pre-wrap"
                                                                 :class="{
                                                                     'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
                                                                     'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
