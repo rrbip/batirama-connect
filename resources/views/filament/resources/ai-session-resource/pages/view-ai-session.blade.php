@@ -402,28 +402,28 @@
                                         @else
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
-                                                    <div class="border-2 rounded-lg p-4" :class="{
-                                                        'border-gray-300 dark:border-gray-600': !block.rejected && !block.validated,
-                                                        'border-green-500 dark:border-green-400': block.validated && !block.rejected,
-                                                        'border-red-500 dark:border-red-400 opacity-60': block.rejected
-                                                    }">
+                                                    <div class="border-2 rounded-lg p-4"
+                                                        :style="{
+                                                            borderColor: block.rejected ? '#ef4444' : (block.validated ? '#22c55e' : '#d1d5db'),
+                                                            opacity: block.rejected ? 0.6 : 1
+                                                        }">
                                                         {{-- Header du bloc --}}
                                                         <div class="flex items-center justify-between gap-2 mb-3">
                                                             <div class="flex items-center gap-2 flex-wrap">
                                                                 {{-- Numéro de question (visible multi-questions) --}}
-                                                                <span class="inline-flex items-center px-2.5 py-1 text-xs font-bold rounded bg-primary-100 text-primary-800 dark:bg-primary-900 dark:text-primary-200" x-show="blocks.length > 1">
+                                                                <span class="inline-flex items-center px-2.5 py-1 text-xs font-bold rounded shadow-sm" x-show="blocks.length > 1" style="background-color: #3b82f6; color: white;">
                                                                     Question <span x-text="block.id"></span>/<span x-text="blocks.length"></span>
                                                                 </span>
 
                                                                 {{-- Badge type (Suggestion/Documenté) - TRÈS VISIBLE --}}
                                                                 <template x-if="block.is_suggestion || block.type === 'suggestion'">
-                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-bold rounded-lg bg-amber-500 text-white shadow-sm">
+                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg shadow-md" style="background-color: #f59e0b; color: white;">
                                                                         <x-heroicon-s-light-bulb class="w-4 h-4" />
                                                                         SUGGESTION IA
                                                                     </span>
                                                                 </template>
                                                                 <template x-if="!block.is_suggestion && block.type === 'documented'">
-                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-bold rounded-lg bg-cyan-500 text-white shadow-sm">
+                                                                    <span class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold rounded-lg shadow-md" style="background-color: #06b6d4; color: white;">
                                                                         <x-heroicon-s-document-check class="w-4 h-4" />
                                                                         DOCUMENTÉ
                                                                     </span>
@@ -431,17 +431,17 @@
 
                                                                 {{-- Badge validé --}}
                                                                 <template x-if="block.validated && !block.rejected">
-                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-success-100 text-success-700 dark:bg-success-900 dark:text-success-300">
-                                                                        <x-heroicon-o-check class="w-3 h-3" />
-                                                                        Validé
+                                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full" style="background-color: #dcfce7; color: #15803d;">
+                                                                        <x-heroicon-s-check class="w-3.5 h-3.5" />
+                                                                        VALIDÉ
                                                                     </span>
                                                                 </template>
 
                                                                 {{-- Badge rejeté --}}
                                                                 <template x-if="block.rejected">
-                                                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-danger-100 text-danger-700 dark:bg-danger-900 dark:text-danger-300">
-                                                                        <x-heroicon-o-x-mark class="w-3 h-3" />
-                                                                        Rejeté
+                                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-full" style="background-color: #fee2e2; color: #b91c1c;">
+                                                                        <x-heroicon-s-x-mark class="w-3.5 h-3.5" />
+                                                                        REJETÉ
                                                                     </span>
                                                                 </template>
                                                             </div>
@@ -453,13 +453,15 @@
                                                                     <div class="flex gap-2">
                                                                         <button type="button"
                                                                             @click="block.validated = true"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-green-600 text-white hover:bg-green-700 shadow transition-all">
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg shadow-md transition-all hover:opacity-90"
+                                                                            style="background-color: #16a34a; color: white;">
                                                                             <x-heroicon-s-check class="w-4 h-4" />
                                                                             Valider
                                                                         </button>
                                                                         <button type="button"
                                                                             @click="block.rejected = true"
-                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg bg-red-600 text-white hover:bg-red-700 shadow transition-all">
+                                                                            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold rounded-lg shadow-md transition-all hover:opacity-90"
+                                                                            style="background-color: #dc2626; color: white;">
                                                                             <x-heroicon-s-x-mark class="w-4 h-4" />
                                                                             Rejeter
                                                                         </button>
@@ -470,7 +472,8 @@
                                                                 <template x-if="block.validated || block.rejected">
                                                                     <button type="button"
                                                                         @click="block.validated = false; block.rejected = false"
-                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600 border border-gray-400 dark:border-gray-500">
+                                                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border-2 transition-all hover:opacity-80"
+                                                                        style="background-color: #f3f4f6; color: #374151; border-color: #9ca3af;">
                                                                         <x-heroicon-o-arrow-uturn-left class="w-4 h-4" />
                                                                         Annuler
                                                                     </button>
@@ -550,7 +553,8 @@
                                                         {{-- Bouton Envoyer - PROMINENT --}}
                                                         <button type="button"
                                                             @click="sendAll()"
-                                                            class="inline-flex items-center gap-2 px-6 py-3 text-base font-bold rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
+                                                            class="inline-flex items-center gap-2 px-6 py-3 text-base font-bold rounded-xl shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all hover:opacity-90"
+                                                            style="background-color: #2563eb; color: white;"
                                                             :disabled="getValidatedBlocks().length === 0">
                                                             <x-heroicon-s-paper-airplane class="w-5 h-5" />
                                                             Envoyer
@@ -566,7 +570,8 @@
                                                     <button type="button"
                                                         @click="validateAllPending()"
                                                         x-show="getPendingBlocks().length > 0"
-                                                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-200 dark:hover:bg-green-800 border border-green-400 dark:border-green-600">
+                                                        class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg border-2 transition-all hover:opacity-90"
+                                                        style="background-color: #dcfce7; color: #15803d; border-color: #22c55e;">
                                                         <x-heroicon-s-check-circle class="w-4 h-4" />
                                                         Tout valider
                                                     </button>
