@@ -291,6 +291,11 @@
                                     return this.blocks.filter(b => !b.validated && !b.rejected);
                                 },
 
+                                // Vérifier si tous les blocs sont rejetés
+                                allRejected() {
+                                    return this.blocks.length > 0 && this.blocks.every(b => b.rejected);
+                                },
+
                                 // Valider tous les blocs en attente
                                 validateAllPending() {
                                     this.blocks.forEach(b => {
@@ -317,6 +322,12 @@
                                     }
 
                                     $wire.sendValidatedBlocks({{ $message['original_id'] }}, validBlocks);
+                                    this.sent = true;
+                                },
+
+                                // Passer (tout rejeté)
+                                skipAll() {
+                                    $wire.rejectAllBlocks({{ $message['original_id'] }});
                                     this.sent = true;
                                 },
 
@@ -392,7 +403,7 @@
 
                                         {{-- Message en cours de génération --}}
                                         @if(empty(trim($message['content'] ?? '')))
-                                            <div class="flex items-center gap-2 text-gray-400 italic mb-4">
+                                            <div class="flex items-center gap-2 text-gray-400 italic mb-4" wire:poll.3s>
                                                 <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -402,11 +413,11 @@
                                         @else
                                             <div class="space-y-4">
                                                 <template x-for="(block, blockIndex) in blocks" :key="block.id">
-                                                    <div class="border-2 rounded-lg p-4 transition-colors"
+                                                    <div class="rounded-lg p-4 transition-all"
                                                         :class="{
-                                                            'border-gray-300 dark:border-gray-600': !block.rejected && !block.validated,
-                                                            'border-success-500 bg-success-50 dark:bg-success-950': block.validated && !block.rejected,
-                                                            'border-danger-500 bg-danger-50 dark:bg-danger-950 opacity-70': block.rejected
+                                                            'border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800': !block.rejected && !block.validated,
+                                                            'border-2 border-success-400 dark:border-success-600 bg-success-50 dark:bg-success-900/30': block.validated && !block.rejected,
+                                                            'border-2 border-danger-400 dark:border-danger-600 bg-danger-50 dark:bg-danger-900/30 opacity-60': block.rejected
                                                         }">
                                                         {{-- Header du bloc --}}
                                                         <div class="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-200 dark:border-gray-700">
@@ -489,29 +500,37 @@
                                                         {{-- Question --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Question :</label>
-                                                            <div class="p-3 rounded-lg text-sm min-h-[2.5rem] whitespace-pre-wrap"
+                                                            <textarea
+                                                                x-model="block.question"
+                                                                :disabled="block.validated || block.rejected || sent"
                                                                 :class="{
-                                                                    'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
+                                                                    'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                :contenteditable="!block.validated && !block.rejected && !sent"
-                                                                @input="block.question = $event.target.innerText"
-                                                                x-text="block.question">
-                                                            </div>
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none dark:text-gray-100"
+                                                                rows="2"
+                                                                x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                            ></textarea>
                                                         </div>
 
                                                         {{-- Réponse --}}
                                                         <div class="mb-3">
                                                             <label class="block text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Réponse :</label>
-                                                            <div class="p-3 rounded-lg text-sm prose prose-sm dark:prose-invert max-w-none min-h-[4rem] whitespace-pre-wrap"
+                                                            <textarea
+                                                                x-model="block.answer"
+                                                                :disabled="block.validated || block.rejected || sent"
                                                                 :class="{
-                                                                    'bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
-                                                                    'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700': block.validated || block.rejected || sent,
+                                                                    'bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600': !block.validated && !block.rejected && !sent,
+                                                                    'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-not-allowed': block.validated || block.rejected || sent,
                                                                     'line-through opacity-50': block.rejected
                                                                 }"
-                                                                x-html="block.answer">
-                                                            </div>
+                                                                class="w-full p-3 rounded-lg text-sm border resize-none dark:text-gray-100"
+                                                                rows="4"
+                                                                x-init="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                            ></textarea>
                                                         </div>
 
                                                         {{-- Checkbox handoff - TOUJOURS VISIBLE, désactivée si verrouillé --}}
@@ -542,20 +561,37 @@
                                             <div class="mt-5 pt-4 border-t-2 border-gray-200 dark:border-gray-700" x-show="!sent">
                                                 <div class="flex items-center justify-between gap-4 flex-wrap">
                                                     <div class="flex items-center gap-4">
-                                                        {{-- Bouton Envoyer --}}
+                                                        {{-- Bouton Envoyer (si au moins un validé) --}}
                                                         <x-filament::button
                                                             color="primary"
                                                             size="lg"
                                                             icon="heroicon-s-paper-airplane"
+                                                            x-show="!allRejected()"
                                                             x-on:click="sendAll()"
                                                             ::disabled="getValidatedBlocks().length === 0"
                                                         >
                                                             Envoyer
                                                         </x-filament::button>
 
+                                                        {{-- Bouton Passer (si tout rejeté) --}}
+                                                        <x-filament::button
+                                                            color="gray"
+                                                            size="lg"
+                                                            icon="heroicon-s-forward"
+                                                            x-show="allRejected()"
+                                                            x-on:click="skipAll()"
+                                                        >
+                                                            Passer
+                                                        </x-filament::button>
+
                                                         {{-- Compteur blocs validés --}}
-                                                        <x-filament::badge color="gray" x-show="blocks.length > 1">
+                                                        <x-filament::badge color="gray" x-show="blocks.length > 1 && !allRejected()">
                                                             <span x-text="getValidatedBlocks().length"></span>/<span x-text="blocks.length"></span> validés
+                                                        </x-filament::badge>
+
+                                                        {{-- Indication tout rejeté --}}
+                                                        <x-filament::badge color="danger" x-show="allRejected()">
+                                                            Tout rejeté
                                                         </x-filament::badge>
                                                     </div>
 

@@ -1403,4 +1403,36 @@ class ViewAiSession extends ViewRecord
                 ->send();
         }
     }
+
+    /**
+     * Rejette tous les blocs d'un message (équivalent à "Passer").
+     * Utilisé quand l'agent décide de ne pas envoyer la réponse IA.
+     *
+     * @param int $messageId ID du message IA
+     */
+    public function rejectAllBlocks(int $messageId): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        try {
+            app(LearningService::class)->reject($message, auth()->id(), 'Réponse IA passée par l\'agent');
+
+            Notification::make()
+                ->title('Réponse passée')
+                ->body('La suggestion IA a été ignorée.')
+                ->info()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
 }
