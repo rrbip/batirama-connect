@@ -9,6 +9,7 @@ use App\Filament\Resources\AiSessionResource;
 use App\Models\AiMessage;
 use App\Models\SupportMessage;
 use App\Services\AI\LearningService;
+use App\Services\AI\MultiQuestionParser;
 use App\Services\Support\EscalationService;
 use App\Services\Support\SupportService;
 use Filament\Actions;
@@ -16,6 +17,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\On;
 
 class ViewAiSession extends ViewRecord
@@ -918,5 +920,299 @@ class ViewAiSession extends ViewRecord
     {
         return app(\App\Services\Support\SupportTrainingService::class)
             ->getPendingQrPairs($this->record);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // APPRENTISSAGE MULTI-QUESTIONS
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Valide un bloc spécifique d'une réponse multi-questions.
+     */
+    public function learnMultiQuestionBlock(
+        int $messageId,
+        int $blockId,
+        string $question,
+        string $answer,
+        bool $requiresHandoff = false
+    ): void {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        if (empty(trim($question)) || empty(trim($answer))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('La question et la réponse ne peuvent pas être vides.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            // Indexer la paire Q/R
+            $result = app(LearningService::class)->indexLearnedResponse(
+                question: trim($question),
+                answer: trim($answer),
+                agentId: $this->record->agent_id,
+                agentSlug: $this->record->agent->slug,
+                messageId: $messageId,
+                validatorId: auth()->id(),
+                requiresHandoff: $requiresHandoff
+            );
+
+            if ($result) {
+                // Mettre à jour le statut du bloc dans rag_context
+                $this->updateBlockLearnedStatus($message, $blockId);
+
+                Notification::make()
+                    ->title('Bloc appris')
+                    ->body("Question {$blockId} indexée avec succès.")
+                    ->success()
+                    ->send();
+            } else {
+                Notification::make()
+                    ->title('Erreur')
+                    ->body('Impossible d\'indexer le bloc.')
+                    ->danger()
+                    ->send();
+            }
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Met à jour le statut d'apprentissage d'un bloc dans rag_context.
+     */
+    private function updateBlockLearnedStatus(AiMessage $message, int $blockId): void
+    {
+        $ragContext = $message->rag_context ?? [];
+
+        if (!isset($ragContext['multi_question']['blocks'])) {
+            return;
+        }
+
+        $parser = new MultiQuestionParser();
+        $blocks = $parser->markBlockAsLearned(
+            $ragContext['multi_question']['blocks'],
+            $blockId,
+            auth()->id()
+        );
+
+        $ragContext['multi_question']['blocks'] = $blocks;
+
+        // Vérifier si tous les blocs sont appris
+        if ($parser->allBlocksLearned($blocks)) {
+            $message->update([
+                'rag_context' => $ragContext,
+                'validation_status' => 'learned',
+                'validated_by' => auth()->id(),
+                'validated_at' => now(),
+            ]);
+        } else {
+            $message->update(['rag_context' => $ragContext]);
+        }
+    }
+
+    /**
+     * Récupère les statistiques d'apprentissage des blocs multi-questions.
+     */
+    public function getMultiQuestionStats(AiMessage $message): array
+    {
+        $ragContext = $message->rag_context ?? [];
+
+        if (!isset($ragContext['multi_question']['blocks'])) {
+            return ['learned' => 0, 'total' => 0, 'percentage' => 0];
+        }
+
+        $parser = new MultiQuestionParser();
+        return $parser->getLearnedStats($ragContext['multi_question']['blocks']);
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MODE APPRENTISSAGE ACCÉLÉRÉ
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Indique si la zone de réponse libre est déverrouillée.
+     * En mode accéléré, elle est verrouillée par défaut.
+     */
+    public bool $canRespondFreely = false;
+
+    /**
+     * ID du message IA rejeté (pour indexer la réponse de l'agent).
+     */
+    public ?int $rejectedMessageId = null;
+
+    /**
+     * Vérifie si le mode apprentissage accéléré est actif.
+     */
+    public function isAcceleratedLearningMode(): bool
+    {
+        return $this->record->agent?->isAcceleratedLearningEnabled() ?? false;
+    }
+
+    /**
+     * Rejette la réponse IA et déverrouille la zone de réponse.
+     */
+    public function rejectAndUnlock(int $messageId): void
+    {
+        $message = AiMessage::findOrFail($messageId);
+
+        if ($message->session_id !== $this->record->id) {
+            return;
+        }
+
+        try {
+            // Marquer comme rejeté
+            app(LearningService::class)->reject($message, auth()->id(), 'Agent a préféré rédiger');
+
+            // Déverrouiller la zone de réponse
+            $this->canRespondFreely = true;
+            $this->rejectedMessageId = $messageId;
+
+            Notification::make()
+                ->title('Réponse rejetée')
+                ->body('Vous pouvez maintenant rédiger votre réponse.')
+                ->info()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Passe sans impact sur l'apprentissage.
+     */
+    public function skipToFreeResponse(?string $reason = null): void
+    {
+        // Vérifier si le skip est autorisé
+        $agent = $this->record->agent;
+        if ($agent && !$agent->allowsSkipInAcceleratedMode()) {
+            Notification::make()
+                ->title('Action non autorisée')
+                ->body('Le bouton "Passer" est désactivé pour cet agent.')
+                ->warning()
+                ->send();
+            return;
+        }
+
+        $this->canRespondFreely = true;
+        $this->rejectedMessageId = null;
+
+        // Logger le skip pour analyse
+        Log::info('Agent skipped accelerated learning', [
+            'session_id' => $this->record->id,
+            'agent_id' => auth()->id(),
+            'reason' => $reason,
+        ]);
+
+        Notification::make()
+            ->title('Mode libre activé')
+            ->body('Vous pouvez répondre librement.')
+            ->info()
+            ->send();
+    }
+
+    /**
+     * Envoie la réponse libre ET l'indexe (après refus ou mode accéléré).
+     */
+    public function sendAndLearn(): void
+    {
+        if (empty(trim($this->supportMessage))) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Le message ne peut pas être vide.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        // Vérifier l'assignation
+        if ($this->record->support_status === 'escalated') {
+            app(SupportService::class)->takeOverSession($this->record, auth()->user());
+            $this->record->refresh();
+        } elseif ($this->record->support_agent_id !== auth()->id()) {
+            Notification::make()
+                ->title('Erreur')
+                ->body('Vous n\'êtes pas assigné à cette conversation.')
+                ->danger()
+                ->send();
+            return;
+        }
+
+        try {
+            // Envoyer le message
+            app(SupportService::class)->sendAgentMessage(
+                $this->record,
+                auth()->user(),
+                $this->supportMessage
+            );
+
+            // Récupérer la dernière question utilisateur pour l'apprentissage
+            $lastUserMessage = $this->record->messages()
+                ->where('role', 'user')
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if ($lastUserMessage) {
+                // Indexer la nouvelle paire Q/R
+                app(LearningService::class)->indexLearnedResponse(
+                    question: $lastUserMessage->content,
+                    answer: $this->supportMessage,
+                    agentId: $this->record->agent_id,
+                    agentSlug: $this->record->agent->slug,
+                    messageId: $lastUserMessage->id,
+                    validatorId: auth()->id()
+                );
+            }
+
+            $this->supportMessage = '';
+            $this->canRespondFreely = false;
+            $this->rejectedMessageId = null;
+
+            Notification::make()
+                ->title('Message envoyé et indexé')
+                ->body('Votre réponse a été envoyée et l\'IA a appris de cette interaction.')
+                ->success()
+                ->send();
+
+        } catch (\Throwable $e) {
+            Notification::make()
+                ->title('Erreur')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /**
+     * Retourne les raisons de skip disponibles.
+     */
+    public function getSkipReasons(): array
+    {
+        return $this->record->agent?->getSkipReasons() ?? [];
+    }
+
+    /**
+     * Vérifie si un motif de skip est obligatoire.
+     */
+    public function requiresSkipReason(): bool
+    {
+        $config = $this->record->agent?->getAcceleratedLearningConfig() ?? [];
+        return $config['require_skip_reason'] ?? false;
     }
 }

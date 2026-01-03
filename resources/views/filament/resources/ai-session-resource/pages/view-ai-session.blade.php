@@ -263,7 +263,45 @@
                                             @elseif($message['validation_status'] === 'rejected')
                                                 <x-filament::badge color="danger" size="sm">Rejetée</x-filament::badge>
                                             @endif
+
+                                            {{-- Badge de type de réponse (Documenté / Suggestion) --}}
+                                            @php
+                                                $responseType = $message['rag_context']['response_type'] ?? 'unknown';
+                                                $isSuggestion = $message['rag_context']['is_suggestion'] ?? false;
+                                                $isMultiQuestion = $message['rag_context']['multi_question']['is_multi'] ?? false;
+                                                $blockCount = $message['rag_context']['multi_question']['block_count'] ?? 0;
+                                            @endphp
+
+                                            @if($isSuggestion)
+                                                <x-filament::badge color="warning" size="sm" icon="heroicon-o-light-bulb">
+                                                    Suggestion IA
+                                                </x-filament::badge>
+                                            @elseif($responseType === 'documented')
+                                                <x-filament::badge color="info" size="sm" icon="heroicon-o-document-check">
+                                                    Documenté
+                                                </x-filament::badge>
+                                            @endif
+
+                                            @if($isMultiQuestion)
+                                                <x-filament::badge color="gray" size="sm" icon="heroicon-o-queue-list">
+                                                    {{ $blockCount }} questions
+                                                </x-filament::badge>
+                                            @endif
                                         </div>
+
+                                        {{-- Bannière d'avertissement pour les suggestions --}}
+                                        @if($isSuggestion && $message['validation_status'] === 'pending')
+                                            <div class="mb-3 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded-lg">
+                                                <div class="flex items-start gap-2">
+                                                    <x-heroicon-o-exclamation-triangle class="w-5 h-5 text-warning-500 flex-shrink-0 mt-0.5" />
+                                                    <div class="text-xs text-warning-700 dark:text-warning-300">
+                                                        <strong>Attention :</strong> Cette réponse est une suggestion basée sur les connaissances générales de l'IA.
+                                                        Aucune source documentaire n'a été trouvée.
+                                                        <strong>Vérifiez et corrigez si nécessaire avant validation.</strong>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        @endif
 
                                         {{-- Contenu --}}
                                         <div class="prose prose-sm dark:prose-invert max-w-none">
@@ -343,14 +381,25 @@
                                                     </x-filament::button>
 
                                                     @if(!($message['is_direct_match'] ?? false))
-                                                    <x-filament::button
-                                                        size="xs"
-                                                        color="danger"
-                                                        icon="heroicon-o-x-mark"
-                                                        wire:click="rejectMessage({{ $message['original_id'] }})"
-                                                    >
-                                                        Rejeter
-                                                    </x-filament::button>
+                                                        @if($this->isAcceleratedLearningMode())
+                                                            <x-filament::button
+                                                                size="xs"
+                                                                color="danger"
+                                                                icon="heroicon-o-x-mark"
+                                                                wire:click="rejectAndUnlock({{ $message['original_id'] }})"
+                                                            >
+                                                                Refuser et Rédiger
+                                                            </x-filament::button>
+                                                        @else
+                                                            <x-filament::button
+                                                                size="xs"
+                                                                color="danger"
+                                                                icon="heroicon-o-x-mark"
+                                                                wire:click="rejectMessage({{ $message['original_id'] }})"
+                                                            >
+                                                                Rejeter
+                                                            </x-filament::button>
+                                                        @endif
                                                     @endif
                                                 </div>
 
@@ -444,6 +493,140 @@
                                                         </x-filament::button>
                                                     </div>
                                                 </div>
+                                            </div>
+                                        @endif
+
+                                        {{-- Blocs Multi-Questions --}}
+                                        @if($isMultiQuestion && !empty($message['rag_context']['multi_question']['blocks']))
+                                            @php $blocks = $message['rag_context']['multi_question']['blocks']; @endphp
+                                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                                                <div class="flex items-center justify-between">
+                                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                                        Blocs Q/R individuels
+                                                    </span>
+                                                    @php
+                                                        $learnedCount = collect($blocks)->where('learned', true)->count();
+                                                        $totalBlocks = count($blocks);
+                                                    @endphp
+                                                    <span class="text-xs text-gray-500">
+                                                        {{ $learnedCount }}/{{ $totalBlocks }} validés
+                                                    </span>
+                                                </div>
+
+                                                @foreach($blocks as $blockIndex => $block)
+                                                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700"
+                                                         x-data="{
+                                                             showBlockForm: false,
+                                                             blockQuestion: @js($block['question']),
+                                                             blockAnswer: @js($block['answer']),
+                                                             validated: @js($block['learned'] ?? false),
+                                                             requiresHandoff: false
+                                                         }">
+
+                                                        {{-- Header du bloc --}}
+                                                        <div class="flex items-start justify-between gap-2 mb-2">
+                                                            <div class="flex-1">
+                                                                <div class="flex items-center gap-2 mb-1">
+                                                                    <span class="text-xs font-medium text-gray-700 dark:text-gray-300">
+                                                                        Question {{ $block['id'] }}
+                                                                    </span>
+
+                                                                    {{-- Badge de type pour CE bloc --}}
+                                                                    @if(($block['type'] ?? '') === 'suggestion' || ($block['is_suggestion'] ?? false))
+                                                                        <x-filament::badge color="warning" size="xs" icon="heroicon-o-light-bulb">
+                                                                            Suggestion
+                                                                        </x-filament::badge>
+                                                                    @elseif(($block['type'] ?? '') === 'documented')
+                                                                        <x-filament::badge color="info" size="xs" icon="heroicon-o-document-check">
+                                                                            Documenté
+                                                                        </x-filament::badge>
+                                                                    @endif
+                                                                </div>
+
+                                                                <div class="text-sm text-gray-600 dark:text-gray-400">
+                                                                    {{ \Illuminate\Support\Str::limit($block['question'], 100) }}
+                                                                </div>
+                                                            </div>
+
+                                                            {{-- Boutons de validation du bloc --}}
+                                                            <div class="flex items-center gap-2" x-show="!validated">
+                                                                <x-filament::button
+                                                                    size="xs"
+                                                                    color="success"
+                                                                    icon="heroicon-o-check"
+                                                                    x-on:click="showBlockForm = !showBlockForm"
+                                                                >
+                                                                    Valider
+                                                                </x-filament::button>
+                                                            </div>
+                                                            <x-filament::badge x-show="validated" color="success" size="sm">
+                                                                Validé
+                                                            </x-filament::badge>
+                                                        </div>
+
+                                                        {{-- Bannière d'avertissement si suggestion --}}
+                                                        @if(($block['type'] ?? '') === 'suggestion' || ($block['is_suggestion'] ?? false))
+                                                            <div class="mb-2 p-2 bg-warning-50 dark:bg-warning-950 border border-warning-200 dark:border-warning-800 rounded text-xs">
+                                                                <div class="flex items-center gap-1 text-warning-700 dark:text-warning-300">
+                                                                    <x-heroicon-o-exclamation-triangle class="w-4 h-4" />
+                                                                    <span><strong>Suggestion IA</strong> - Pas de documentation trouvée</span>
+                                                                </div>
+                                                            </div>
+                                                        @endif
+
+                                                        {{-- Aperçu de la réponse --}}
+                                                        <div class="text-sm text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800 p-2 rounded border">
+                                                            {{ \Illuminate\Support\Str::limit($block['answer'], 200) }}
+                                                        </div>
+
+                                                        {{-- Formulaire de validation du bloc --}}
+                                                        <div x-show="showBlockForm" x-cloak class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 space-y-3">
+                                                            <div>
+                                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Question</label>
+                                                                <textarea
+                                                                    x-model="blockQuestion"
+                                                                    rows="2"
+                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                ></textarea>
+                                                            </div>
+                                                            <div>
+                                                                <label class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Réponse</label>
+                                                                <textarea
+                                                                    x-model="blockAnswer"
+                                                                    rows="3"
+                                                                    class="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm"
+                                                                ></textarea>
+                                                            </div>
+                                                            <div>
+                                                                <label class="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        x-model="requiresHandoff"
+                                                                        class="rounded border-gray-300 dark:border-gray-600 text-warning-600 focus:ring-warning-500"
+                                                                    />
+                                                                    <span>Nécessite un suivi humain</span>
+                                                                </label>
+                                                            </div>
+                                                            <div class="flex gap-2">
+                                                                <x-filament::button
+                                                                    size="xs"
+                                                                    color="success"
+                                                                    icon="heroicon-o-check"
+                                                                    x-on:click="$wire.learnMultiQuestionBlock({{ $message['original_id'] }}, {{ $block['id'] }}, blockQuestion, blockAnswer, requiresHandoff); showBlockForm = false; validated = true"
+                                                                >
+                                                                    Enregistrer
+                                                                </x-filament::button>
+                                                                <x-filament::button
+                                                                    size="xs"
+                                                                    color="gray"
+                                                                    x-on:click="showBlockForm = false"
+                                                                >
+                                                                    Annuler
+                                                                </x-filament::button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                @endforeach
                                             </div>
                                         @endif
 
@@ -1199,37 +1382,106 @@
                             </div>
                         @endif
 
-                        {{-- Formulaire de réponse --}}
-                        <div class="flex gap-2">
-                            <textarea
-                                wire:model="supportMessage"
-                                rows="2"
-                                class="flex-1 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm resize-none"
-                                placeholder="Tapez votre réponse au client..."
-                                wire:keydown.ctrl.enter="sendSupportMessage"
-                            ></textarea>
-                            <div class="flex flex-col gap-2">
-                                <x-filament::button
-                                    wire:click="sendSupportMessage"
-                                    icon="heroicon-o-paper-airplane"
-                                    color="success"
-                                >
-                                    Envoyer
-                                </x-filament::button>
-                                <x-filament::button
-                                    wire:click="suggestAiResponse"
-                                    icon="heroicon-o-sparkles"
-                                    color="gray"
-                                    size="sm"
-                                    title="Demander une suggestion à l'IA"
-                                >
-                                    Suggérer
-                                </x-filament::button>
+                        {{-- Mode Apprentissage Accéléré : Zone verrouillée --}}
+                        @if($this->isAcceleratedLearningMode() && !$this->canRespondFreely)
+                            <div class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                                <div class="flex items-center gap-3 text-gray-500 dark:text-gray-400">
+                                    <x-heroicon-o-lock-closed class="w-6 h-6" />
+                                    <div>
+                                        <p class="font-medium">Zone de réponse verrouillée</p>
+                                        <p class="text-sm">Utilisez les boutons de la réponse IA ci-dessus pour :</p>
+                                        <ul class="text-sm mt-1 list-disc list-inside">
+                                            <li><strong>Valider</strong> - Si la réponse est correcte</li>
+                                            <li><strong>Corriger</strong> - Pour ajuster avant envoi</li>
+                                            <li><strong>Rejeter</strong> - Pour rédiger votre propre réponse</li>
+                                        </ul>
+                                        @if($session->agent?->allowsSkipInAcceleratedMode())
+                                            <div class="mt-3">
+                                                <x-filament::button
+                                                    wire:click="skipToFreeResponse"
+                                                    size="sm"
+                                                    color="gray"
+                                                    icon="heroicon-o-forward"
+                                                >
+                                                    Passer (cas exceptionnel)
+                                                </x-filament::button>
+                                            </div>
+                                        @endif
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-2">
-                            <kbd class="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800">Ctrl+Entrée</kbd> pour envoyer
-                        </p>
+                        @elseif($this->isAcceleratedLearningMode() && $this->canRespondFreely)
+                            {{-- Mode déverrouillé : zone de réponse libre avec apprentissage --}}
+                            <div class="space-y-3">
+                                @if($this->rejectedMessageId)
+                                    <div class="p-2 bg-primary-50 dark:bg-primary-950 rounded text-xs text-primary-700 dark:text-primary-300">
+                                        <x-heroicon-o-academic-cap class="w-4 h-4 inline" />
+                                        Votre réponse sera automatiquement indexée pour l'apprentissage de l'IA.
+                                    </div>
+                                @endif
+
+                                <div class="flex gap-2">
+                                    <textarea
+                                        wire:model="supportMessage"
+                                        rows="3"
+                                        class="flex-1 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm resize-none"
+                                        placeholder="Rédigez votre réponse..."
+                                        wire:keydown.ctrl.enter="{{ $this->rejectedMessageId ? 'sendAndLearn' : 'sendSupportMessage' }}"
+                                    ></textarea>
+                                    <div class="flex flex-col gap-2">
+                                        @if($this->rejectedMessageId)
+                                            <x-filament::button
+                                                wire:click="sendAndLearn"
+                                                icon="heroicon-o-paper-airplane"
+                                                color="success"
+                                            >
+                                                Envoyer et Apprendre
+                                            </x-filament::button>
+                                        @else
+                                            <x-filament::button
+                                                wire:click="sendSupportMessage"
+                                                icon="heroicon-o-paper-airplane"
+                                                color="primary"
+                                            >
+                                                Envoyer
+                                            </x-filament::button>
+                                        @endif
+                                    </div>
+                                </div>
+                            </div>
+                        @else
+                            {{-- Mode normal : zone de réponse toujours visible --}}
+                            <div class="flex gap-2">
+                                <textarea
+                                    wire:model="supportMessage"
+                                    rows="2"
+                                    class="flex-1 rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-900 text-sm resize-none"
+                                    placeholder="Tapez votre réponse au client..."
+                                    wire:keydown.ctrl.enter="sendSupportMessage"
+                                ></textarea>
+                                <div class="flex flex-col gap-2">
+                                    <x-filament::button
+                                        wire:click="sendSupportMessage"
+                                        icon="heroicon-o-paper-airplane"
+                                        color="success"
+                                    >
+                                        Envoyer
+                                    </x-filament::button>
+                                    <x-filament::button
+                                        wire:click="suggestAiResponse"
+                                        icon="heroicon-o-sparkles"
+                                        color="gray"
+                                        size="sm"
+                                        title="Demander une suggestion à l'IA"
+                                    >
+                                        Suggérer
+                                    </x-filament::button>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2">
+                                <kbd class="px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800">Ctrl+Entrée</kbd> pour envoyer
+                            </p>
+                        @endif
                     </div>
                 @elseif($session->support_status === 'resolved')
                     <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">

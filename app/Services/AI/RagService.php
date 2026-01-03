@@ -23,8 +23,13 @@ class RagService
         private PromptBuilder $promptBuilder,
         private LearningService $learningService,
         private CategoryDetectionService $categoryDetectionService,
-        private IndexingStrategyService $indexingStrategyService
-    ) {}
+        private IndexingStrategyService $indexingStrategyService,
+        private ?ResponseParser $responseParser = null,
+        private ?MultiQuestionParser $multiQuestionParser = null
+    ) {
+        $this->responseParser = $responseParser ?? new ResponseParser();
+        $this->multiQuestionParser = $multiQuestionParser ?? new MultiQuestionParser();
+    }
 
     /**
      * Traite une question utilisateur avec RAG complet
@@ -90,29 +95,83 @@ class RagService
             'fallback_model' => $agent->fallback_model,
         ]);
 
-        // 8. Construire le contexte complet pour sauvegarde (validation humaine)
+        // 8. Parser la réponse pour détecter le type et les multi-questions
+        $parsedResponse = $this->parseResponse($response->content, $agent);
+
+        // 9. Construire le contexte complet pour sauvegarde (validation humaine)
         $fullContext = $this->buildFullContext(
             agent: $agent,
             messages: $messages,
             learnedResponses: $learnedResponses,
             ragResults: $ragResults,
             session: $session,
-            categoryDetection: $categoryDetection
+            categoryDetection: $categoryDetection,
+            parsedResponse: $parsedResponse
         );
 
-        // 9. Ajouter les métadonnées à la réponse
+        // 10. Déterminer le contenu à afficher (nettoyé des marqueurs)
+        $displayContent = $parsedResponse['display_content'] ?? $response->content;
+
+        // 11. Ajouter les métadonnées à la réponse
         $response = new LLMResponse(
-            content: $response->content,
+            content: $displayContent,
             model: $response->model,
             tokensPrompt: $response->tokensPrompt,
             tokensCompletion: $response->tokensCompletion,
             generationTimeMs: $response->generationTimeMs,
             raw: array_merge($response->raw, [
                 'context' => $fullContext,
+                'original_content' => $response->content,
             ])
         );
 
         return $response;
+    }
+
+    /**
+     * Parse la réponse LLM pour détecter le type et les multi-questions.
+     *
+     * @param string $content Le contenu brut de la réponse LLM
+     * @param Agent $agent L'agent pour les configurations
+     * @return array Les informations parsées
+     */
+    private function parseResponse(string $content, Agent $agent): array
+    {
+        // Essayer d'abord le parsing multi-questions si activé
+        if ($agent->isMultiQuestionEnabled()) {
+            $multiQuestionResult = $this->multiQuestionParser->parse($content);
+
+            if ($multiQuestionResult['is_multi_question'] || $multiQuestionResult['block_count'] > 0) {
+                Log::info('RagService: Multi-question response detected', [
+                    'agent' => $agent->slug,
+                    'block_count' => $multiQuestionResult['block_count'],
+                    'type_stats' => $this->multiQuestionParser->getTypeStats($multiQuestionResult['blocks']),
+                ]);
+
+                return [
+                    'is_multi_question' => $multiQuestionResult['is_multi_question'],
+                    'blocks' => $multiQuestionResult['blocks'],
+                    'display_content' => $multiQuestionResult['display_content'],
+                    'raw_content' => $multiQuestionResult['raw_content'],
+                    'global_type' => null, // Chaque bloc a son propre type
+                    'response_type' => 'multi_question',
+                    'is_suggestion' => false, // Déterminé par bloc
+                ];
+            }
+        }
+
+        // Sinon, parsing simple pour le type de réponse
+        $parsedType = $this->responseParser->parseResponseType($content);
+
+        return [
+            'is_multi_question' => false,
+            'blocks' => [],
+            'display_content' => $parsedType['content'],
+            'raw_content' => $content,
+            'global_type' => $parsedType['type'],
+            'response_type' => $parsedType['type'],
+            'is_suggestion' => $parsedType['requires_review'],
+        ];
     }
 
     /**
@@ -124,7 +183,8 @@ class RagService
         array $learnedResponses,
         array $ragResults,
         ?AiSession $session = null,
-        ?array $categoryDetection = null
+        ?array $categoryDetection = null,
+        ?array $parsedResponse = null
     ): array {
         // Extraire le system prompt envoyé
         $systemPrompt = collect($messages)
@@ -191,6 +251,17 @@ class RagService
                 'agent_model' => $agent->getModel(),
                 'temperature' => $agent->temperature,
                 'use_category_filtering' => $agent->use_category_filtering ?? false,
+            ],
+
+            // Informations de parsing de la réponse
+            'response_type' => $parsedResponse['response_type'] ?? ResponseParser::TYPE_UNKNOWN,
+            'is_suggestion' => $parsedResponse['is_suggestion'] ?? false,
+
+            // Multi-questions parsing
+            'multi_question' => [
+                'is_multi' => $parsedResponse['is_multi_question'] ?? false,
+                'blocks' => $parsedResponse['blocks'] ?? [],
+                'block_count' => count($parsedResponse['blocks'] ?? []),
             ],
         ];
     }

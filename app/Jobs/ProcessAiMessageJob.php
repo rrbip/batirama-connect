@@ -8,6 +8,7 @@ use App\Events\Chat\AiMessageCompleted;
 use App\Events\Chat\AiMessageFailed;
 use App\Models\AiMessage;
 use App\Services\AI\RagService;
+use App\Services\AI\ResponseParser;
 use App\Services\Support\EscalationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -78,8 +79,10 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
             $response = $ragService->query($agent, $this->userContent, $session);
 
             // Vérifier si l'IA demande un handoff humain (via marqueur)
-            $needsHandoff = $this->checkHandoffMarker($response->content);
-            $cleanContent = $this->removeHandoffMarker($response->content);
+            // Note: On vérifie sur le contenu original car le content pourrait déjà être nettoyé
+            $originalContent = $response->raw['original_content'] ?? $response->content;
+            $needsHandoff = $this->checkHandoffMarker($originalContent);
+            $cleanContent = $this->cleanAllMarkers($response->content);
 
             // Backup: Vérifier si l'utilisateur demande explicitement un humain
             $userRequestsHuman = $this->checkUserRequestsHuman($this->userContent);
@@ -243,6 +246,24 @@ class ProcessAiMessageJob implements ShouldQueue, ShouldBeUnique
     {
         // Supprimer le marqueur et les lignes vides autour
         $content = preg_replace('/\n*\[HANDOFF_NEEDED\]\n*/', '', $content);
+
+        return trim($content);
+    }
+
+    /**
+     * Nettoie tous les marqueurs système de la réponse.
+     *
+     * Note: Le RagService devrait déjà avoir nettoyé ces marqueurs,
+     * mais cette méthode sert de sécurité.
+     */
+    private function cleanAllMarkers(string $content): string
+    {
+        // Supprimer le marqueur de handoff
+        $content = $this->removeHandoffMarker($content);
+
+        // Supprimer les marqueurs de type de réponse (DOCUMENTED, SUGGESTION)
+        $responseParser = new ResponseParser();
+        $content = $responseParser->cleanMarkers($content);
 
         return trim($content);
     }

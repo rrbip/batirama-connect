@@ -106,6 +106,12 @@ class Agent extends Model
         'support_email',
         'support_hours',
         'ai_assistance_config',
+        // Multi-questions and learning fields
+        'multi_question_detection_enabled',
+        'max_questions_per_message',
+        'allow_suggestions_without_context',
+        'accelerated_learning_mode',
+        'accelerated_learning_config',
     ];
 
     protected $casts = [
@@ -130,6 +136,12 @@ class Agent extends Model
         'escalation_threshold' => 'float',
         'support_hours' => 'array',
         'ai_assistance_config' => 'array',
+        // Multi-questions and learning casts
+        'multi_question_detection_enabled' => 'boolean',
+        'max_questions_per_message' => 'integer',
+        'allow_suggestions_without_context' => 'boolean',
+        'accelerated_learning_mode' => 'boolean',
+        'accelerated_learning_config' => 'array',
     ];
 
     public function tenant(): BelongsTo
@@ -717,5 +729,98 @@ HANDOFF;
     public function requiresPoweredByBranding(): bool
     {
         return $this->whitelabel_config['required_branding'] ?? true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // MULTI-QUESTIONS & APPRENTISSAGE
+    // ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Vérifie si la détection multi-questions est activée.
+     */
+    public function isMultiQuestionEnabled(): bool
+    {
+        return $this->multi_question_detection_enabled ?? false;
+    }
+
+    /**
+     * Retourne le nombre max de questions par message.
+     */
+    public function getMaxQuestionsPerMessage(): int
+    {
+        return $this->max_questions_per_message ?? 5;
+    }
+
+    /**
+     * Vérifie si le mode Strict Assisté est actif.
+     *
+     * Le mode Strict Assisté = strict_mode + human_support_enabled
+     * Permet à l'IA de proposer des suggestions même sans documentation
+     * car un humain validera avant envoi au client.
+     */
+    public function isStrictAssistedMode(): bool
+    {
+        return $this->strict_mode && $this->human_support_enabled;
+    }
+
+    /**
+     * Vérifie si les suggestions sans contexte sont autorisées.
+     *
+     * En mode Strict Assisté, l'IA peut proposer des suggestions
+     * basées sur ses connaissances générales.
+     */
+    public function allowsSuggestionsWithoutContext(): bool
+    {
+        // Par défaut true si mode strict assisté
+        if ($this->isStrictAssistedMode()) {
+            return $this->allow_suggestions_without_context ?? true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si le mode apprentissage accéléré est actif.
+     */
+    public function isAcceleratedLearningEnabled(): bool
+    {
+        return $this->accelerated_learning_mode ?? false;
+    }
+
+    /**
+     * Retourne la configuration de l'apprentissage accéléré.
+     */
+    public function getAcceleratedLearningConfig(): array
+    {
+        return array_merge([
+            'allow_skip' => true,
+            'require_skip_reason' => false,
+            'skip_reasons' => [
+                'Cas client spécifique',
+                'Urgence',
+                'Hors périmètre IA',
+                'Autre',
+            ],
+            'auto_validate_high_confidence' => false,
+            'high_confidence_threshold' => 0.95,
+        ], $this->accelerated_learning_config ?? []);
+    }
+
+    /**
+     * Vérifie si le bouton "Passer" est autorisé en mode apprentissage accéléré.
+     */
+    public function allowsSkipInAcceleratedMode(): bool
+    {
+        $config = $this->getAcceleratedLearningConfig();
+        return $config['allow_skip'] ?? true;
+    }
+
+    /**
+     * Retourne les raisons de skip possibles.
+     */
+    public function getSkipReasons(): array
+    {
+        $config = $this->getAcceleratedLearningConfig();
+        return $config['skip_reasons'] ?? [];
     }
 }

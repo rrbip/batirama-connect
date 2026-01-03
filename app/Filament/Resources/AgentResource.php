@@ -825,6 +825,84 @@ class AgentResource extends Resource
                                     ->visible(fn (callable $get) => $get('human_support_enabled'))
                                     ->collapsible()
                                     ->collapsed(),
+
+                                Forms\Components\Section::make('Détection Multi-Questions')
+                                    ->description('Permet à l\'IA de détecter et traiter plusieurs questions dans un même message')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('multi_question_detection_enabled')
+                                            ->label('Activer la détection multi-questions')
+                                            ->helperText('L\'IA structurera sa réponse par bloc pour chaque question détectée')
+                                            ->live(),
+
+                                        Forms\Components\TextInput::make('max_questions_per_message')
+                                            ->label('Nombre max de questions')
+                                            ->type('number')
+                                            ->minValue(1)
+                                            ->maxValue(10)
+                                            ->default(5)
+                                            ->helperText('Limite le nombre de questions traitées par message (1-10)')
+                                            ->visible(fn (callable $get) => $get('multi_question_detection_enabled')),
+                                    ])
+                                    ->columns(2)
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Mode Apprentissage Accéléré')
+                                    ->description('Force les agents à valider/corriger les réponses IA avant de répondre - maximise l\'apprentissage')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('accelerated_learning_mode')
+                                            ->label('Activer le mode apprentissage accéléré')
+                                            ->helperText('La zone de réponse libre est verrouillée jusqu\'à ce que l\'agent interagisse avec la réponse IA')
+                                            ->live(),
+
+                                        Forms\Components\Fieldset::make('Options')
+                                            ->visible(fn (callable $get) => $get('accelerated_learning_mode'))
+                                            ->schema([
+                                                Forms\Components\Toggle::make('accelerated_learning_config.allow_skip')
+                                                    ->label('Autoriser "Passer"')
+                                                    ->helperText('Permet aux agents de contourner le workflow pour les cas exceptionnels')
+                                                    ->default(true),
+
+                                                Forms\Components\Toggle::make('accelerated_learning_config.require_skip_reason')
+                                                    ->label('Motif obligatoire pour "Passer"')
+                                                    ->default(false),
+
+                                                Forms\Components\TagsInput::make('accelerated_learning_config.skip_reasons')
+                                                    ->label('Motifs de "Passer"')
+                                                    ->default(['Cas client spécifique', 'Urgence', 'Hors périmètre IA'])
+                                                    ->helperText('Motifs proposés quand l\'agent clique sur Passer')
+                                                    ->columnSpanFull(),
+                                            ])
+                                            ->columns(2),
+
+                                        Forms\Components\Placeholder::make('accelerated_learning_info')
+                                            ->label('')
+                                            ->content('💡 En mode accéléré, chaque interaction (validation, correction, rejet) enrichit automatiquement la base de connaissances de l\'IA.')
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled'))
+                                    ->collapsible()
+                                    ->collapsed(),
+
+                                Forms\Components\Section::make('Mode Strict Assisté')
+                                    ->description('Configuration des suggestions IA en mode strict avec validation humaine')
+                                    ->schema([
+                                        Forms\Components\Toggle::make('allow_suggestions_without_context')
+                                            ->label('Permettre les suggestions sans documentation')
+                                            ->helperText('En mode strict avec handoff, l\'IA peut proposer des suggestions basées sur ses connaissances générales (marquées clairement)')
+                                            ->default(true),
+
+                                        Forms\Components\Placeholder::make('strict_assisted_info')
+                                            ->label('')
+                                            ->content(fn (callable $get) => $get('strict_mode') && $get('human_support_enabled')
+                                                ? '✅ Mode Strict Assisté actif : L\'IA peut proposer des suggestions même sans documentation, car un humain valide avant envoi.'
+                                                : 'ℹ️ Ce mode s\'active automatiquement quand Mode strict + Handoff humain sont tous deux activés.')
+                                            ->columnSpanFull(),
+                                    ])
+                                    ->visible(fn (callable $get) => $get('human_support_enabled') && $get('strict_mode'))
+                                    ->collapsible()
+                                    ->collapsed(),
                             ]),
 
                         Forms\Components\Tabs\Tab::make('Liens Publics')

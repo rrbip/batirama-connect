@@ -13,13 +13,16 @@ class PromptBuilder
 {
     private HydrationService $hydrationService;
     private StructuredOutputParser $structuredOutputParser;
+    private MultiQuestionParser $multiQuestionParser;
 
     public function __construct(
         HydrationService $hydrationService,
-        ?StructuredOutputParser $structuredOutputParser = null
+        ?StructuredOutputParser $structuredOutputParser = null,
+        ?MultiQuestionParser $multiQuestionParser = null
     ) {
         $this->hydrationService = $hydrationService;
         $this->structuredOutputParser = $structuredOutputParser ?? new StructuredOutputParser();
+        $this->multiQuestionParser = $multiQuestionParser ?? new MultiQuestionParser();
     }
 
     /**
@@ -70,11 +73,27 @@ class PromptBuilder
         // System message avec contexte intégré
         $systemContent = $agent->system_prompt;
 
-        // Ajouter les garde-fous si strict_mode est activé
-        $systemContent .= $agent->getStrictModeGuardrails();
+        // Déterminer si on a du contexte (RAG ou learned responses)
+        $hasContext = !empty($ragResults) || !empty($learnedResponses);
+
+        // Ajouter les garde-fous adaptés au mode
+        if ($agent->isStrictAssistedMode()) {
+            // Mode Strict Assisté : permet les suggestions quand pas de contexte
+            $systemContent .= $this->getStrictAssistedGuardrails($hasContext, $agent);
+        } elseif ($agent->strict_mode) {
+            // Mode Strict Pur : comportement actuel
+            $systemContent .= $agent->getStrictModeGuardrails();
+        }
 
         // Ajouter les instructions de handoff humain si activé
         $systemContent .= $agent->getHandoffInstructions();
+
+        // Ajouter les instructions multi-questions si activées
+        if ($agent->isMultiQuestionEnabled()) {
+            $systemContent .= $this->multiQuestionParser->getPromptInstructions(
+                $agent->getMaxQuestionsPerMessage()
+            );
+        }
 
         // Ajouter les instructions de structured output si activées
         $systemContent .= $this->getStructuredOutputInstructions($agent, $session);
@@ -338,5 +357,103 @@ class PromptBuilder
     public function parsePreQuote(string $content): ?array
     {
         return $this->structuredOutputParser->parsePreQuote($content);
+    }
+
+    /**
+     * Retourne les garde-fous pour le mode Strict Assisté.
+     *
+     * Ce mode permet des suggestions quand il n'y a pas de contexte documentaire,
+     * car un humain validera la réponse avant qu'elle n'atteigne le client.
+     *
+     * @param bool $hasContext True si du contexte RAG/learned a été trouvé
+     * @param Agent $agent L'agent pour récupérer les configurations
+     * @return string Les instructions à ajouter au prompt
+     */
+    private function getStrictAssistedGuardrails(bool $hasContext, Agent $agent): string
+    {
+        // Déterminer si multi-questions est activé pour adapter les instructions
+        $multiQuestionEnabled = $agent->isMultiQuestionEnabled();
+
+        if ($hasContext) {
+            // Avec contexte : comportement strict normal + marqueur
+            $baseInstructions = <<<'GUARDRAILS'
+
+## CONTRAINTES DE RÉPONSE (Mode Strict avec Validation Humaine)
+
+- Réponds en priorité avec les informations présentes dans le contexte fourni
+- NE CITE PAS les sources dans ta réponse (pas de "Source:", "Document:", etc.)
+- IGNORE les sources qui ne parlent pas du sujet demandé
+- Si plusieurs sources se contredisent, signale cette incohérence
+
+Ta réponse sera validée par un agent avant d'être transmise au client.
+Ajoute le marqueur `[DOCUMENTED]` à la fin de ta réponse.
+
+GUARDRAILS;
+        } else {
+            // Sans contexte : permettre une suggestion
+            $baseInstructions = <<<'GUARDRAILS'
+
+## MODE SUGGESTION (Contexte Documentaire Insuffisant)
+
+⚠️ **IMPORTANT** : Aucune information pertinente n'a été trouvée dans la base de connaissances pour cette question.
+
+Cependant, ta réponse sera **validée par un agent humain** avant d'être transmise au client.
+Tu peux donc proposer une réponse basée sur tes connaissances générales.
+
+### Instructions :
+1. Propose une réponse utile basée sur tes connaissances générales du domaine
+2. Sois honnête sur le fait que tu n'as pas de source spécifique
+3. Formule ta réponse de manière à aider l'agent humain à la compléter/corriger
+4. Ajoute le marqueur `[SUGGESTION]` à la fin de ta réponse
+
+### Format de réponse :
+- Commence par une réponse utile (même générale)
+- Si tu identifies des points qui nécessitent vérification, mentionne-les
+- L'agent humain pourra corriger, compléter ou remplacer ta suggestion
+
+**RAPPEL** : Cette réponse NE SERA PAS envoyée directement au client.
+Elle servira de base de travail pour l'agent de support.
+
+GUARDRAILS;
+        }
+
+        // Ajouter les instructions combinées pour multi-questions + strict assisté
+        if ($multiQuestionEnabled) {
+            $baseInstructions .= $this->getMultiQuestionStrictAssistedInstructions();
+        }
+
+        return $baseInstructions;
+    }
+
+    /**
+     * Instructions supplémentaires pour combiner multi-questions et strict assisté.
+     *
+     * Chaque bloc doit avoir son propre type (documented ou suggestion).
+     */
+    private function getMultiQuestionStrictAssistedInstructions(): string
+    {
+        return <<<'INSTRUCTIONS'
+
+### IMPORTANT - Multi-Questions avec Validation Humaine
+
+Si tu détectes plusieurs questions dans le message, pour CHAQUE question :
+1. Vérifie si tu as du contexte documentaire spécifique pour cette question
+2. Marque le bloc avec `type="documented"` si tu utilises les sources fournies
+3. Marque le bloc avec `type="suggestion"` si tu réponds avec tes connaissances générales
+
+**Exemple de format combiné :**
+```
+[QUESTION_BLOCK id="1" question="Question avec documentation" type="documented"]
+Réponse basée sur les sources...
+[/QUESTION_BLOCK]
+
+[QUESTION_BLOCK id="2" question="Question sans documentation" type="suggestion"]
+Suggestion basée sur mes connaissances générales...
+[/QUESTION_BLOCK]
+```
+
+Chaque bloc sera validé indépendamment par l'agent humain.
+
+INSTRUCTIONS;
     }
 }
