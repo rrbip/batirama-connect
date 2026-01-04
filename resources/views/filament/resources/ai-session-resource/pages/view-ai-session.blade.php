@@ -251,16 +251,34 @@
                                 } else {
                                     // Mono-question : créer un bloc unique
                                     // Note: response_type est dans stats pour direct_qr_match
+                                    $responseType = $message['rag_context']['stats']['response_type']
+                                        ?? $message['rag_context']['response_type']
+                                        ?? 'unknown';
+
+                                    // Pour direct_qr_match, construire le rag_match depuis raw
+                                    $ragMatch = null;
+                                    $raw = $message['rag_context']['raw'] ?? [];
+                                    if ($responseType === 'direct_qr_match' && ($raw['direct_qr'] ?? false)) {
+                                        $ragMatch = [
+                                            'score' => $raw['score'] ?? 0,
+                                            'source' => $raw['source'] ?? 'learned_response',
+                                            'matched_question' => $raw['matched_question'] ?? null,
+                                            'learned_response_id' => $raw['learned_response_id'] ?? null,
+                                            'requires_handoff' => $raw['requires_handoff'] ?? false,
+                                            'replaced' => true,
+                                        ];
+                                    }
+
                                     $qrBlocks = [[
                                         'id' => 1,
                                         'question' => $previousQuestion,
                                         'answer' => $message['content'] ?? '',
-                                        'type' => $message['rag_context']['stats']['response_type']
-                                            ?? $message['rag_context']['response_type']
-                                            ?? 'unknown',
+                                        'type' => $responseType,
                                         'is_suggestion' => $message['rag_context']['is_suggestion'] ?? false,
                                         'learned' => in_array($message['validation_status'], ['learned', 'validated']),
                                         'rejected' => $message['validation_status'] === 'rejected',
+                                        'rag_match' => $ragMatch,
+                                        'requires_handoff' => $ragMatch['requires_handoff'] ?? $message['rag_context']['stats']['requires_handoff'] ?? false,
                                     ]];
                                 }
 

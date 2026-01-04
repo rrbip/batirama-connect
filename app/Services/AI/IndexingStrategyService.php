@@ -52,6 +52,8 @@ class IndexingStrategyService
             'score' => $result['score'] ?? 0,
             'is_faq' => $payload['is_faq'] ?? false,
             'requires_handoff' => $payload['requires_handoff'] ?? false,
+            'learned_response_id' => $payload['learned_response_id'] ?? null,
+            'point_id' => $result['id'] ?? null,
         ];
     }
 

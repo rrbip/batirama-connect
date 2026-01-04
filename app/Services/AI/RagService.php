@@ -448,6 +448,7 @@ class RagService
                 'category' => $qr['category'],
                 'is_faq' => $qr['is_faq'],
                 'requires_handoff' => $qr['requires_handoff'] ?? false,
+                'learned_response_id' => $qr['learned_response_id'] ?? null,
                 'context' => $fullContext,
             ]
         );
