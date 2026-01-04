@@ -207,7 +207,8 @@ class LearnedResponseObserver
         }
 
         try {
-            $pointId = 'lr_' . $learnedResponse->id; // Préfixe pour identifier les learned responses
+            // UUID déterministe pour pouvoir supprimer/mettre à jour le point
+            $pointId = $this->generateFaqPointId($learnedResponse->id);
 
             $this->qdrantService->upsert($agent->qdrant_collection, [
                 [
@@ -223,16 +224,19 @@ class LearnedResponseObserver
                         'is_faq' => true,
                         'validation_count' => $learnedResponse->validation_count,
                         'rejection_count' => $learnedResponse->rejection_count,
+                        'source_doc' => 'FAQ Validée',
+                        'category' => 'FAQ',
                     ],
                 ]
             ]);
 
-            Log::debug('LearnedResponse indexed in agent collection', [
+            Log::info('LearnedResponse indexed in agent collection', [
                 'learned_response_id' => $learnedResponse->id,
                 'collection' => $agent->qdrant_collection,
+                'point_id' => $pointId,
             ]);
         } catch (\Exception $e) {
-            Log::warning('Failed to index LearnedResponse in agent collection', [
+            Log::error('Failed to index LearnedResponse in agent collection', [
                 'learned_response_id' => $learnedResponse->id,
                 'error' => $e->getMessage(),
             ]);
@@ -251,7 +255,7 @@ class LearnedResponseObserver
         }
 
         try {
-            $pointId = 'lr_' . $learnedResponse->id;
+            $pointId = $this->generateFaqPointId($learnedResponse->id);
             $this->qdrantService->delete($agent->qdrant_collection, [$pointId]);
 
             Log::debug('LearnedResponse removed from agent collection', [
@@ -264,6 +268,25 @@ class LearnedResponseObserver
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Génère un UUID déterministe pour un point FAQ dans la collection de l'agent.
+     * Format UUID valide requis par Qdrant.
+     */
+    private function generateFaqPointId(int $learnedResponseId): string
+    {
+        // Hash MD5 formatté comme UUID v4 (déterministe)
+        $hash = md5('learned_response_faq_' . $learnedResponseId);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12)
+        );
     }
 
     /**

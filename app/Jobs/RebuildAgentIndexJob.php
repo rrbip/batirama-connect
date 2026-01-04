@@ -359,7 +359,8 @@ class RebuildAgentIndexJob implements ShouldQueue
                 });
 
                 // b) Indexer aussi dans la collection de l'agent (comme FAQ)
-                $faqPointId = 'lr_' . $lr->id;
+                // UUID déterministe pour permettre la mise à jour/suppression
+                $faqPointId = $this->generateFaqPointId($lr->id);
                 $qdrantService->upsert($collection, [[
                     'id' => $faqPointId,
                     'vector' => $vector,
@@ -480,6 +481,24 @@ class RebuildAgentIndexJob implements ShouldQueue
         Log::info('RebuildAgentIndexJob: Created learned_responses collection', [
             'collection' => $collection,
         ]);
+    }
+
+    /**
+     * Génère un UUID déterministe pour un point FAQ dans la collection de l'agent.
+     * Doit être identique à LearnedResponseObserver::generateFaqPointId()
+     */
+    private function generateFaqPointId(int $learnedResponseId): string
+    {
+        $hash = md5('learned_response_faq_' . $learnedResponseId);
+
+        return sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12)
+        );
     }
 
     public function failed(\Throwable $exception): void
