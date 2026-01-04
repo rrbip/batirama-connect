@@ -90,23 +90,11 @@ class LearningService
         string $source = LearnedResponse::SOURCE_AI_VALIDATION
     ): bool {
         try {
-            // Chercher une LearnedResponse existante
-            // Pour les multi-questions, on cherche par source_message_id ET question
-            // car plusieurs Q/R peuvent venir du même message
-            $existing = null;
-            if ($sourceMessageId) {
-                $existing = LearnedResponse::where('source_message_id', $sourceMessageId)
-                    ->where('question', $question)
-                    ->first();
-            }
-
-            // Si pas trouvé par message+question, chercher par agent+question exacte
-            // (cas où la même question aurait été validée depuis un autre message)
-            if (!$existing) {
-                $existing = LearnedResponse::where('agent_id', $agentId)
-                    ->where('question', $question)
-                    ->first();
-            }
+            // Unicité basée sur agent_id + question uniquement
+            // Le source_message_id n'est qu'une métadonnée (pour traçabilité), pas un critère d'unicité
+            $existing = LearnedResponse::where('agent_id', $agentId)
+                ->where('question', $question)
+                ->first();
 
             if ($existing) {
                 // Mettre à jour l'existante
@@ -115,13 +103,12 @@ class LearningService
                     'requires_handoff' => $requiresHandoff,
                     'last_validated_by' => $userId,
                     'last_validated_at' => now(),
-                    'source_message_id' => $sourceMessageId ?? $existing->source_message_id,
                 ]);
                 $existing->increment('validation_count');
 
                 Log::info('LearnedResponse updated', [
                     'learned_response_id' => $existing->id,
-                    'source_message_id' => $sourceMessageId,
+                    'validation_count' => $existing->validation_count + 1,
                     'question' => \Illuminate\Support\Str::limit($question, 50),
                 ]);
             } else {
@@ -142,7 +129,6 @@ class LearningService
 
                 Log::info('LearnedResponse created', [
                     'agent_id' => $agentId,
-                    'source_message_id' => $sourceMessageId,
                     'question' => \Illuminate\Support\Str::limit($question, 50),
                 ]);
             }
