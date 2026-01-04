@@ -23,6 +23,11 @@ class ResponseParser
     public const TYPE_SUGGESTION = 'suggestion';
 
     /**
+     * Type de réponse pour question ambiguë nécessitant clarification
+     */
+    public const TYPE_AMBIGUOUS = 'ambiguous';
+
+    /**
      * Type inconnu (pas de marqueur détecté)
      */
     public const TYPE_UNKNOWN = 'unknown';
@@ -38,11 +43,16 @@ class ResponseParser
     private const SUGGESTION_PATTERN = '/\s*\[SUGGESTION\]\s*$/i';
 
     /**
+     * Pattern pour détecter le marqueur [AMBIGUOUS]
+     */
+    private const AMBIGUOUS_PATTERN = '/\s*\[AMBIGUOUS\]\s*$/i';
+
+    /**
      * Analyse une réponse IA pour détecter son type.
      *
      * @param string $content Contenu de la réponse IA
      * @return array{
-     *   type: 'documented'|'suggestion'|'unknown',
+     *   type: 'documented'|'suggestion'|'ambiguous'|'unknown',
      *   content: string,
      *   requires_review: bool,
      *   original_content: string
@@ -64,6 +74,12 @@ class ResponseParser
             $type = self::TYPE_SUGGESTION;
             $requiresReview = true;
             $content = preg_replace(self::SUGGESTION_PATTERN, '', $content);
+        }
+        // Détecter le marqueur [AMBIGUOUS]
+        elseif (preg_match(self::AMBIGUOUS_PATTERN, $content)) {
+            $type = self::TYPE_AMBIGUOUS;
+            $requiresReview = false; // Question de clarification, pas besoin de review
+            $content = preg_replace(self::AMBIGUOUS_PATTERN, '', $content);
         }
 
         return [
@@ -117,12 +133,21 @@ class ResponseParser
     }
 
     /**
+     * Vérifie si une réponse est une question ambiguë.
+     */
+    public function isAmbiguous(string $type): bool
+    {
+        return $type === self::TYPE_AMBIGUOUS;
+    }
+
+    /**
      * Nettoie les marqueurs de type d'une réponse.
      */
     public function cleanMarkers(string $content): string
     {
         $content = preg_replace(self::DOCUMENTED_PATTERN, '', $content);
         $content = preg_replace(self::SUGGESTION_PATTERN, '', $content);
+        $content = preg_replace(self::AMBIGUOUS_PATTERN, '', $content);
 
         return trim($content);
     }

@@ -417,6 +417,9 @@ Elle servira de base de travail pour l'agent de support.
 GUARDRAILS;
         }
 
+        // Ajouter les instructions pour les questions ambiguës (mono et multi)
+        $baseInstructions .= $this->getAmbiguousQuestionInstructions();
+
         // Ajouter les instructions combinées pour multi-questions + strict assisté
         if ($multiQuestionEnabled) {
             $baseInstructions .= $this->getMultiQuestionStrictAssistedInstructions();
@@ -426,9 +429,42 @@ GUARDRAILS;
     }
 
     /**
+     * Instructions pour gérer les questions ambiguës (mono et multi questions).
+     */
+    private function getAmbiguousQuestionInstructions(): string
+    {
+        return <<<'INSTRUCTIONS'
+
+### Question ambiguë
+
+Si la question est **ambiguë** (trop vague, manque de contexte, fait référence à un élément non précisé, ou dépend d'informations absentes de l'historique), NE DEVINE PAS. À la place :
+
+1. Propose une **question de clarification** comme réponse
+2. Ajoute le marqueur `[AMBIGUOUS]` à la fin de ta réponse
+
+**Exemples de questions ambiguës :**
+- "Comment je supprime ça ?" → Supprimer quoi ?
+- "Et si je me trompe dans mon import ?" → Quel import ? (clients, produits, devis...)
+- "C'est possible de changer la couleur ?" → La couleur de quoi ?
+
+**Format de réponse pour une question ambiguë :**
+```
+Pourriez-vous préciser ce que vous souhaitez supprimer ?
+- Un client
+- Une facture
+- Un devis
+
+Cela me permettra de vous donner une réponse précise.
+[AMBIGUOUS]
+```
+
+INSTRUCTIONS;
+    }
+
+    /**
      * Instructions supplémentaires pour combiner multi-questions et strict assisté.
      *
-     * Chaque bloc doit avoir son propre type (documented ou suggestion).
+     * Chaque bloc doit avoir son propre type (documented, suggestion ou ambiguous).
      */
     private function getMultiQuestionStrictAssistedInstructions(): string
     {
@@ -440,6 +476,7 @@ Si tu détectes plusieurs questions dans le message, pour CHAQUE question :
 1. Vérifie si tu as du contexte documentaire spécifique pour cette question
 2. Marque le bloc avec `type="documented"` si tu utilises les sources fournies
 3. Marque le bloc avec `type="suggestion"` si tu réponds avec tes connaissances générales
+4. Marque le bloc avec `type="ambiguous"` si la question est trop vague et nécessite clarification
 
 **Exemple de format combiné :**
 ```
@@ -449,6 +486,12 @@ Réponse basée sur les sources...
 
 [QUESTION_BLOCK id="2" question="Question sans documentation" type="suggestion"]
 Suggestion basée sur mes connaissances générales...
+[/QUESTION_BLOCK]
+
+[QUESTION_BLOCK id="3" question="Question vague sans contexte clair" type="ambiguous"]
+Pourriez-vous préciser votre question ?
+- Option A
+- Option B
 [/QUESTION_BLOCK]
 ```
 

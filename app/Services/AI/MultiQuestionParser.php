@@ -25,10 +25,10 @@ class MultiQuestionParser
      * Capture:
      * - $1: id (numérique)
      * - $2: question (texte entre guillemets)
-     * - $3: type optionnel (documented|suggestion)
+     * - $3: type optionnel (documented|suggestion|ambiguous)
      * - $4: contenu du bloc
      */
-    private const BLOCK_PATTERN = '/\[QUESTION_BLOCK\s+id="(\d+)"\s+question="([^"]+)"(?:\s+type="(documented|suggestion)")?\](.*?)\[\/QUESTION_BLOCK\]/s';
+    private const BLOCK_PATTERN = '/\[QUESTION_BLOCK\s+id="(\d+)"\s+question="([^"]+)"(?:\s+type="(documented|suggestion|ambiguous)")?\](.*?)\[\/QUESTION_BLOCK\]/s';
 
     /**
      * Pattern alternatif sans attribut type (rétrocompatibilité)
@@ -274,15 +274,16 @@ class MultiQuestionParser
     }
 
     /**
-     * Compte le nombre de suggestions vs documentés.
+     * Compte le nombre de suggestions vs documentés vs ambiguës.
      *
-     * @return array{documented: int, suggestion: int, unknown: int}
+     * @return array{documented: int, suggestion: int, ambiguous: int, unknown: int}
      */
     public function getTypeStats(array $blocks): array
     {
         $stats = [
             'documented' => 0,
             'suggestion' => 0,
+            'ambiguous' => 0,
             'unknown' => 0,
         ];
 
@@ -313,23 +314,45 @@ Si le message de l'utilisateur contient PLUSIEURS questions distinctes :
 2. Structure ta réponse avec le format suivant :
 
 ```
-[QUESTION_BLOCK id="1" question="Question reformulée clairement" type="documented|suggestion"]
-Ta réponse complète pour cette question...
-[/QUESTION_BLOCK]
-
-[QUESTION_BLOCK id="2" question="Autre question reformulée" type="documented|suggestion"]
-Ta réponse complète pour cette autre question...
+[QUESTION_BLOCK id="1" question="La question" type="documented|suggestion|ambiguous"]
+Ta réponse pour cette question...
 [/QUESTION_BLOCK]
 ```
 
-### Règles importantes :
-- Chaque bloc est AUTONOME (la réponse doit être complète et utilisable seule)
-- Reformule la question pour plus de clarté
-- Numérote les IDs séquentiellement (1, 2, 3...)
-- Indique `type="documented"` si ta réponse utilise le contexte fourni
-- Indique `type="suggestion"` si tu réponds avec tes connaissances générales
+### Types de réponse :
+- `type="documented"` → Ta réponse utilise le contexte documentaire fourni
+- `type="suggestion"` → Ta réponse utilise tes connaissances générales (pas de documentation)
+- `type="ambiguous"` → La question est trop vague, tu demandes une clarification
 
-Si le message contient une SEULE question, réponds normalement sans utiliser ce format.
+### Questions ambiguës (type="ambiguous")
+
+Si une question est **ambiguë** (trop vague, manque de contexte, ou fait référence à un élément non précisé), NE DEVINE PAS. À la place :
+
+1. Garde la question telle quelle (ne la reformule pas)
+2. Marque le bloc avec `type="ambiguous"`
+3. Propose une **question de clarification** comme réponse
+
+**Exemples de questions ambiguës :**
+- "Et si je me trompe dans mon import ?" → Quel import ? (clients, produits, devis...)
+- "Comment je supprime tout ?" → Supprimer quoi exactement ?
+- "C'est possible de changer la couleur ?" → La couleur de quoi ?
+
+**Format pour une question ambiguë :**
+```
+[QUESTION_BLOCK id="3" question="Si je me trompe dans mon import, y a-t-il un bouton pour tout supprimer ?" type="ambiguous"]
+Pourriez-vous préciser de quel import vous parlez ?
+- Import CSV de clients
+- Import de produits
+- Import de devis
+
+Cela me permettra de vous donner une réponse précise.
+[/QUESTION_BLOCK]
+```
+
+### Règles générales :
+- Chaque bloc est AUTONOME (complet et utilisable seul)
+- Numérote les IDs séquentiellement (1, 2, 3...)
+- Une seule question dans le message = pas de format multi-bloc
 
 INSTRUCTIONS;
     }

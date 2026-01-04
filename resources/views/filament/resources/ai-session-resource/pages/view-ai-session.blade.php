@@ -450,6 +450,11 @@
                                                                 SUGGESTION IA
                                                             </x-filament::badge>
 
+                                                            {{-- Badge type: Question Ambiguë --}}
+                                                            <x-filament::badge color="gray" icon="heroicon-s-question-mark-circle" x-show="block.type === 'ambiguous'">
+                                                                QUESTION AMBIGUË
+                                                            </x-filament::badge>
+
                                                             {{-- Badge type: Documenté (avec tooltip au clic) --}}
                                                             <div class="relative" x-data="{ showTooltip: false }" x-show="!block.is_suggestion && block.type === 'documented'">
                                                                 <x-filament::badge
