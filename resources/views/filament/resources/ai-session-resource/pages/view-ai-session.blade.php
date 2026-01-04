@@ -281,7 +281,7 @@
                                     'id' => $b['id'] ?? $i + 1,
                                     'question' => $b['question'] ?? '',
                                     'answer' => $b['answer'] ?? '',
-                                    'requiresHandoff' => $b['requires_handoff'] ?? $globalRequiresHandoff,
+                                    'requiresHandoff' => $b['requires_handoff'] ?? $b['rag_match']['requires_handoff'] ?? $globalRequiresHandoff,
                                     'validated' => $b['learned'] ?? false,
                                     'rejected' => $b['rejected'] ?? $isRejected,
                                     'is_suggestion' => $b['is_suggestion'] ?? false,
