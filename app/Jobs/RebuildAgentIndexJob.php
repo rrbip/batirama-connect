@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Models\Agent;
 use App\Models\AiMessage;
 use App\Models\DocumentChunk;
+use App\Models\LearnedResponse;
 use App\Services\AI\EmbeddingService;
 use App\Services\AI\QdrantService;
 use Illuminate\Bus\Queueable;
@@ -305,8 +306,8 @@ class RebuildAgentIndexJob implements ShouldQueue
     /**
      * Reconstruit les learned_responses pour cet agent.
      *
-     * Récupère tous les messages validés/learned depuis ai_messages et les réindexe
-     * dans la collection learned_responses ET dans la collection de l'agent.
+     * Utilise la table PostgreSQL learned_responses comme source de vérité
+     * et réindexe dans Qdrant (collection learned_responses ET collection de l'agent).
      */
     private function rebuildLearnedResponses(
         QdrantService $qdrantService,
@@ -315,86 +316,68 @@ class RebuildAgentIndexJob implements ShouldQueue
     ): array {
         $learnedResponsesCollection = 'learned_responses';
 
-        // 1. Supprimer les points existants pour cet agent dans learned_responses
+        // 1. Supprimer les points existants pour cet agent dans learned_responses Qdrant
         $this->deleteAgentPointsFromLearnedResponses($qdrantService, $learnedResponsesCollection);
 
-        // 2. Récupérer tous les messages assistant validés/learned pour cet agent
-        $learnedMessages = AiMessage::whereHas('session', function ($query) {
-            $query->where('agent_id', $this->agent->id);
-        })
-            ->where('role', 'assistant')
-            ->whereIn('validation_status', ['validated', 'learned'])
-            ->with(['session'])
+        // 2. Supprimer les FAQs existantes dans la collection de l'agent
+        $this->deleteAgentFaqPoints($qdrantService, $collection);
+
+        // 3. Récupérer toutes les LearnedResponse depuis PostgreSQL pour cet agent
+        $learnedResponses = LearnedResponse::where('agent_id', $this->agent->id)
+            ->with(['agent'])
             ->get();
 
-        Log::info('RebuildAgentIndexJob: Found learned messages to reindex', [
+        Log::info('RebuildAgentIndexJob: Found LearnedResponse records to reindex', [
             'agent_id' => $this->agent->id,
-            'count' => $learnedMessages->count(),
+            'count' => $learnedResponses->count(),
         ]);
 
-        if ($learnedMessages->isEmpty()) {
+        if ($learnedResponses->isEmpty()) {
             return ['count' => 0];
         }
 
         $indexedCount = 0;
 
-        foreach ($learnedMessages as $message) {
-            // Récupérer la question originale (message user précédent)
-            $questionMessage = $message->session->messages()
-                ->where('role', 'user')
-                ->where('id', '<', $message->id)
-                ->orderBy('id', 'desc')
-                ->first();
-
-            if (!$questionMessage) {
-                Log::warning('RebuildAgentIndexJob: No question found for learned message', [
-                    'message_id' => $message->id,
-                ]);
-                continue;
-            }
-
-            $question = $questionMessage->content;
-            $answer = $message->corrected_content ?? $message->content;
-
+        foreach ($learnedResponses as $lr) {
             try {
                 // Générer l'embedding de la question
-                $vector = $embeddingService->embed($question);
+                $vector = $embeddingService->embed($lr->question);
                 $pointId = Str::uuid()->toString();
 
-                // a) Indexer dans learned_responses
+                // a) Indexer dans learned_responses Qdrant
                 $this->ensureLearnedResponsesCollectionExists($qdrantService, $learnedResponsesCollection);
 
                 $qdrantService->upsert($learnedResponsesCollection, [[
                     'id' => $pointId,
                     'vector' => $vector,
-                    'payload' => [
-                        'agent_id' => $this->agent->id,
-                        'agent_slug' => $this->agent->slug,
-                        'message_id' => $message->id,
-                        'question' => $question,
-                        'answer' => $answer,
-                        'validated_by' => $message->validated_by,
-                        'validated_at' => $message->validated_at?->toIso8601String(),
-                    ],
+                    'payload' => $lr->toQdrantPayload(),
                 ]]);
 
+                // Mettre à jour le qdrant_point_id dans PostgreSQL
+                LearnedResponse::withoutEvents(function () use ($lr, $pointId) {
+                    $lr->update(['qdrant_point_id' => $pointId]);
+                });
+
                 // b) Indexer aussi dans la collection de l'agent (comme FAQ)
-                $faqPointId = Str::uuid()->toString();
+                $faqPointId = 'lr_' . $lr->id;
                 $qdrantService->upsert($collection, [[
                     'id' => $faqPointId,
                     'vector' => $vector,
                     'payload' => [
                         'type' => 'qa_pair',
                         'category' => 'FAQ',
-                        'display_text' => $answer,
-                        'question' => $question,
+                        'display_text' => $lr->answer,
+                        'question' => $lr->question,
                         'source_doc' => 'FAQ Validée',
                         'parent_context' => '',
                         'chunk_id' => null,
                         'document_id' => null,
                         'agent_id' => $this->agent->id,
                         'is_faq' => true,
-                        'message_id' => $message->id,
+                        'learned_response_id' => $lr->id,
+                        'validation_count' => $lr->validation_count,
+                        'rejection_count' => $lr->rejection_count,
+                        'requires_handoff' => $lr->requires_handoff,
                         'indexed_at' => now()->toIso8601String(),
                     ],
                 ]]);
@@ -402,19 +385,44 @@ class RebuildAgentIndexJob implements ShouldQueue
                 $indexedCount++;
 
             } catch (\Exception $e) {
-                Log::warning('RebuildAgentIndexJob: Failed to reindex learned message', [
-                    'message_id' => $message->id,
+                Log::warning('RebuildAgentIndexJob: Failed to reindex LearnedResponse', [
+                    'learned_response_id' => $lr->id,
                     'error' => $e->getMessage(),
                 ]);
             }
         }
 
-        Log::info('RebuildAgentIndexJob: Learned responses reindexed', [
+        Log::info('RebuildAgentIndexJob: LearnedResponse records reindexed', [
             'agent_id' => $this->agent->id,
             'indexed' => $indexedCount,
         ]);
 
         return ['count' => $indexedCount];
+    }
+
+    /**
+     * Supprime les points FAQ existants dans la collection de l'agent.
+     */
+    private function deleteAgentFaqPoints(QdrantService $qdrantService, string $collection): void
+    {
+        if (!$qdrantService->collectionExists($collection)) {
+            return;
+        }
+
+        $filter = [
+            'must' => [
+                ['key' => 'is_faq', 'match' => ['value' => true]]
+            ]
+        ];
+
+        $deleted = $qdrantService->deleteByFilter($collection, $filter);
+
+        if ($deleted) {
+            Log::info('RebuildAgentIndexJob: Deleted existing FAQ points from agent collection', [
+                'agent_id' => $this->agent->id,
+                'collection' => $collection,
+            ]);
+        }
     }
 
     /**

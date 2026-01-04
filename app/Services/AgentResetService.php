@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Agent;
+use App\Models\LearnedResponse;
 use App\Services\AI\QdrantService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -200,61 +201,66 @@ class AgentResetService
     }
 
     /**
-     * Supprime les reponses apprises pour cet agent dans la collection learned_responses
+     * Supprime les reponses apprises pour cet agent.
+     * - Supprime de la table PostgreSQL learned_responses (l'Observer supprime automatiquement de Qdrant)
+     * - Nettoie aussi directement dans Qdrant au cas où il y aurait des orphelins
      */
     private function deleteLearnedResponses(Agent $agent): int
     {
-        $learnedCollection = 'learned_responses';
-
-        if (!$this->qdrantService->collectionExists($learnedCollection)) {
-            return 0;
-        }
+        $deletedCount = 0;
 
         try {
-            // Recuperer tous les points de cet agent via scroll
-            $pointIds = [];
-            $offset = null;
+            // 1. Supprimer de la table PostgreSQL (l'Observer gère la suppression Qdrant)
+            $deletedCount = LearnedResponse::where('agent_id', $agent->id)->delete();
 
-            do {
-                $result = $this->qdrantService->scroll(
-                    collection: $learnedCollection,
-                    limit: 100,
-                    offset: $offset,
-                    filter: [
-                        'must' => [
-                            ['key' => 'agent_slug', 'match' => ['value' => $agent->slug]]
-                        ]
-                    ],
-                    withFullResult: true
-                );
+            Log::info('Learned responses deleted from PostgreSQL', [
+                'agent_id' => $agent->id,
+                'agent_slug' => $agent->slug,
+                'count' => $deletedCount,
+            ]);
 
-                foreach ($result['points'] ?? [] as $point) {
-                    $pointIds[] = $point['id'];
-                }
+            // 2. Nettoyer aussi dans Qdrant (au cas où il y aurait des orphelins)
+            $learnedCollection = 'learned_responses';
+            if ($this->qdrantService->collectionExists($learnedCollection)) {
+                $filter = [
+                    'must' => [
+                        ['key' => 'agent_slug', 'match' => ['value' => $agent->slug]]
+                    ]
+                ];
+                $this->qdrantService->deleteByFilter($learnedCollection, $filter);
 
-                $offset = $result['next_page_offset'] ?? null;
-
-            } while ($offset !== null);
-
-            // Supprimer les points
-            if (!empty($pointIds)) {
-                $this->qdrantService->delete($learnedCollection, $pointIds);
-
-                Log::info('Learned responses deleted', [
+                Log::info('Learned responses cleaned from Qdrant collection', [
                     'agent_slug' => $agent->slug,
-                    'count' => count($pointIds),
+                    'collection' => $learnedCollection,
                 ]);
             }
 
-            return count($pointIds);
+            // 3. Nettoyer les points FAQ dans la collection de l'agent
+            if (!empty($agent->qdrant_collection) && $this->qdrantService->collectionExists($agent->qdrant_collection)) {
+                $faqFilter = [
+                    'must' => [
+                        ['key' => 'type', 'match' => ['value' => 'qa_pair']],
+                        ['key' => 'is_faq', 'match' => ['value' => true]],
+                    ]
+                ];
+                $this->qdrantService->deleteByFilter($agent->qdrant_collection, $faqFilter);
+
+                Log::info('FAQ points cleaned from agent collection', [
+                    'agent_slug' => $agent->slug,
+                    'collection' => $agent->qdrant_collection,
+                ]);
+            }
+
+            return $deletedCount;
 
         } catch (\Exception $e) {
             Log::error('Failed to delete learned responses', [
+                'agent_id' => $agent->id,
                 'agent_slug' => $agent->slug,
                 'error' => $e->getMessage(),
             ]);
 
-            return 0;
+            return $deletedCount;
         }
     }
 }
