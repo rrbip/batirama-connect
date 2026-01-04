@@ -445,34 +445,66 @@
                                                                 SUGGESTION IA
                                                             </x-filament::badge>
 
-                                                            {{-- Badge type: Documenté (avec tooltip au survol) --}}
-                                                            <div class="relative group" x-show="!block.is_suggestion && block.type === 'documented'">
-                                                                <x-filament::badge color="info" icon="heroicon-s-document-check" class="cursor-help">
+                                                            {{-- Badge type: Documenté (avec tooltip au clic) --}}
+                                                            <div class="relative" x-data="{ showTooltip: false }" x-show="!block.is_suggestion && block.type === 'documented'">
+                                                                <x-filament::badge
+                                                                    color="info"
+                                                                    icon="heroicon-s-document-check"
+                                                                    class="cursor-pointer"
+                                                                    x-on:click="showTooltip = !showTooltip"
+                                                                    x-on:click.away="showTooltip = false"
+                                                                >
                                                                     DOCUMENTÉ
                                                                 </x-filament::badge>
                                                                 {{-- Tooltip avec la question source --}}
-                                                                <div x-show="block.rag_match && block.rag_match.matched_question"
-                                                                    class="absolute z-50 hidden group-hover:block left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
-                                                                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Source correspondante :</div>
-                                                                    <div class="text-sm text-gray-700 dark:text-gray-200" x-text="block.rag_match?.matched_question"></div>
-                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                                                                        Score : <span x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(0) + '%' : 'N/A'"></span>
+                                                                <div x-show="showTooltip && block.rag_match && block.rag_match.matched_question"
+                                                                    x-transition:enter="transition ease-out duration-100"
+                                                                    x-transition:enter-start="opacity-0 scale-95"
+                                                                    x-transition:enter-end="opacity-100 scale-100"
+                                                                    x-transition:leave="transition ease-in duration-75"
+                                                                    x-transition:leave-start="opacity-100 scale-100"
+                                                                    x-transition:leave-end="opacity-0 scale-95"
+                                                                    class="absolute z-50 left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
+                                                                    <div class="text-xs font-semibold text-info-600 dark:text-info-400 mb-1 flex items-center gap-1">
+                                                                        <x-heroicon-s-document-text class="w-4 h-4" />
+                                                                        Source correspondante (learned_responses) :
+                                                                    </div>
+                                                                    <div class="text-sm text-gray-700 dark:text-gray-200 p-2 bg-gray-50 dark:bg-gray-900 rounded" x-text="block.rag_match?.matched_question"></div>
+                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2 flex justify-between">
+                                                                        <span>Score : <strong x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(1) + '%' : 'N/A'"></strong></span>
+                                                                        <span class="text-info-500">Cliquez ailleurs pour fermer</span>
                                                                     </div>
                                                                 </div>
                                                             </div>
 
                                                             {{-- Badge type: Direct QR Match (Qdrant sans LLM) avec tooltip --}}
-                                                            <div class="relative group" x-show="block.type === 'direct_qr_match'">
-                                                                <x-filament::badge color="success" icon="heroicon-s-bolt" class="cursor-help">
+                                                            <div class="relative" x-data="{ showTooltip: false }" x-show="block.type === 'direct_qr_match'">
+                                                                <x-filament::badge
+                                                                    color="success"
+                                                                    icon="heroicon-s-bolt"
+                                                                    class="cursor-pointer"
+                                                                    x-on:click="showTooltip = !showTooltip"
+                                                                    x-on:click.away="showTooltip = false"
+                                                                >
                                                                     RÉPONSE DIRECTE
                                                                 </x-filament::badge>
                                                                 {{-- Tooltip avec la question source --}}
-                                                                <div x-show="block.rag_match && block.rag_match.matched_question"
-                                                                    class="absolute z-50 hidden group-hover:block left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700">
-                                                                    <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Question source (match exact) :</div>
-                                                                    <div class="text-sm text-gray-700 dark:text-gray-200" x-text="block.rag_match?.matched_question"></div>
-                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                                                                        Score : <span x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(0) + '%' : 'N/A'"></span>
+                                                                <div x-show="showTooltip && block.rag_match && block.rag_match.matched_question"
+                                                                    x-transition:enter="transition ease-out duration-100"
+                                                                    x-transition:enter-start="opacity-0 scale-95"
+                                                                    x-transition:enter-end="opacity-100 scale-100"
+                                                                    x-transition:leave="transition ease-in duration-75"
+                                                                    x-transition:leave-start="opacity-100 scale-100"
+                                                                    x-transition:leave-end="opacity-0 scale-95"
+                                                                    class="absolute z-50 left-0 top-full mt-1 w-80 p-3 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700">
+                                                                    <div class="text-xs font-semibold text-success-600 dark:text-success-400 mb-1 flex items-center gap-1">
+                                                                        <x-heroicon-s-bolt class="w-4 h-4" />
+                                                                        Match exact (learned_responses) :
+                                                                    </div>
+                                                                    <div class="text-sm text-gray-700 dark:text-gray-200 p-2 bg-gray-50 dark:bg-gray-900 rounded" x-text="block.rag_match?.matched_question"></div>
+                                                                    <div class="text-xs text-gray-400 dark:text-gray-500 mt-2 flex justify-between">
+                                                                        <span>Score : <strong x-text="block.rag_match?.score ? (block.rag_match.score * 100).toFixed(1) + '%' : 'N/A'"></strong></span>
+                                                                        <span class="text-success-500">Cliquez ailleurs pour fermer</span>
                                                                     </div>
                                                                 </div>
                                                             </div>
