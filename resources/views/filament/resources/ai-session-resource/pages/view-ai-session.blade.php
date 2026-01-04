@@ -325,7 +325,8 @@
                                             id: b.id,
                                             question: b.question,
                                             answer: b.answer,
-                                            requiresHandoff: b.requiresHandoff
+                                            requiresHandoff: b.requiresHandoff,
+                                            learned_response_id: b.rag_match?.learned_response_id ?? null
                                         }));
 
                                     if (validBlocks.length === 0) {
@@ -339,7 +340,11 @@
 
                                 // Passer (tout rejeté)
                                 skipAll() {
-                                    $wire.rejectAllBlocks({{ $message['original_id'] }});
+                                    // Collecter les learned_response_id de tous les blocs pour incrémenter les compteurs de rejet
+                                    const learnedResponseIds = this.blocks
+                                        .filter(b => b.rag_match?.learned_response_id)
+                                        .map(b => b.rag_match.learned_response_id);
+                                    $wire.rejectAllBlocks({{ $message['original_id'] }}, learnedResponseIds);
                                     this.sent = true;
                                 },
 

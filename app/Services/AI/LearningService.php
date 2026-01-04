@@ -6,9 +6,9 @@ namespace App\Services\AI;
 
 use App\Models\Agent;
 use App\Models\AiMessage;
+use App\Models\LearnedResponse;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class LearningService
 {
@@ -20,21 +20,28 @@ class LearningService
     ) {}
 
     /**
-     * Valide un message et l'ajoute à la base d'apprentissage
+     * Valide un message et l'ajoute à la base d'apprentissage.
+     * Si c'est un direct_qr_match, incrémente le compteur de validation de la LearnedResponse existante.
      */
     public function validateAndLearn(
         AiMessage $message,
         User $validator,
         ?string $correctedContent = null,
         ?string $customQuestion = null,
-        bool $requiresHandoff = false
+        bool $requiresHandoff = false,
+        ?int $existingLearnedResponseId = null
     ): bool {
         // Le message doit être une réponse assistant
         if ($message->role !== 'assistant') {
             return false;
         }
 
-        // Récupérer la question originale (utiliser id car created_at peut être identique)
+        // Si on a un ID de LearnedResponse existant (direct_qr_match), on incrémente
+        if ($existingLearnedResponseId) {
+            return $this->incrementValidation($existingLearnedResponseId, $validator->id, $correctedContent, $requiresHandoff);
+        }
+
+        // Récupérer la question originale
         $questionMessage = $message->session->messages()
             ->where('role', 'user')
             ->where('id', '<', $message->id)
@@ -45,7 +52,7 @@ class LearningService
             throw new \RuntimeException("Aucune question utilisateur trouvée avant ce message assistant (ID: {$message->id})");
         }
 
-        // Contenu à apprendre (question personnalisée ou originale)
+        // Contenu à apprendre
         $answerContent = $correctedContent ?? $message->content;
         $question = $customQuestion ?? $questionMessage->content;
 
@@ -57,143 +64,168 @@ class LearningService
             'corrected_content' => $correctedContent,
         ]);
 
-        // Indexer dans la collection d'apprentissage
-        return $this->indexLearnedResponse(
+        // Créer ou mettre à jour la LearnedResponse
+        return $this->createOrUpdateLearnedResponse(
+            agentId: $message->session->agent_id,
             question: $question,
             answer: $answerContent,
-            agentId: $message->session->agent_id,
-            agentSlug: $message->session->agent->slug,
-            messageId: $message->id,
-            validatorId: $validator->id,
-            requiresHandoff: $requiresHandoff
+            userId: $validator->id,
+            sourceMessageId: $message->id,
+            requiresHandoff: $requiresHandoff,
+            source: LearnedResponse::SOURCE_AI_VALIDATION
         );
     }
 
     /**
-     * Indexe une réponse validée dans Qdrant (learned_responses + collection agent)
+     * Crée ou met à jour une LearnedResponse.
+     * L'Observer gère automatiquement la synchronisation avec Qdrant.
      */
-    public function indexLearnedResponse(
+    public function createOrUpdateLearnedResponse(
+        int $agentId,
         string $question,
         string $answer,
-        int $agentId,
-        string $agentSlug,
-        int $messageId,
-        int $validatorId,
-        bool $requiresHandoff = false
+        int $userId,
+        ?int $sourceMessageId = null,
+        bool $requiresHandoff = false,
+        string $source = LearnedResponse::SOURCE_AI_VALIDATION
     ): bool {
-        // S'assurer que la collection existe
-        $this->ensureCollectionExists();
+        try {
+            // Chercher une LearnedResponse existante pour ce message source
+            $existing = null;
+            if ($sourceMessageId) {
+                $existing = LearnedResponse::where('source_message_id', $sourceMessageId)->first();
+            }
 
-        // Supprimer les anciens points pour ce message_id (évite les doublons lors des corrections)
-        $this->deleteExistingPointsForMessage($messageId, $agentId);
-
-        // Générer l'embedding de la question
-        $vector = $this->embeddingService->embed($question);
-
-        // NOTE: On ne supprime plus les questions "similaires" car cela causait la suppression
-        // de questions différentes mais avec des mots-clés communs. Le dédoublonnage se fait
-        // uniquement par message_id (ci-dessus).
-
-        $pointId = Str::uuid()->toString();
-
-        // 1. Indexer dans learned_responses
-        $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
-            [
-                'id' => $pointId,
-                'vector' => $vector,
-                'payload' => [
-                    'agent_id' => $agentId,
-                    'agent_slug' => $agentSlug,
-                    'message_id' => $messageId,
+            if ($existing) {
+                // Mettre à jour l'existante
+                $existing->update([
                     'question' => $question,
                     'answer' => $answer,
-                    'validated_by' => $validatorId,
-                    'validated_at' => now()->toIso8601String(),
                     'requires_handoff' => $requiresHandoff,
-                ],
-            ]
-        ]);
+                    'last_validated_by' => $userId,
+                    'last_validated_at' => now(),
+                ]);
+                $existing->increment('validation_count');
 
-        if ($result) {
-            Log::info('Learned response indexed in learned_responses', [
-                'message_id' => $messageId,
-                'agent' => $agentSlug,
-            ]);
+                Log::info('LearnedResponse updated', [
+                    'learned_response_id' => $existing->id,
+                    'source_message_id' => $sourceMessageId,
+                ]);
+            } else {
+                // Créer une nouvelle
+                LearnedResponse::create([
+                    'agent_id' => $agentId,
+                    'question' => $question,
+                    'answer' => $answer,
+                    'validation_count' => 1,
+                    'rejection_count' => 0,
+                    'requires_handoff' => $requiresHandoff,
+                    'source' => $source,
+                    'source_message_id' => $sourceMessageId,
+                    'created_by' => $userId,
+                    'last_validated_by' => $userId,
+                    'last_validated_at' => now(),
+                ]);
 
-            // 2. Double indexation : indexer aussi dans la collection de l'agent
-            $agent = Agent::find($agentId);
-            if ($agent) {
-                $this->indexFaqInAgentCollection($agent, $question, $answer, $messageId, $requiresHandoff);
+                Log::info('LearnedResponse created', [
+                    'agent_id' => $agentId,
+                    'source_message_id' => $sourceMessageId,
+                ]);
             }
-        } else {
-            Log::error('Failed to upsert learned response to Qdrant', [
-                'message_id' => $messageId,
-                'agent' => $agentSlug,
-            ]);
-        }
 
-        return $result;
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to create/update LearnedResponse', [
+                'error' => $e->getMessage(),
+                'agent_id' => $agentId,
+            ]);
+            return false;
+        }
     }
 
     /**
-     * Indexe une FAQ dans la collection de l'agent avec type=qa_pair.
-     * Permet aux FAQ d'être trouvées lors des recherches RAG normales.
+     * Incrémente le compteur de validation d'une LearnedResponse existante.
+     * Utilisé quand on re-valide un direct_qr_match.
      */
-    public function indexFaqInAgentCollection(
-        Agent $agent,
-        string $question,
-        string $answer,
-        ?int $messageId = null,
+    public function incrementValidation(
+        int $learnedResponseId,
+        int $userId,
+        ?string $correctedAnswer = null,
         bool $requiresHandoff = false
-    ): ?string {
-        if (empty($agent->qdrant_collection)) {
-            Log::warning('LearningService: Agent has no Qdrant collection', [
-                'agent' => $agent->slug,
+    ): bool {
+        try {
+            $lr = LearnedResponse::find($learnedResponseId);
+            if (!$lr) {
+                Log::warning('LearnedResponse not found for increment', ['id' => $learnedResponseId]);
+                return false;
+            }
+
+            $updateData = [
+                'last_validated_by' => $userId,
+                'last_validated_at' => now(),
+            ];
+
+            // Si la réponse a été corrigée, mettre à jour
+            if ($correctedAnswer) {
+                $updateData['answer'] = $correctedAnswer;
+            }
+
+            // Si le flag handoff a changé
+            if ($requiresHandoff !== $lr->requires_handoff) {
+                $updateData['requires_handoff'] = $requiresHandoff;
+            }
+
+            $lr->update($updateData);
+            $lr->increment('validation_count');
+
+            Log::info('LearnedResponse validation incremented', [
+                'learned_response_id' => $learnedResponseId,
+                'new_count' => $lr->validation_count,
             ]);
-            return null;
-        }
 
-        $embedding = $this->embeddingService->embed($question);
-        $pointId = Str::uuid()->toString();
-
-        $result = $this->qdrantService->upsert($agent->qdrant_collection, [[
-            'id' => $pointId,
-            'vector' => $embedding,
-            'payload' => [
-                'type' => 'qa_pair',
-                'category' => 'FAQ',
-                'display_text' => $answer,
-                'question' => $question,
-                'source_doc' => 'FAQ Validée',
-                'parent_context' => '',
-                'chunk_id' => null,
-                'document_id' => null,
-                'agent_id' => $agent->id,
-                'is_faq' => true,
-                'message_id' => $messageId,
-                'indexed_at' => now()->toIso8601String(),
-                'requires_handoff' => $requiresHandoff,
-            ],
-        ]]);
-
-        if ($result) {
-            Log::info('LearningService: FAQ indexed in agent collection', [
-                'agent' => $agent->slug,
-                'collection' => $agent->qdrant_collection,
-                'point_id' => $pointId,
-                'message_id' => $messageId,
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to increment LearnedResponse validation', [
+                'error' => $e->getMessage(),
+                'learned_response_id' => $learnedResponseId,
             ]);
-            return $pointId;
+            return false;
         }
-
-        Log::error('LearningService: Failed to index FAQ in agent collection', [
-            'agent' => $agent->slug,
-        ]);
-        return null;
     }
 
     /**
-     * Ajoute une FAQ manuelle (double indexation).
+     * Incrémente le compteur de rejet d'une LearnedResponse existante.
+     * Utilisé quand on rejette un direct_qr_match.
+     */
+    public function incrementRejection(int $learnedResponseId): bool
+    {
+        try {
+            $lr = LearnedResponse::find($learnedResponseId);
+            if (!$lr) {
+                Log::warning('LearnedResponse not found for rejection', ['id' => $learnedResponseId]);
+                return false;
+            }
+
+            $lr->increment('rejection_count');
+
+            Log::info('LearnedResponse rejection incremented', [
+                'learned_response_id' => $learnedResponseId,
+                'new_count' => $lr->rejection_count,
+            ]);
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to increment LearnedResponse rejection', [
+                'error' => $e->getMessage(),
+                'learned_response_id' => $learnedResponseId,
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Ajoute une FAQ manuelle.
+     * L'Observer gère automatiquement la synchronisation avec Qdrant.
      */
     public function addManualFaq(
         Agent $agent,
@@ -202,46 +234,20 @@ class LearningService
         int $userId,
         bool $requiresHandoff = false
     ): bool {
-        // S'assurer que la collection learned_responses existe
-        $this->ensureCollectionExists();
-
-        // Générer l'embedding de la question
-        $vector = $this->embeddingService->embed($question);
-        $pointId = Str::uuid()->toString();
-
-        // 1. Indexer dans learned_responses
-        $result = $this->qdrantService->upsert(self::LEARNED_RESPONSES_COLLECTION, [
-            [
-                'id' => $pointId,
-                'vector' => $vector,
-                'payload' => [
-                    'agent_id' => $agent->id,
-                    'agent_slug' => $agent->slug,
-                    'message_id' => null,
-                    'question' => $question,
-                    'answer' => $answer,
-                    'validated_by' => $userId,
-                    'validated_at' => now()->toIso8601String(),
-                    'source' => 'manual',
-                    'requires_handoff' => $requiresHandoff,
-                ],
-            ]
-        ]);
-
-        if ($result) {
-            Log::info('Manual FAQ indexed in learned_responses', [
-                'agent' => $agent->slug,
-            ]);
-
-            // 2. Double indexation : indexer aussi dans la collection de l'agent
-            $this->indexFaqInAgentCollection($agent, $question, $answer, null, $requiresHandoff);
-        }
-
-        return $result;
+        return $this->createOrUpdateLearnedResponse(
+            agentId: $agent->id,
+            question: $question,
+            answer: $answer,
+            userId: $userId,
+            sourceMessageId: null,
+            requiresHandoff: $requiresHandoff,
+            source: LearnedResponse::SOURCE_MANUAL
+        );
     }
 
     /**
-     * Recherche des réponses apprises similaires
+     * Recherche des réponses apprises similaires via Qdrant.
+     * Retourne aussi le learned_response_id pour permettre les mises à jour.
      */
     public function findSimilarLearnedResponses(
         string $question,
@@ -268,6 +274,12 @@ class LearningService
                 'question' => $r['payload']['question'] ?? '',
                 'answer' => $r['payload']['answer'] ?? '',
                 'score' => $r['score'],
+                'qdrant_point_id' => $r['id'] ?? null,
+                'learned_response_id' => $r['payload']['learned_response_id'] ?? null,
+                'validation_count' => $r['payload']['validation_count'] ?? 1,
+                'rejection_count' => $r['payload']['rejection_count'] ?? 0,
+                'requires_handoff' => $r['payload']['requires_handoff'] ?? false,
+                // Garder message_id pour compatibilité avec l'ancien système
                 'message_id' => $r['payload']['message_id'] ?? null,
             ])->toArray();
 
@@ -281,16 +293,29 @@ class LearningService
     }
 
     /**
-     * Valide un message ET l'ajoute à la base d'apprentissage
-     * (la réponse originale est considérée comme correcte)
+     * Valide un message (sans correction).
      */
-    public function validate(AiMessage $message, int $validatorId, ?string $customQuestion = null, bool $requiresHandoff = false): bool
-    {
-        // Si c'est un direct_qr_match avec une question modifiée ou un flag handoff, on ré-indexe
-        if ($message->model_used === 'direct_qr_match' && empty($customQuestion) && !$requiresHandoff) {
-            Log::info('Skip learning for direct_qr_match - already in learned_responses', [
-                'message_id' => $message->id,
+    public function validate(
+        AiMessage $message,
+        int $validatorId,
+        ?string $customQuestion = null,
+        bool $requiresHandoff = false,
+        ?int $existingLearnedResponseId = null
+    ): bool {
+        // Si c'est un direct_qr_match avec un learned_response_id, on incrémente
+        if ($existingLearnedResponseId) {
+            $message->update([
+                'validation_status' => 'validated',
+                'validated_by' => $validatorId,
+                'validated_at' => now(),
             ]);
+
+            return $this->incrementValidation($existingLearnedResponseId, $validatorId, null, $requiresHandoff);
+        }
+
+        // Si c'est un direct_qr_match sans learned_response_id (ancien système), on skip
+        if ($message->model_used === 'direct_qr_match' && empty($customQuestion) && !$requiresHandoff) {
+            Log::info('Skip learning for legacy direct_qr_match', ['message_id' => $message->id]);
             return $message->update([
                 'validation_status' => 'validated',
                 'validated_by' => $validatorId,
@@ -307,37 +332,53 @@ class LearningService
             ]);
         }
 
-        // Valider ET apprendre (sans correction = réponse originale, avec question optionnelle)
         return $this->validateAndLearn($message, $validator, null, $customQuestion, $requiresHandoff);
     }
 
     /**
-     * Rejette un message (pas d'apprentissage)
+     * Rejette un message.
+     * Si c'est un direct_qr_match avec un learned_response_id, incrémente le compteur de rejet.
      */
-    public function reject(AiMessage $message, int $validatorId, ?string $reason = null): bool
-    {
-        return $message->update([
+    public function reject(
+        AiMessage $message,
+        int $validatorId,
+        ?string $reason = null,
+        ?int $existingLearnedResponseId = null
+    ): bool {
+        $message->update([
             'validation_status' => 'rejected',
             'validated_by' => $validatorId,
             'validated_at' => now(),
         ]);
+
+        // Si c'est un direct_qr_match, incrémenter le compteur de rejet
+        if ($existingLearnedResponseId) {
+            $this->incrementRejection($existingLearnedResponseId);
+        }
+
+        return true;
     }
 
     /**
-     * Apprend d'un message corrigé
+     * Apprend d'un message corrigé.
      */
-    public function learn(AiMessage $message, string $correctedContent, int $validatorId, bool $requiresHandoff = false): bool
-    {
+    public function learn(
+        AiMessage $message,
+        string $correctedContent,
+        int $validatorId,
+        bool $requiresHandoff = false,
+        ?int $existingLearnedResponseId = null
+    ): bool {
         $validator = User::find($validatorId);
         if (!$validator) {
             return false;
         }
 
-        return $this->validateAndLearn($message, $validator, $correctedContent, null, $requiresHandoff);
+        return $this->validateAndLearn($message, $validator, $correctedContent, null, $requiresHandoff, $existingLearnedResponseId);
     }
 
     /**
-     * Apprend d'un message avec question et réponse personnalisées
+     * Apprend d'un message avec question et réponse personnalisées.
      */
     public function learnWithQuestion(
         AiMessage $message,
@@ -355,92 +396,91 @@ class LearningService
     }
 
     /**
-     * Récupère les statistiques d'apprentissage
+     * Récupère les statistiques d'apprentissage.
      */
     public function getStats(): array
     {
-        $collection = self::LEARNED_RESPONSES_COLLECTION;
+        $total = LearnedResponse::count();
+        $byAgent = LearnedResponse::selectRaw('agent_id, COUNT(*) as count')
+            ->groupBy('agent_id')
+            ->with('agent:id,name,slug')
+            ->get()
+            ->mapWithKeys(fn ($item) => [
+                $item->agent?->slug ?? 'unknown' => $item->count
+            ])
+            ->toArray();
 
-        if (!$this->qdrantService->collectionExists($collection)) {
-            return [
-                'total_learned' => 0,
-                'by_agent' => [],
-            ];
-        }
-
-        $total = $this->qdrantService->count($collection);
-
-        // TODO: Agrégation par agent (nécessite scroll)
+        $problematic = LearnedResponse::problematic()->count();
 
         return [
             'total_learned' => $total,
-            'collection' => $collection,
+            'by_agent' => $byAgent,
+            'problematic_count' => $problematic,
         ];
     }
 
     /**
-     * Supprime les points existants pour un message_id donné (évite les doublons lors des corrections)
-     * Supprime à la fois dans learned_responses et dans la collection de l'agent
+     * Trouve une LearnedResponse par son ID Qdrant point.
      */
-    private function deleteExistingPointsForMessage(int $messageId, int $agentId): void
+    public function findByQdrantPointId(string $pointId): ?LearnedResponse
     {
-        // Supprimer dans learned_responses
-        $filter = [
-            'must' => [
-                ['key' => 'message_id', 'match' => ['value' => $messageId]]
-            ]
-        ];
-
-        $deleted = $this->qdrantService->deleteByFilter(self::LEARNED_RESPONSES_COLLECTION, $filter);
-        if ($deleted) {
-            Log::info('Deleted existing learned_response point for message', ['message_id' => $messageId]);
-        }
-
-        // Supprimer dans la collection de l'agent (si elle existe)
-        $agent = Agent::find($agentId);
-        if ($agent && !empty($agent->qdrant_collection)) {
-            $deleted = $this->qdrantService->deleteByFilter($agent->qdrant_collection, $filter);
-            if ($deleted) {
-                Log::info('Deleted existing FAQ point in agent collection', [
-                    'message_id' => $messageId,
-                    'collection' => $agent->qdrant_collection,
-                ]);
-            }
-        }
+        return LearnedResponse::where('qdrant_point_id', $pointId)->first();
     }
 
-    // NOTE: deleteSimilarQuestions() a été supprimée car elle causait la suppression
-    // involontaire de questions différentes mais avec des mots-clés communs.
-    // Le dédoublonnage se fait maintenant uniquement par message_id via deleteExistingPointsForMessage().
-    // Exemple de problème: "Comment importer un fichier CSV ?" supprimait
-    // "Supprimer l'import CSV en cas d'erreur ?" car elles étaient considérées "similaires" à 81%.
-
     /**
-     * S'assure que la collection learned_responses existe
+     * Indexe une réponse validée (méthode de compatibilité).
+     * Délègue à createOrUpdateLearnedResponse.
+     *
+     * @deprecated Utiliser createOrUpdateLearnedResponse directement
      */
-    private function ensureCollectionExists(): void
-    {
-        if ($this->qdrantService->collectionExists(self::LEARNED_RESPONSES_COLLECTION)) {
-            return;
+    public function indexLearnedResponse(
+        string $question,
+        string $answer,
+        int $agentId,
+        string $agentSlug,
+        int $messageId,
+        int $validatorId,
+        bool $requiresHandoff = false,
+        ?int $existingLearnedResponseId = null
+    ): bool {
+        // Si on a un ID de LearnedResponse existant (direct_qr_match), on incrémente
+        if ($existingLearnedResponseId) {
+            return $this->incrementValidation($existingLearnedResponseId, $validatorId, $answer, $requiresHandoff);
         }
 
-        $config = config('qdrant.collections.' . self::LEARNED_RESPONSES_COLLECTION, [
-            'vector_size' => config('ai.qdrant.vector_size', 768),
-            'distance' => 'Cosine',
-        ]);
+        return $this->createOrUpdateLearnedResponse(
+            agentId: $agentId,
+            question: $question,
+            answer: $answer,
+            userId: $validatorId,
+            sourceMessageId: $messageId,
+            requiresHandoff: $requiresHandoff,
+            source: LearnedResponse::SOURCE_AI_VALIDATION
+        );
+    }
 
-        $created = $this->qdrantService->createCollection(self::LEARNED_RESPONSES_COLLECTION, $config);
-
-        if ($created) {
-            Log::info('Collection learned_responses créée automatiquement');
-
-            // Créer les index sur les champs payload
-            $indexes = $config['payload_indexes'] ?? [];
-            foreach ($indexes as $field => $type) {
-                $this->qdrantService->createPayloadIndex(self::LEARNED_RESPONSES_COLLECTION, $field, $type);
+    /**
+     * Supprime une LearnedResponse.
+     * L'Observer gère automatiquement la suppression dans Qdrant.
+     */
+    public function delete(int $learnedResponseId): bool
+    {
+        try {
+            $lr = LearnedResponse::find($learnedResponseId);
+            if (!$lr) {
+                return false;
             }
-        } else {
-            Log::error('Impossible de créer la collection learned_responses');
+
+            $lr->delete();
+
+            Log::info('LearnedResponse deleted', ['learned_response_id' => $learnedResponseId]);
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to delete LearnedResponse', [
+                'error' => $e->getMessage(),
+                'learned_response_id' => $learnedResponseId,
+            ]);
+            return false;
         }
     }
 }

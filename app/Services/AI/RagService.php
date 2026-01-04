@@ -230,6 +230,10 @@ class RagService
                         'score' => $score,
                         'source' => 'learned_response',
                         'matched_question' => $bestMatch['question'] ?? null,
+                        'learned_response_id' => $bestMatch['learned_response_id'] ?? null,
+                        'validation_count' => $bestMatch['validation_count'] ?? 1,
+                        'rejection_count' => $bestMatch['rejection_count'] ?? 0,
+                        'requires_handoff' => $bestMatch['requires_handoff'] ?? false,
                         'replaced' => true,
                     ];
 
@@ -237,6 +241,7 @@ class RagService
                         'block_id' => $block['id'] ?? null,
                         'question' => Str::limit($question, 50),
                         'score' => $score,
+                        'learned_response_id' => $bestMatch['learned_response_id'] ?? null,
                     ]);
                 } else {
                     // DOCUMENTED : on a du contexte mais on garde la réponse LLM
@@ -246,6 +251,9 @@ class RagService
                         'score' => $score,
                         'source' => 'learned_response',
                         'matched_question' => $bestMatch['question'] ?? null,
+                        'learned_response_id' => $bestMatch['learned_response_id'] ?? null,
+                        'validation_count' => $bestMatch['validation_count'] ?? 1,
+                        'rejection_count' => $bestMatch['rejection_count'] ?? 0,
                         'replaced' => false,
                     ];
 

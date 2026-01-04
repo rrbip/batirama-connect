@@ -1262,7 +1262,10 @@ class ViewAiSession extends ViewRecord
                     continue;
                 }
 
-                // Indexer la paire Q/R dans Qdrant
+                // Extraire le learned_response_id si c'est un direct_qr_match
+                $learnedResponseId = $block['learned_response_id'] ?? null;
+
+                // Indexer la paire Q/R (ou incrémenter le compteur si existant)
                 $result = app(LearningService::class)->indexLearnedResponse(
                     question: $question,
                     answer: $answer,
@@ -1270,7 +1273,8 @@ class ViewAiSession extends ViewRecord
                     agentSlug: $this->record->agent->slug,
                     messageId: $messageId,
                     validatorId: auth()->id(),
-                    requiresHandoff: $requiresHandoff
+                    requiresHandoff: $requiresHandoff,
+                    existingLearnedResponseId: $learnedResponseId
                 );
 
                 if ($result) {
@@ -1418,8 +1422,9 @@ class ViewAiSession extends ViewRecord
      * Utilisé quand l'agent décide de ne pas envoyer la réponse IA.
      *
      * @param int $messageId ID du message IA
+     * @param array $learnedResponseIds Liste des IDs de LearnedResponse à marquer comme rejetés
      */
-    public function rejectAllBlocks(int $messageId): void
+    public function rejectAllBlocks(int $messageId, array $learnedResponseIds = []): void
     {
         $message = AiMessage::findOrFail($messageId);
 
@@ -1428,7 +1433,15 @@ class ViewAiSession extends ViewRecord
         }
 
         try {
+            // Rejeter le message
             app(LearningService::class)->reject($message, auth()->id(), 'Réponse IA passée par l\'agent');
+
+            // Incrémenter le compteur de rejet pour chaque LearnedResponse associée
+            foreach ($learnedResponseIds as $learnedResponseId) {
+                if ($learnedResponseId) {
+                    app(LearningService::class)->incrementRejection((int) $learnedResponseId);
+                }
+            }
 
             Notification::make()
                 ->title('Réponse passée')
