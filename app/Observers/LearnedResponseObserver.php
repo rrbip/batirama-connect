@@ -161,7 +161,7 @@ class LearnedResponseObserver
     }
 
     /**
-     * Met à jour uniquement le payload dans Qdrant (sans changer le vecteur)
+     * Met à jour le payload dans Qdrant via upsert (le vecteur reste inchangé car même ID)
      */
     private function updatePayloadInQdrant(LearnedResponse $learnedResponse): void
     {
@@ -170,12 +170,17 @@ class LearnedResponseObserver
         }
 
         try {
-            // Qdrant permet de mettre à jour le payload sans toucher au vecteur
-            $success = $this->qdrantService->updatePayload(
-                self::COLLECTION,
-                [$learnedResponse->qdrant_point_id],
-                $learnedResponse->toQdrantPayload()
-            );
+            // On utilise upsert avec le même point ID - Qdrant met à jour le point existant
+            // On doit régénérer l'embedding car upsert nécessite un vecteur
+            $vector = $this->embeddingService->embed($learnedResponse->question);
+
+            $success = $this->qdrantService->upsert(self::COLLECTION, [
+                [
+                    'id' => $learnedResponse->qdrant_point_id,
+                    'vector' => $vector,
+                    'payload' => $learnedResponse->toQdrantPayload(),
+                ]
+            ]);
 
             if ($success) {
                 Log::debug('LearnedResponse payload updated in Qdrant', [
@@ -183,18 +188,9 @@ class LearnedResponseObserver
                 ]);
             }
         } catch (\Exception $e) {
-            // Si updatePayload n'existe pas, on fait un upsert complet
-            Log::debug('Falling back to full re-index for payload update', [
+            Log::warning('Failed to update LearnedResponse payload in Qdrant', [
                 'learned_response_id' => $learnedResponse->id,
-            ]);
-
-            $vector = $this->embeddingService->embed($learnedResponse->question);
-            $this->qdrantService->upsert(self::COLLECTION, [
-                [
-                    'id' => $learnedResponse->qdrant_point_id,
-                    'vector' => $vector,
-                    'payload' => $learnedResponse->toQdrantPayload(),
-                ]
+                'error' => $e->getMessage(),
             ]);
         }
     }
