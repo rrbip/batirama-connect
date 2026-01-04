@@ -273,6 +273,7 @@
                                     ?? $message['rag_context']['requires_handoff']
                                     ?? false;
                                 $isPending = $message['validation_status'] === 'pending';
+                                $isRejected = $message['validation_status'] === 'rejected';
                                 $isSuggestionGlobal = $message['rag_context']['is_suggestion'] ?? false;
                             @endphp
                             <div class="flex justify-start" x-data="{
@@ -282,13 +283,13 @@
                                     'answer' => $b['answer'] ?? '',
                                     'requiresHandoff' => $b['requires_handoff'] ?? $globalRequiresHandoff,
                                     'validated' => $b['learned'] ?? false,
-                                    'rejected' => $b['rejected'] ?? false,
+                                    'rejected' => $b['rejected'] ?? $isRejected,
                                     'is_suggestion' => $b['is_suggestion'] ?? false,
                                     'type' => $b['type'] ?? 'unknown',
                                     'improving' => false,
                                     'rag_match' => $b['rag_match'] ?? null,
                                 ])->values()->toArray()),
-                                sent: @js($message['validation_status'] === 'learned' || $message['validation_status'] === 'validated'),
+                                sent: @js(in_array($message['validation_status'], ['learned', 'validated', 'rejected'])),
                                 openContext: false,
                                 copied: false,
 
@@ -531,12 +532,12 @@
                                                                 rows="1"
                                                                 x-effect="block.answer; $nextTick(() => { $el.style.height = 'auto'; $el.style.height = ($el.scrollHeight + 2) + 'px'; })"
                                                             ></textarea>
-                                                            {{-- Bouton Améliorer (sous le textarea, aligné à droite) --}}
-                                                            <div class="flex justify-end mt-1"
-                                                                x-show="!block.validated && !block.rejected && !sent && block.answer.length > 0">
+                                                            {{-- Bouton Améliorer (sous le textarea, aligné à droite, toujours visible mais désactivé si validé/rejeté) --}}
+                                                            <div class="flex justify-end mt-1">
                                                                 <button
                                                                     type="button"
                                                                     x-on:click="
+                                                                        if (block.validated || block.rejected || sent || block.answer.length === 0) return;
                                                                         block.improving = true;
                                                                         $wire.improveBlockResponse({{ $message['original_id'] }}, block.id, block.question, block.answer)
                                                                             .then(result => {
@@ -545,8 +546,8 @@
                                                                             })
                                                                             .catch(() => block.improving = false);
                                                                     "
-                                                                    :disabled="block.improving"
-                                                                    class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/50 rounded transition-colors disabled:opacity-50"
+                                                                    :disabled="block.improving || block.validated || block.rejected || sent || block.answer.length === 0"
+                                                                    class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                                                     title="Corriger les fautes et améliorer la formulation"
                                                                 >
                                                                     <template x-if="!block.improving">
