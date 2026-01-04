@@ -198,8 +198,8 @@ class RagService
     private function enrichBlocksWithRagMatches(array $blocks, Agent $agent): array
     {
         $enrichedBlocks = [];
-        $directMatchThreshold = 0.92;
-        $documentedThreshold = 0.75;
+        $directMatchThreshold = 0.94;
+        $documentedThreshold = 0.88;
 
         foreach ($blocks as $block) {
             $question = $block['question'] ?? '';
